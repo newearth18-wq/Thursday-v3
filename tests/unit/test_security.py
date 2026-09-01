@@ -3,13 +3,12 @@
 from __future__ import annotations
 
 import pytest
-
-from thursday.security.audit import AuditEntry, AuditLog
-from thursday.security.privacy import PrivacyClassifier, PrivacyZone, PrivacyZoneRegistry
-from thursday.security.redaction import REDACTED, SecretRedactor, redact_dict
-from thursday.security.vault import ChainVault, InMemoryVault
-from thursday.shared.enums import DataSensitivity
-from thursday.shared.errors import ConfigurationError, SecretLeakBlocked
+from thursday_security.audit import AuditEntry, AuditLog
+from thursday_security.privacy import PrivacyClassifier, PrivacyZone, PrivacyZoneRegistry
+from thursday_security.redaction import REDACTED, SecretRedactor, redact_dict
+from thursday_security.vault import ChainVault, InMemoryVault
+from thursday_shared.enums import DataSensitivity
+from thursday_shared.errors import ConfigurationError, SecretLeakBlocked
 
 
 @pytest.fixture

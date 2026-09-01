@@ -5,14 +5,14 @@ from __future__ import annotations
 import asyncio
 
 import pytest
+from thursday_devices.hub import LoopbackDeviceSession
+from thursday_devices.node.executor import NodeExecutor
+from thursday_shared.enums import ApprovalScope, TaskState
+from thursday_shared.errors import PermissionDenied
+from thursday_shared.ids import new_id
+from thursday_shared.models import ToolCall
 
 from tests.conftest import FakeAdapter
-from thursday.devices.hub import LoopbackDeviceSession
-from thursday.devices.node.executor import NodeExecutor
-from thursday.shared.enums import ApprovalScope, TaskState
-from thursday.shared.errors import PermissionDenied
-from thursday.shared.ids import new_id
-from thursday.shared.models import ToolCall
 
 
 async def test_retries_are_bounded_and_do_not_loop(container, tmp_path, session_id, monkeypatch):
@@ -94,8 +94,8 @@ async def test_always_allow_is_scoped_to_the_directory_not_the_filesystem(
     assert grants[0].expires_at is not None
 
     # A file in a different directory is still gated.
-    from thursday.shared.enums import PolicyDecision
-    from thursday.shared.models import ActionRequest
+    from thursday_shared.enums import PolicyDecision
+    from thursday_shared.models import ActionRequest
 
     verdict = container.permissions.decide(
         ActionRequest(action="delete", resource=str(tmp_path / "elsewhere" / "b.txt"))
@@ -127,10 +127,10 @@ async def test_a_failing_event_subscriber_cannot_break_a_task(container, office_
 
 
 async def test_budget_exhaustion_stops_a_task_cleanly(container, office_pc, session_id):
-    from thursday.shared.models import Budget
+    from thursday_shared.models import Budget
 
     task = await container.tasks.create(title="tiny", objective="tiny", budget=Budget(tool_calls=0))
-    from thursday.shared.models import Spend
+    from thursday_shared.models import Spend
 
     with pytest.raises(Exception, match="budget"):
         container.tasks.charge(task.id, Spend(tool_calls=1))

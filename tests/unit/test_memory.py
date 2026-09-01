@@ -3,12 +3,11 @@
 from __future__ import annotations
 
 import pytest
-
-from thursday.memory.embeddings import HashEmbeddingProvider, cosine
-from thursday.memory.manager import MemoryManager
-from thursday.memory.vector import InMemoryVectorStore
-from thursday.shared.enums import DataSensitivity, MemoryLayer, MemorySource
-from thursday.shared.models import MemoryQuery, MemoryWrite
+from thursday_memory.embeddings import HashEmbeddingProvider, cosine
+from thursday_memory.manager import MemoryManager
+from thursday_memory.vector import InMemoryVectorStore
+from thursday_shared.enums import DataSensitivity, MemoryLayer, MemorySource
+from thursday_shared.models import MemoryQuery, MemoryWrite
 
 
 @pytest.fixture

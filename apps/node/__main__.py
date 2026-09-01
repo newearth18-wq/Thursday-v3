@@ -22,12 +22,11 @@ import uuid
 from pathlib import Path
 
 import websockets
-
-from thursday.core.logging import configure_logging, get_logger
-from thursday.devices.node.adapters import for_current_platform
-from thursday.devices.node.executor import NodeExecutor
-from thursday.shared.models import DeviceAction
-from thursday.shared.protocol import (
+from thursday_core.logging import configure_logging, get_logger
+from thursday_devices.node.adapters import for_current_platform
+from thursday_devices.node.executor import NodeExecutor
+from thursday_shared.models import DeviceAction
+from thursday_shared.protocol import (
     ActionFrame,
     ActionResultFrame,
     Heartbeat,

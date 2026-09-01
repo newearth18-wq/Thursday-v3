@@ -9,9 +9,8 @@ not say it succeeded (§76).
 from __future__ import annotations
 
 import pytest
-
-from thursday.shared.enums import PolicyDecision, TaskState, VoiceMode
-from thursday.shared.models import ActionRequest
+from thursday_shared.enums import PolicyDecision, TaskState, VoiceMode
+from thursday_shared.models import ActionRequest
 
 
 async def test_open_app_is_verified_before_success_is_reported(
@@ -76,9 +75,9 @@ async def test_approval_gates_a_risky_tool_call(container, office_pc, tmp_path, 
     """The full ASK path: pending approval → decision → execution (or refusal)."""
     import asyncio
 
-    from thursday.shared.enums import ApprovalScope
-    from thursday.shared.errors import PermissionDenied
-    from thursday.shared.models import ToolCall
+    from thursday_shared.enums import ApprovalScope
+    from thursday_shared.errors import PermissionDenied
+    from thursday_shared.models import ToolCall
 
     target = tmp_path / "scratch.txt"
     target.write_text("delete me", encoding="utf-8")

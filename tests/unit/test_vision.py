@@ -5,15 +5,14 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 
 import pytest
-
-from thursday.vision.gestures import (
+from thursday_vision.gestures import (
     ACTIVATION_GESTURE,
     Gesture,
     GestureMode,
     HandLandmarks,
     classify,
 )
-from thursday.vision.spatial import SpatialMemory
+from thursday_vision.spatial import SpatialMemory
 
 # ------------------------------------------------------------------ spatial memory
 

@@ -5,17 +5,17 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+from thursday_core.device_router import DeviceRouter
+from thursday_devices import actions as catalogue
+from thursday_devices.hub import DeviceHub, LoopbackDeviceSession
+from thursday_devices.node.executor import NodeExecutor
+from thursday_shared.enums import ControlTier
+from thursday_shared.errors import DeviceActionFailed, DeviceUnavailable
+from thursday_shared.ids import new_id
+from thursday_shared.models import DeviceAction, WorldStateSnapshot
+from thursday_shared.protocol import Hello, dump_frame, parse_frame
 
 from tests.conftest import FakeAdapter
-from thursday.core.device_router import DeviceRouter
-from thursday.devices import actions as catalogue
-from thursday.devices.hub import DeviceHub, LoopbackDeviceSession
-from thursday.devices.node.executor import NodeExecutor
-from thursday.shared.enums import ControlTier
-from thursday.shared.errors import DeviceActionFailed, DeviceUnavailable
-from thursday.shared.ids import new_id
-from thursday.shared.models import DeviceAction, WorldStateSnapshot
-from thursday.shared.protocol import Hello, dump_frame, parse_frame
 
 
 @pytest.fixture
@@ -98,7 +98,7 @@ async def test_an_unknown_action_is_refused(executor):
 async def test_an_unsupported_capability_is_refused_by_the_node(tmp_path):
     adapter = FakeAdapter()
     adapter.capabilities = lambda: __import__(
-        "thursday.shared.models", fromlist=["DeviceCapabilities"]
+        "thursday_shared.models", fromlist=["DeviceCapabilities"]
     ).DeviceCapabilities(open_app=True)
     executor = NodeExecutor(adapter, allowed_roots=[tmp_path])
     result = await executor.execute(DeviceAction(action="run_shell", args={"command": "ls"}))
@@ -107,7 +107,7 @@ async def test_an_unsupported_capability_is_refused_by_the_node(tmp_path):
 
 async def test_the_hub_refuses_an_unadvertised_action_before_dispatch(tmp_path):
     adapter = FakeAdapter()
-    from thursday.shared.models import DeviceCapabilities
+    from thursday_shared.models import DeviceCapabilities
 
     adapter.capabilities = lambda: DeviceCapabilities(open_app=True)
     hub = DeviceHub()
@@ -147,7 +147,7 @@ def test_every_mutating_action_declares_its_reversibility():
 
 
 def test_protocol_frames_round_trip():
-    from thursday.shared.models import DeviceCapabilities, DeviceTelemetry
+    from thursday_shared.models import DeviceCapabilities, DeviceTelemetry
 
     hello = Hello(
         device_id=new_id(),

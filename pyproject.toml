@@ -3,7 +3,7 @@ name = "thursday"
 version = "0.1.0"
 description = "Thursday — a personal AI operating system. One assistant, many capabilities."
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 license = { text = "MIT" }
 
 dependencies = [
@@ -44,11 +44,29 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["thursday", "apps"]
+# PART 3's tree as one distribution: eleven source packages, three services, four apps.
+# See docs/architecture/decisions/0005-monorepo-package-split.md for why not eleven wheels.
+packages = [
+    "packages/shared/thursday_shared",
+    "packages/core/thursday_core",
+    "packages/agents/thursday_agents",
+    "packages/tools/thursday_tools",
+    "packages/memory/thursday_memory",
+    "packages/voice/thursday_voice",
+    "packages/vision/thursday_vision",
+    "packages/security/thursday_security",
+    "packages/automation/thursday_automation",
+    "packages/devices/thursday_devices",
+    "packages/models/thursday_models",
+    "services/api/thursday_api",
+    "services/worker/thursday_worker",
+    "services/realtime/thursday_realtime",
+    "apps",
+]
 
 [tool.ruff]
 line-length = 100
-target-version = "py311"
+target-version = "py312"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "N", "UP", "B", "C4", "SIM", "RUF", "ASYNC", "S"]
@@ -71,14 +89,14 @@ ignore = [
 [tool.ruff.lint.per-file-ignores]
 # Tests assert on paths directly; the blocking call is irrelevant in a test body.
 "tests/**" = ["S", "N806", "ASYNC240"]
-"migrations/**" = ["N999", "E", "F", "I", "UP"]
+"database/migrations/**" = ["N999", "E", "F", "I", "UP"]
 # Shelling out is the adapters' entire job; path *resolution* is in-memory and the real
 # file I/O is already dispatched to worker threads.
-"thursday/devices/node/adapters/*.py" = ["S602", "S603", "S607", "ASYNC240"]
-"thursday/devices/node/executor.py" = ["S324"]
+"packages/devices/thursday_devices/node/adapters/*.py" = ["S602", "S603", "S607", "ASYNC240"]
+"packages/devices/thursday_devices/node/executor.py" = ["S324"]
 
 [tool.mypy]
-python_version = "3.11"
+python_version = "3.12"
 warn_unused_configs = true
 disallow_untyped_defs = false
 ignore_missing_imports = true
@@ -87,3 +105,11 @@ plugins = ["pydantic.mypy"]
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+# A dev checkout runs without `pip install -e .` reinstalls after a package move.
+pythonpath = [
+    ".",
+    "packages/shared", "packages/core", "packages/agents", "packages/tools",
+    "packages/memory", "packages/voice", "packages/vision", "packages/security",
+    "packages/automation", "packages/devices", "packages/models",
+    "services/api", "services/worker", "services/realtime",
+]

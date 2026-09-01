@@ -8,9 +8,8 @@ from __future__ import annotations
 import argparse
 
 import uvicorn
-
-from thursday.api.app import create_app
-from thursday.core.config import get_settings
+from thursday_api.app import create_app
+from thursday_core.config import get_settings
 
 
 def main() -> None:

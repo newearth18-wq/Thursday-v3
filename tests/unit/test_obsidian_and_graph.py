@@ -5,11 +5,10 @@ from __future__ import annotations
 from itertools import pairwise
 
 import pytest
-
-from thursday.memory.graph import KnowledgeGraph
-from thursday.memory.obsidian import FOLDERS, ObsidianVault, safe_filename
-from thursday.shared.errors import SecretLeakBlocked
-from thursday.shared.ids import new_id
+from thursday_memory.graph import KnowledgeGraph
+from thursday_memory.obsidian import FOLDERS, ObsidianVault, safe_filename
+from thursday_shared.errors import SecretLeakBlocked
+from thursday_shared.ids import new_id
 
 
 @pytest.fixture

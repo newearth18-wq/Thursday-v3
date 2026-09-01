@@ -16,16 +16,16 @@ import sys
 from pathlib import Path
 from uuid import UUID
 
-from thursday.core.config import get_settings
-from thursday.core.container import build_container
-from thursday.core.logging import configure_logging
-from thursday.devices.hub import LoopbackDeviceSession
-from thursday.devices.node.adapters import for_current_platform
-from thursday.devices.node.executor import NodeExecutor
-from thursday.shared.enums import VoiceMode
-from thursday.shared.ids import new_id
-from thursday.shared.models import ThursdayReply
-from thursday.voice.providers import TextStubTTS
+from thursday_core.config import get_settings
+from thursday_core.container import build_container
+from thursday_core.logging import configure_logging
+from thursday_devices.hub import LoopbackDeviceSession
+from thursday_devices.node.adapters import for_current_platform
+from thursday_devices.node.executor import NodeExecutor
+from thursday_shared.enums import VoiceMode
+from thursday_shared.ids import new_id
+from thursday_shared.models import ThursdayReply
+from thursday_voice.providers import TextStubTTS
 
 RESET = "\033[0m"
 DIM = "\033[2m"
@@ -149,7 +149,7 @@ async def handle_command(container, line: str, session_id: UUID) -> bool:
         if not (0 <= index < len(pending)):
             print("  no such pending approval")
             return False
-        from thursday.shared.enums import ApprovalScope
+        from thursday_shared.enums import ApprovalScope
 
         scope = ApprovalScope.ALWAYS if "always" in rest else ApprovalScope.ONCE
         decided = await container.approvals.decide(
@@ -160,7 +160,7 @@ async def handle_command(container, line: str, session_id: UUID) -> bool:
         for task in container.tasks.list(limit=10):
             print(f"  {task.status:16} {task.progress:>5.0%}  {task.title}")
     elif command == "/memory":
-        from thursday.shared.models import MemoryQuery
+        from thursday_shared.models import MemoryQuery
 
         records = await container.memory.recall(MemoryQuery(text=" ".join(rest), k=8))
         for record in records:

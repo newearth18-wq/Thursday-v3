@@ -5,19 +5,18 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 
 import pytest
-
-from thursday.security.permissions import PermissionEngine
-from thursday.security.policy import HARD_BLOCKED, PolicyTable
-from thursday.security.privacy import PrivacyZone, PrivacyZoneRegistry
-from thursday.shared.enums import (
+from thursday_security.permissions import PermissionEngine
+from thursday_security.policy import HARD_BLOCKED, PolicyTable
+from thursday_security.privacy import PrivacyZone, PrivacyZoneRegistry
+from thursday_shared.enums import (
     ApprovalScope,
     DataSensitivity,
     PermissionLevel,
     PolicyDecision,
     RiskLevel,
 )
-from thursday.shared.ids import new_id
-from thursday.shared.models import ActionRequest, PermissionGrant, PermissionSet
+from thursday_shared.ids import new_id
+from thursday_shared.models import ActionRequest, PermissionGrant, PermissionSet
 
 
 @pytest.fixture

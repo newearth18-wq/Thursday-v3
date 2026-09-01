@@ -3,15 +3,14 @@
 from __future__ import annotations
 
 import pytest
-
-from thursday.core.tasks import InvalidTransition, TaskManager
-from thursday.core.undo import UndoRegistry, is_reversible
-from thursday.shared.enums import AgentVerdict, DataSensitivity, RiskLevel, TaskState
-from thursday.shared.errors import BudgetExceeded, ThursdayError
-from thursday.shared.ids import new_id
-from thursday.shared.models import Budget, Spend, UndoRecord, VerificationReport
-from thursday.tools.builtin import register_builtin_tools
-from thursday.tools.registry import ToolRegistry, ToolRouter
+from thursday_core.tasks import InvalidTransition, TaskManager
+from thursday_core.undo import UndoRegistry, is_reversible
+from thursday_shared.enums import AgentVerdict, DataSensitivity, RiskLevel, TaskState
+from thursday_shared.errors import BudgetExceeded, ThursdayError
+from thursday_shared.ids import new_id
+from thursday_shared.models import Budget, Spend, UndoRecord, VerificationReport
+from thursday_tools.builtin import register_builtin_tools
+from thursday_tools.registry import ToolRegistry, ToolRouter
 
 
 @pytest.fixture
@@ -118,7 +117,7 @@ def tools() -> ToolRegistry:
 
 
 def test_a_duplicate_tool_name_is_refused(tools):
-    from thursday.tools.builtin import ClockTool
+    from thursday_tools.builtin import ClockTool
 
     with pytest.raises(ValueError, match="already registered"):
         tools.register(ClockTool())
@@ -143,7 +142,7 @@ def test_the_router_honours_an_allowlist(tools):
 
 
 def test_an_unknown_tool_names_what_is_available(tools):
-    from thursday.shared.errors import ToolNotFound
+    from thursday_shared.errors import ToolNotFound
 
     with pytest.raises(ToolNotFound) as exc:
         tools.get("no_such_tool")

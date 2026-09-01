@@ -12,14 +12,13 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-
-from thursday.core.config import Settings
-from thursday.core.container import build_container
-from thursday.devices.hub import LoopbackDeviceSession
-from thursday.devices.node.adapters.base import OSAdapter
-from thursday.devices.node.executor import NodeExecutor
-from thursday.shared.ids import new_id
-from thursday.shared.models import DeviceCapabilities
+from thursday_core.config import Settings
+from thursday_core.container import build_container
+from thursday_devices.hub import LoopbackDeviceSession
+from thursday_devices.node.adapters.base import OSAdapter
+from thursday_devices.node.executor import NodeExecutor
+from thursday_shared.ids import new_id
+from thursday_shared.models import DeviceCapabilities
 
 
 class FakeAdapter(OSAdapter):

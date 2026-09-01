@@ -5,23 +5,22 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 
 import pytest
-
-from thursday.agents.factory import MAX_DEPTH, MAX_PER_TASK, AgentFactory, DynamicAgentSpec
-from thursday.agents.registry import AgentRegistry
-from thursday.automation.engine import AutomationEngine, ProactivityGate
-from thursday.automation.routines import RoutineLearner
-from thursday.automation.rules import Action, Automation, Condition, Trigger
-from thursday.core.bus import InProcessEventBus
-from thursday.shared.enums import (
+from thursday_agents.factory import MAX_DEPTH, MAX_PER_TASK, AgentFactory, DynamicAgentSpec
+from thursday_agents.registry import AgentRegistry
+from thursday_automation.engine import AutomationEngine, ProactivityGate
+from thursday_automation.routines import RoutineLearner
+from thursday_automation.rules import Action, Automation, Condition, Trigger
+from thursday_automation.skills.models import SkillStatus, SkillStep, SkillTest
+from thursday_automation.skills.registry import SkillRegistry
+from thursday_core.bus import InProcessEventBus
+from thursday_shared.enums import (
     NotificationPriority,
     PermissionLevel,
     ProactivityLevel,
 )
-from thursday.shared.errors import PermissionDenied, ThursdayError
-from thursday.shared.ids import new_id
-from thursday.shared.models import Event, PermissionSet
-from thursday.skills.models import SkillStatus, SkillStep, SkillTest
-from thursday.skills.registry import SkillRegistry
+from thursday_shared.errors import PermissionDenied, ThursdayError
+from thursday_shared.ids import new_id
+from thursday_shared.models import Event, PermissionSet
 
 # ------------------------------------------------------------------ automation rules
 
@@ -219,8 +218,8 @@ async def test_a_destructive_step_may_not_continue_on_error(skills):
 
 
 async def test_sandbox_testing_checks_that_the_tools_exist(skills):
-    from thursday.tools.builtin import register_builtin_tools
-    from thursday.tools.registry import ToolRegistry
+    from thursday_tools.builtin import register_builtin_tools
+    from thursday_tools.registry import ToolRegistry
 
     tools = ToolRegistry()
     register_builtin_tools(tools, hub=object(), memory=None, vault=None)
@@ -248,7 +247,7 @@ async def test_a_failing_sandbox_case_is_reported_not_swallowed(skills):
 
 
 async def test_versions_are_kept_so_a_regression_can_be_rolled_back(skills):
-    from thursday.skills.models import SkillVersion
+    from thursday_automation.skills.models import SkillVersion
 
     skill = skills.capture(name="s", description="d", steps=[SkillStep(seq=0, tool="clock")])
     await skills.test(skill.id)

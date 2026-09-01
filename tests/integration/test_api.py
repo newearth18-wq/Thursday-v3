@@ -4,9 +4,8 @@ from __future__ import annotations
 
 import pytest
 from httpx import ASGITransport, AsyncClient
-
-from thursday.api.app import create_app
-from thursday.shared.enums import PolicyDecision
+from thursday_api.app import create_app
+from thursday_shared.enums import PolicyDecision
 
 
 @pytest.fixture
@@ -74,7 +73,7 @@ async def test_direct_device_control_still_passes_the_permission_engine(
 
 
 async def test_an_unknown_device_is_a_404(client):
-    from thursday.shared.ids import new_id
+    from thursday_shared.ids import new_id
 
     response = await client.post(
         f"/api/v1/devices/{new_id()}/action", json={"action": "system_info"}
@@ -214,7 +213,7 @@ async def test_routine_suggestions_are_accepted_but_stay_disabled(client, contai
     """§49 — accepting a suggestion records it; enabling it is a separate act."""
     from datetime import UTC, datetime, timedelta
 
-    from thursday.shared.models import Event
+    from thursday_shared.models import Event
 
     base = datetime.now(UTC).replace(hour=8, minute=15)
     for day in range(4):

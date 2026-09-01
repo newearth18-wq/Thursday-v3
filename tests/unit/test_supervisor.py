@@ -3,11 +3,10 @@
 from __future__ import annotations
 
 import pytest
-
-from thursday.core.supervisor import Supervisor
-from thursday.shared.enums import AgentVerdict
-from thursday.shared.ids import new_id
-from thursday.shared.models import AgentResult, JobContract, ToolResult
+from thursday_core.supervisor import Supervisor
+from thursday_shared.enums import AgentVerdict
+from thursday_shared.ids import new_id
+from thursday_shared.models import AgentResult, JobContract, ToolResult
 
 
 def contract(**overrides) -> JobContract:
@@ -117,9 +116,9 @@ async def test_transient_failures_are_retried_within_the_attempt_budget(supervis
 
 async def test_the_offline_verifier_escalates_rather_than_fabricating_a_pass():
     """A verifier with no reasoning model must not invent approval."""
-    from thursday.core.model_router import ModelRouter
-    from thursday.providers.llm import RuleBasedLLM
-    from thursday.shared.enums import ModelTier
+    from thursday_core.model_router import ModelRouter
+    from thursday_models.llm import RuleBasedLLM
+    from thursday_shared.enums import ModelTier
 
     router = ModelRouter()
     router.register(ModelTier.LOCAL, RuleBasedLLM())
