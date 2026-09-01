@@ -67,7 +67,10 @@ _STATUS = re.compile(
 )
 _APPROVE = re.compile(r"(?i)^\s*(approve|yes,? do it|อนุมัติ|ตกลง|ทำเลย|ยืนยัน|confirm)\b")
 _SCREENSHOT = re.compile(r"(?i)(screenshot|จับภาพหน้าจอ|แคปหน้าจอ|capture the screen)")
-_SYSINFO = re.compile(r"(?i)(system info|ข้อมูลเครื่อง|สเปคเครื่อง|how much (ram|memory|disk))")
+_SYSINFO = re.compile(
+    r"(?i)(system info|ข้อมูลเครื่อง|สเปคเครื่อง|สถานะเครื่อง|เครื่อง(?:นี้)?เป็นยังไง|"
+    r"how much (ram|memory|disk)|disk space|พื้นที่ดิสก์)"
+)
 _LIST_DIR = re.compile(r"(?i)\b(?:list|ls|ดู(?:ไฟล์)?ใน|show files in)\s+(?P<target>[^\s]+)")
 
 _THIS_DEVICE = re.compile(r"(?i)(this (?:machine|device|pc|computer)|เครื่องนี้|ที่นี่|here)")

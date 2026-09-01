@@ -91,7 +91,8 @@ class RuleBasedLLM:
     def _chat(self, user_text: str) -> str:
         lowered = user_text.lower()
         thai = any("฀" <= ch <= "๿" for ch in user_text)
-        if re.search(r"\b(hello|hi|สวัสดี)\b", lowered):
+        # \b does not delimit Thai script, so the Thai greeting is matched literally.
+        if "สวัสดี" in user_text or re.search(r"\b(hello|hi|hey)\b", lowered):
             return "สวัสดีครับ พร้อมทำงานแล้ว" if thai else "Ready when you are."
         if thai:
             return (
