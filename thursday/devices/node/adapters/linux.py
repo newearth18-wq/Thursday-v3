@@ -74,8 +74,14 @@ class LinuxAdapter(OSAdapter):
             for process in psutil.process_iter(["pid", "name", "exe", "cmdline"]):
                 info = process.info
                 haystack = " ".join(
-                    filter(None, [info.get("name") or "", info.get("exe") or "",
-                                  " ".join(info.get("cmdline") or [])])
+                    filter(
+                        None,
+                        [
+                            info.get("name") or "",
+                            info.get("exe") or "",
+                            " ".join(info.get("cmdline") or []),
+                        ],
+                    )
                 ).lower()
                 if any(candidate in haystack for candidate in candidates):
                     found.append({"pid": info["pid"], "name": info.get("name")})
@@ -104,8 +110,10 @@ class LinuxAdapter(OSAdapter):
         if opener is None:
             raise RuntimeError("xdg-open is not available on this machine")
         process = await asyncio.create_subprocess_exec(
-            opener, str(target),
-            stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL,
+            opener,
+            str(target),
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.DEVNULL,
         )
         return {"pid": process.pid, "path": str(target)}
 
@@ -134,9 +142,11 @@ class LinuxAdapter(OSAdapter):
         import shlex
 
         quoted = shlex.quote(text)
-        for command in (f"printf %s {quoted} | xclip -selection clipboard",
-                        f"printf %s {quoted} | xsel --clipboard --input",
-                        f"printf %s {quoted} | wl-copy"):
+        for command in (
+            f"printf %s {quoted} | xclip -selection clipboard",
+            f"printf %s {quoted} | xsel --clipboard --input",
+            f"printf %s {quoted} | wl-copy",
+        ):
             if shutil.which(command.split("|")[1].strip().split()[0]):
                 await self.run_shell(command, timeout=5)
                 return

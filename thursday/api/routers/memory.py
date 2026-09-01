@@ -26,7 +26,10 @@ async def search(
 ) -> dict:
     records = await c.memory.recall(
         MemoryQuery(
-            text=q, layers=[layer] if layer else [], project_id=project_id, k=k,
+            text=q,
+            layers=[layer] if layer else [],
+            project_id=project_id,
+            k=k,
             min_confidence=min_confidence,
         )
     )
@@ -37,9 +40,14 @@ async def search(
 async def write(request: MemoryWriteRequest, c: Container = Depends(get_container)) -> dict:
     record = await c.memory.write(
         MemoryWrite(
-            layer=request.layer, content=request.content, key=request.key,
-            importance=request.importance, project_id=request.project_id,
-            structured=request.structured, source=MemorySource.USER, confidence=0.95,
+            layer=request.layer,
+            content=request.content,
+            key=request.key,
+            importance=request.importance,
+            project_id=request.project_id,
+            structured=request.structured,
+            source=MemorySource.USER,
+            confidence=0.95,
         )
     )
     if record is None:
@@ -68,7 +76,9 @@ async def conflicts(pending_only: bool = True, c: Container = Depends(get_contai
 
 
 @router.post("/memory/conflicts/{conflict_id}")
-async def resolve(conflict_id: UUID, resolution: str, c: Container = Depends(get_container)) -> dict:
+async def resolve(
+    conflict_id: UUID, resolution: str, c: Container = Depends(get_container)
+) -> dict:
     if resolution not in ("kept_old", "kept_new", "both_valid", "user_decided"):
         raise HTTPException(status_code=400, detail="unknown resolution")
     try:
@@ -79,8 +89,9 @@ async def resolve(conflict_id: UUID, resolution: str, c: Container = Depends(get
 
 
 @router.get("/graph/query")
-async def graph_query(entity: str, hops: int = 2, kind: str | None = None,
-                      c: Container = Depends(get_container)) -> dict:
+async def graph_query(
+    entity: str, hops: int = 2, kind: str | None = None, c: Container = Depends(get_container)
+) -> dict:
     node = c.graph.find(entity)
     if node is None:
         raise HTTPException(status_code=404, detail=f"no entity named {entity!r}")

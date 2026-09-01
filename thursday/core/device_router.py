@@ -20,10 +20,20 @@ CONFIDENCE_FLOOR = 0.7
 _THIS_WORDS = {"this", "here", "เครื่องนี้", "ที่นี่", "นี่", "current"}
 _LAST_WORDS = {"เมื่อกี้", "ก่อนหน้า", "previous", "last", "ที่แล้ว", "ตะกี้"}
 _KIND_WORDS: dict[str, str] = {
-    "laptop": "laptop", "โน้ตบุ๊ก": "laptop", "โน๊ตบุ๊ค": "laptop", "notebook": "laptop",
-    "phone": "phone", "มือถือ": "phone", "โทรศัพท์": "phone", "มือ ถือ": "phone",
-    "server": "server", "เซิร์ฟเวอร์": "server",
-    "desktop": "desktop", "pc": "desktop", "คอม": "desktop", "คอมพิวเตอร์": "desktop",
+    "laptop": "laptop",
+    "โน้ตบุ๊ก": "laptop",
+    "โน๊ตบุ๊ค": "laptop",
+    "notebook": "laptop",
+    "phone": "phone",
+    "มือถือ": "phone",
+    "โทรศัพท์": "phone",
+    "มือ ถือ": "phone",
+    "server": "server",
+    "เซิร์ฟเวอร์": "server",
+    "desktop": "desktop",
+    "pc": "desktop",
+    "คอม": "desktop",
+    "คอมพิวเตอร์": "desktop",
 }
 
 
@@ -76,7 +86,9 @@ class DeviceRouter:
                     return DeviceResolution(match, 0.95 if hint else 0.85, reason, tuple(devices))
             if len(devices) == 1:
                 return DeviceResolution(devices[0], 0.8, "the only device online", tuple(devices))
-            return DeviceResolution(None, 0.4, "no active device to anchor 'this' to", tuple(devices))
+            return DeviceResolution(
+                None, 0.4, "no active device to anchor 'this' to", tuple(devices)
+            )
 
         if normalised in _LAST_WORDS:
             match = next((d for d in devices if d.id == world.active_device_id), None)
@@ -115,9 +127,13 @@ class DeviceRouter:
         if location := self._location_hint(normalised):
             by_location = [d for d in devices if (d.location_context or "").lower() == location]
             if len(by_location) == 1:
-                return DeviceResolution(by_location[0], 0.82, f"the only device at {location}", tuple(devices))
+                return DeviceResolution(
+                    by_location[0], 0.82, f"the only device at {location}", tuple(devices)
+                )
             if len(by_location) > 1:
-                return DeviceResolution(None, 0.5, f"several devices are at {location}", tuple(by_location))
+                return DeviceResolution(
+                    None, 0.5, f"several devices are at {location}", tuple(by_location)
+                )
 
         scored = sorted(
             ((d, SequenceMatcher(None, normalised, d.name.lower()).ratio()) for d in devices),
@@ -127,7 +143,9 @@ class DeviceRouter:
         best, score = scored[0]
         if score >= 0.72 and (len(scored) == 1 or score - scored[1][1] > 0.15):
             return DeviceResolution(best, min(0.85, score), "closest name match", tuple(devices))
-        return DeviceResolution(None, score, f"{hint!r} does not clearly match one device", tuple(devices))
+        return DeviceResolution(
+            None, score, f"{hint!r} does not clearly match one device", tuple(devices)
+        )
 
     def _capable(self, device: DeviceSummary, capability: str | None) -> bool:
         if device.status is not DeviceStatus.ONLINE:
@@ -136,9 +154,14 @@ class DeviceRouter:
 
     def _location_hint(self, text: str) -> str | None:
         for word, location in (
-            ("home", "home"), ("ที่บ้าน", "home"), ("บ้าน", "home"),
-            ("office", "office"), ("ที่ทำงาน", "office"), ("ออฟฟิศ", "office"),
-            ("school", "school"), ("โรงเรียน", "school"),
+            ("home", "home"),
+            ("ที่บ้าน", "home"),
+            ("บ้าน", "home"),
+            ("office", "office"),
+            ("ที่ทำงาน", "office"),
+            ("ออฟฟิศ", "office"),
+            ("school", "school"),
+            ("โรงเรียน", "school"),
         ):
             if word in text:
                 return location

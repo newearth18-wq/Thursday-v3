@@ -15,16 +15,31 @@ from thursday.shared.models import Intent
 
 #: Application aliases the user is likely to speak, mapped to a canonical name.
 APP_ALIASES: dict[str, str] = {
-    "chrome": "chrome", "โครม": "chrome", "google chrome": "chrome",
-    "edge": "msedge", "firefox": "firefox",
-    "notepad": "notepad", "โน้ตแพด": "notepad",
-    "excel": "excel", "เอ็กเซล": "excel",
-    "word": "winword", "เวิร์ด": "winword",
-    "calculator": "calc", "เครื่องคิดเลข": "calc", "calc": "calc",
-    "terminal": "terminal", "เทอร์มินอล": "terminal",
-    "explorer": "explorer", "file explorer": "explorer",
-    "obsidian": "obsidian", "vscode": "code", "vs code": "code", "code": "code",
-    "spotify": "spotify", "line": "line", "discord": "discord",
+    "chrome": "chrome",
+    "โครม": "chrome",
+    "google chrome": "chrome",
+    "edge": "msedge",
+    "firefox": "firefox",
+    "notepad": "notepad",
+    "โน้ตแพด": "notepad",
+    "excel": "excel",
+    "เอ็กเซล": "excel",
+    "word": "winword",
+    "เวิร์ด": "winword",
+    "calculator": "calc",
+    "เครื่องคิดเลข": "calc",
+    "calc": "calc",
+    "terminal": "terminal",
+    "เทอร์มินอล": "terminal",
+    "explorer": "explorer",
+    "file explorer": "explorer",
+    "obsidian": "obsidian",
+    "vscode": "code",
+    "vs code": "code",
+    "code": "code",
+    "spotify": "spotify",
+    "line": "line",
+    "discord": "discord",
 }
 
 _STOP = re.compile(r"(?i)^\s*(thursday[,\s]*)?(stop|หยุด|ยกเลิก|cancel|abort|เงียบ)\b")
@@ -42,9 +57,7 @@ _CLOSE_APP = re.compile(
     r"(?P<target>[\w฀-๿ .+-]{1,40}?)"
     r"(?:\s*(?:\bon\b|บน|ที่)\s*(?P<device>[\w฀-๿-]{2,30}))?\s*$"
 )
-_OPEN_FILE = re.compile(
-    r"(?i)(?:\bopen\s+(?:file|ไฟล์)|เปิด\s*(?:file|ไฟล์))\s*(?P<target>\S+)"
-)
+_OPEN_FILE = re.compile(r"(?i)(?:\bopen\s+(?:file|ไฟล์)|เปิด\s*(?:file|ไฟล์))\s*(?P<target>\S+)")
 # Two word orders: English puts the verb first, Thai trails the question particle.
 _DEVICE_STATUS_EN = re.compile(
     r"(?i)\bis\s+(?:the\s+)?(?P<device>[\w -]{2,30}?)\s+(?:still\s+)?"
@@ -62,9 +75,7 @@ _ANALYZE = re.compile(
     r"(?i)(analy[sz]e|วิเคราะห์|summari[sz]e|สรุป|report on|ทำรายงาน|เปรียบเทียบ|compare)"
 )
 _SEARCH = re.compile(r"(?i)(search|ค้นหา|หาข้อมูล|look up|research|ค้นคว้า|google)")
-_STATUS = re.compile(
-    r"(?i)(status|สถานะ|ไปถึงไหน|progress|คืบหน้า|what.*(working on|กำลังทำ)|pending)"
-)
+_STATUS = re.compile(r"(?i)(status|สถานะ|ไปถึงไหน|progress|คืบหน้า|what.*(working on|กำลังทำ)|pending)")
 _APPROVE = re.compile(r"(?i)^\s*(approve|yes,? do it|อนุมัติ|ตกลง|ทำเลย|ยืนยัน|confirm)\b")
 _SCREENSHOT = re.compile(r"(?i)(screenshot|จับภาพหน้าจอ|แคปหน้าจอ|capture the screen)")
 _SYSINFO = re.compile(
@@ -102,76 +113,147 @@ def parse(text: str, *, wake_word: str = "thursday") -> RuleMatch | None:
         return None
 
     if _STOP.match(body):
-        return RuleMatch(Intent(kind=IntentKind.STOP, objective="stop current work", confidence=0.97,
-                                rationale="explicit stop command"))
+        return RuleMatch(
+            Intent(
+                kind=IntentKind.STOP,
+                objective="stop current work",
+                confidence=0.97,
+                rationale="explicit stop command",
+            )
+        )
     if _APPROVE.match(body):
-        return RuleMatch(Intent(kind=IntentKind.APPROVE, objective="approve the pending request",
-                                confidence=0.9, rationale="explicit approval"))
+        return RuleMatch(
+            Intent(
+                kind=IntentKind.APPROVE,
+                objective="approve the pending request",
+                confidence=0.9,
+                rationale="explicit approval",
+            )
+        )
 
     status_match = _DEVICE_STATUS_EN.search(body) or _DEVICE_STATUS_TH.search(body)
     if status_match:
         device = status_match.group("device").strip()
         return RuleMatch(
-            Intent(kind=IntentKind.STATUS, objective=f"report the status of {device}",
-                   entities={"subject": "device", "device_name": device}, target_device=device,
-                   confidence=0.85, rationale="device status question")
+            Intent(
+                kind=IntentKind.STATUS,
+                objective=f"report the status of {device}",
+                entities={"subject": "device", "device_name": device},
+                target_device=device,
+                confidence=0.85,
+                rationale="device status question",
+            )
         )
     if _STATUS.search(body):
-        return RuleMatch(Intent(kind=IntentKind.STATUS, objective="report current work status",
-                                confidence=0.8, rationale="status question"))
+        return RuleMatch(
+            Intent(
+                kind=IntentKind.STATUS,
+                objective="report current work status",
+                confidence=0.8,
+                rationale="status question",
+            )
+        )
 
     if _SCREENSHOT.search(body):
         return RuleMatch(
-            Intent(kind=IntentKind.DEVICE_ACTION, objective="capture the screen",
-                   entities={"action": "screenshot"}, target_device=_device_hint(body),
-                   confidence=0.88, rationale="screenshot request")
+            Intent(
+                kind=IntentKind.DEVICE_ACTION,
+                objective="capture the screen",
+                entities={"action": "screenshot"},
+                target_device=_device_hint(body),
+                confidence=0.88,
+                rationale="screenshot request",
+            )
         )
     if _SYSINFO.search(body):
         return RuleMatch(
-            Intent(kind=IntentKind.DEVICE_ACTION, objective="read system information",
-                   entities={"action": "system_info"}, target_device=_device_hint(body),
-                   confidence=0.85, rationale="system info request")
+            Intent(
+                kind=IntentKind.DEVICE_ACTION,
+                objective="read system information",
+                entities={"action": "system_info"},
+                target_device=_device_hint(body),
+                confidence=0.85,
+                rationale="system info request",
+            )
         )
     if match := _LIST_DIR.search(body):
         return RuleMatch(
-            Intent(kind=IntentKind.FILE_OP, objective=f"list {match.group('target')}",
-                   entities={"action": "list_dir", "path": match.group("target")},
-                   target_device=_device_hint(body), confidence=0.82, rationale="directory listing")
+            Intent(
+                kind=IntentKind.FILE_OP,
+                objective=f"list {match.group('target')}",
+                entities={"action": "list_dir", "path": match.group("target")},
+                target_device=_device_hint(body),
+                confidence=0.82,
+                rationale="directory listing",
+            )
         )
     if match := _OPEN_FILE.search(body):
         return RuleMatch(
-            Intent(kind=IntentKind.FILE_OP, objective=f"open {match.group('target')}",
-                   entities={"action": "open_file", "path": match.group("target")},
-                   target_device=_device_hint(body), confidence=0.84, rationale="file open request")
+            Intent(
+                kind=IntentKind.FILE_OP,
+                objective=f"open {match.group('target')}",
+                entities={"action": "open_file", "path": match.group("target")},
+                target_device=_device_hint(body),
+                confidence=0.84,
+                rationale="file open request",
+            )
         )
     if match := _CLOSE_APP.search(body):
         app = _normalise_app(match.group("target"))
         if app and not _looks_like_sentence(app):
             return RuleMatch(
-                Intent(kind=IntentKind.DEVICE_ACTION, objective=f"close {app}",
-                       entities={"action": "close_app", "app": app},
-                       target_device=match.group("device") or _device_hint(body),
-                       confidence=0.86, rationale="application close request")
+                Intent(
+                    kind=IntentKind.DEVICE_ACTION,
+                    objective=f"close {app}",
+                    entities={"action": "close_app", "app": app},
+                    target_device=match.group("device") or _device_hint(body),
+                    confidence=0.86,
+                    rationale="application close request",
+                )
             )
     if match := _OPEN_APP.search(body):
         app = _normalise_app(match.group("target"))
         if app and not _looks_like_sentence(app):
             return RuleMatch(
-                Intent(kind=IntentKind.DEVICE_ACTION, objective=f"open {app}",
-                       entities={"action": "open_app", "app": app},
-                       target_device=match.group("device") or _device_hint(body),
-                       confidence=0.9, rationale="application open request")
+                Intent(
+                    kind=IntentKind.DEVICE_ACTION,
+                    objective=f"open {app}",
+                    entities={"action": "open_app", "app": app},
+                    target_device=match.group("device") or _device_hint(body),
+                    confidence=0.9,
+                    rationale="application open request",
+                )
             )
 
     if _RECALL.search(body):
-        return RuleMatch(Intent(kind=IntentKind.RECALL, objective=body, confidence=0.78,
-                                rationale="memory recall question"))
+        return RuleMatch(
+            Intent(
+                kind=IntentKind.RECALL,
+                objective=body,
+                confidence=0.78,
+                rationale="memory recall question",
+            )
+        )
     if _ANALYZE.search(body):
-        return RuleMatch(Intent(kind=IntentKind.ANALYZE, objective=body, needs_plan=True,
-                                confidence=0.78, rationale="analysis request"))
+        return RuleMatch(
+            Intent(
+                kind=IntentKind.ANALYZE,
+                objective=body,
+                needs_plan=True,
+                confidence=0.78,
+                rationale="analysis request",
+            )
+        )
     if _SEARCH.search(body):
-        return RuleMatch(Intent(kind=IntentKind.SEARCH, objective=body, needs_plan=True,
-                                confidence=0.76, rationale="research request"))
+        return RuleMatch(
+            Intent(
+                kind=IntentKind.SEARCH,
+                objective=body,
+                needs_plan=True,
+                confidence=0.76,
+                rationale="research request",
+            )
+        )
     return None
 
 

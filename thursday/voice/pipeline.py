@@ -80,7 +80,11 @@ class VoiceLoop:
         return VoiceTurn(transcript=transcript, reply=reply, audio=spoken)
 
     async def speak(self, reply: ThursdayReply) -> bytes:
-        mode = reply.voice_mode.value if isinstance(reply.voice_mode, VoiceMode) else str(reply.voice_mode)
+        mode = (
+            reply.voice_mode.value
+            if isinstance(reply.voice_mode, VoiceMode)
+            else str(reply.voice_mode)
+        )
         return await self._tts.synthesize(reply.text, mode=mode, voice=self.voice)
 
     def interrupt(self) -> bool:

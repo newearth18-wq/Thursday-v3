@@ -72,7 +72,9 @@ class ResponseComposer:
         failures = verification.failures()
         detail = verification.critique or "; ".join(f["detail"] for f in failures)
         return ThursdayReply(
-            text=phrase("unverified", language, action=summary, detail=detail or "no evidence returned"),
+            text=phrase(
+                "unverified", language, action=summary, detail=detail or "no evidence returned"
+            ),
             voice_mode=self._mode(VoiceMode.WARNING, people_present),
             avatar_state=AvatarState.WARNING,
             confidence=verification.confidence,

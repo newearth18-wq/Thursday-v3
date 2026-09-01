@@ -27,7 +27,8 @@ async def test_retries_are_bounded_and_do_not_loop(container, tmp_path, session_
 
     adapter.find_processes = flaky  # type: ignore[method-assign]
     session = LoopbackDeviceSession(
-        device_id=new_id(), name="Flaky-PC",
+        device_id=new_id(),
+        name="Flaky-PC",
         executor=NodeExecutor(adapter, allowed_roots=[tmp_path]),
     )
     await container.hub.register(session)
@@ -43,7 +44,9 @@ async def test_retries_are_bounded_and_do_not_loop(container, tmp_path, session_
     adapter.find_processes = original  # type: ignore[method-assign]
 
 
-async def test_a_disconnected_device_mid_task_is_reported_not_swallowed(container, office_pc, session_id):
+async def test_a_disconnected_device_mid_task_is_reported_not_swallowed(
+    container, office_pc, session_id
+):
     await container.hub.unregister(office_pc.device_id)
     container.world.update(active_device_id=None, active_device_name=None)
 
@@ -69,7 +72,9 @@ async def test_a_rejected_approval_does_not_leave_a_standing_grant(container, of
     assert container.permissions.list_grants() == []
 
 
-async def test_always_allow_is_scoped_to_the_directory_not_the_filesystem(container, office_pc, tmp_path):
+async def test_always_allow_is_scoped_to_the_directory_not_the_filesystem(
+    container, office_pc, tmp_path
+):
     """'Always allow' must not become 'allow everywhere' (§8.4, T5)."""
     inside = tmp_path / "scratch" / "a.txt"
     inside.parent.mkdir(parents=True)

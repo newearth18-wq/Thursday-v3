@@ -105,33 +105,45 @@ class Container:
         """§59 — one place that knows whether Thursday is actually able to work."""
         checks: list[dict[str, Any]] = []
         for status in await self.models.health():
-            checks.append({"component": f"model:{status.name}", "ok": status.ok, "detail": status.detail})
+            checks.append(
+                {"component": f"model:{status.name}", "ok": status.ok, "detail": status.detail}
+            )
         online = self.hub.online()
-        checks.append({
-            "component": "devices",
-            "ok": bool(online),
-            "detail": f"{len(online)} online: {', '.join(d.name for d in online) or 'none'}",
-        })
-        checks.append({
-            "component": "memory",
-            "ok": True,
-            "detail": ", ".join(f"{k}={v}" for k, v in self.memory.stats().items()),
-        })
-        checks.append({
-            "component": "audit",
-            "ok": self.audit.verify_chain(),
-            "detail": f"{len(self.audit)} entries, hash chain intact",
-        })
-        checks.append({
-            "component": "approvals",
-            "ok": True,
-            "detail": f"{len(self.approvals.pending())} pending",
-        })
-        checks.append({
-            "component": "queue",
-            "ok": True,
-            "detail": f"{len(self.queue.running())} running",
-        })
+        checks.append(
+            {
+                "component": "devices",
+                "ok": bool(online),
+                "detail": f"{len(online)} online: {', '.join(d.name for d in online) or 'none'}",
+            }
+        )
+        checks.append(
+            {
+                "component": "memory",
+                "ok": True,
+                "detail": ", ".join(f"{k}={v}" for k, v in self.memory.stats().items()),
+            }
+        )
+        checks.append(
+            {
+                "component": "audit",
+                "ok": self.audit.verify_chain(),
+                "detail": f"{len(self.audit)} entries, hash chain intact",
+            }
+        )
+        checks.append(
+            {
+                "component": "approvals",
+                "ok": True,
+                "detail": f"{len(self.approvals.pending())} pending",
+            }
+        )
+        checks.append(
+            {
+                "component": "queue",
+                "ok": True,
+                "detail": f"{len(self.queue.running())} running",
+            }
+        )
         return checks
 
     async def emergency_stop(self, scope: str = "all") -> dict[str, Any]:
@@ -183,10 +195,15 @@ def build_container(settings: Settings | None = None, *, configure_logs: bool = 
     c.embedder = _build_embedder(settings)
     c.vectors = InMemoryVectorStore()
     c.memory = MemoryManager(
-        embedder=c.embedder, vectors=c.vectors, bus=c.bus, redactor=c.redactor,
+        embedder=c.embedder,
+        vectors=c.vectors,
+        bus=c.bus,
+        redactor=c.redactor,
         working_ttl_hours=settings.memory_working_ttl_hours,
     )
-    c.obsidian = ObsidianVault(settings.obsidian_vault, redactor=c.redactor, enabled=settings.obsidian_enabled)
+    c.obsidian = ObsidianVault(
+        settings.obsidian_vault, redactor=c.redactor, enabled=settings.obsidian_enabled
+    )
     c.obsidian.ensure_structure()
     c.graph = KnowledgeGraph()
 
@@ -204,8 +221,14 @@ def build_container(settings: Settings | None = None, *, configure_logs: bool = 
     c.tasks = TaskManager(c.bus)
     c.queue = TaskQueue()
     c.executor = ToolExecutor(
-        registry=c.tools, permissions=c.permissions, approvals=c.approvals, audit=c.audit,
-        undo=c.undo, bus=c.bus, tasks=c.tasks, approval_timeout_s=settings.approval_ttl_seconds,
+        registry=c.tools,
+        permissions=c.permissions,
+        approvals=c.approvals,
+        audit=c.audit,
+        undo=c.undo,
+        bus=c.bus,
+        tasks=c.tasks,
+        approval_timeout_s=settings.approval_ttl_seconds,
     )
     c.agents = AgentRegistry()
     c.agents.register(ComputerAgent())
@@ -222,9 +245,17 @@ def build_container(settings: Settings | None = None, *, configure_logs: bool = 
     c.planner = Planner(max_steps=settings.max_plan_steps)
     c.composer = ResponseComposer()
     c.orchestrator = AgentOrchestrator(
-        agents=c.agents, tools=c.tools, executor=c.executor, supervisor=c.supervisor,
-        tasks=c.tasks, memory=c.memory, models=c.models, bus=c.bus,
-        device_router=c.device_router, hub=c.hub, max_attempts=settings.max_step_attempts,
+        agents=c.agents,
+        tools=c.tools,
+        executor=c.executor,
+        supervisor=c.supervisor,
+        tasks=c.tasks,
+        memory=c.memory,
+        models=c.models,
+        bus=c.bus,
+        device_router=c.device_router,
+        hub=c.hub,
+        max_attempts=settings.max_step_attempts,
     )
 
     from thursday.core.engine import ThursdayEngine
@@ -304,7 +335,10 @@ def _register_undo_executors(c: Container) -> None:
             "open_app": ("open_app", record.args),
             "delete_folder": ("delete", {"path": record.args.get("path")}),
             "move": ("move", record.args),
-            "restore_from_trash": ("move", {"src": record.args.get("src"), "dst": record.args.get("dst")}),
+            "restore_from_trash": (
+                "move",
+                {"src": record.args.get("src"), "dst": record.args.get("dst")},
+            ),
             "clipboard_set": ("clipboard_set", record.args),
             "set_volume": ("set_volume", record.args),
         }
@@ -312,7 +346,9 @@ def _register_undo_executors(c: Container) -> None:
         if mapped is None:
             return False
         action, args = mapped
-        result = await c.hub.invoke(device_id, DeviceAction(action=action, args=args, reason="undo"))
+        result = await c.hub.invoke(
+            device_id, DeviceAction(action=action, args=args, reason="undo")
+        )
         return result.succeeded
 
     async def restore_file(record: UndoRecord) -> bool:
@@ -343,8 +379,15 @@ def _register_undo_executors(c: Container) -> None:
         await c.memory.forget(UUID(str(memory_id)))
         return True
 
-    for operation in ("close_app", "open_app", "delete_folder", "move", "restore_from_trash",
-                      "clipboard_set", "set_volume"):
+    for operation in (
+        "close_app",
+        "open_app",
+        "delete_folder",
+        "move",
+        "restore_from_trash",
+        "clipboard_set",
+        "set_volume",
+    ):
         c.undo.register_executor(operation, device_undo)
     c.undo.register_executor("restore_file", restore_file)
     c.undo.register_executor("memory_forget", memory_forget)

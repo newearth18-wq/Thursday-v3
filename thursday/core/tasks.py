@@ -122,7 +122,9 @@ class TaskManager:
         task.verification = verification
         return await self.transition(task_id, TaskState.COMPLETED)
 
-    async def fail(self, task_id: UUID, error: str, *, verification: VerificationReport | None = None) -> Task:
+    async def fail(
+        self, task_id: UUID, error: str, *, verification: VerificationReport | None = None
+    ) -> Task:
         task = self._require(task_id)
         task.error = error
         if verification is not None:

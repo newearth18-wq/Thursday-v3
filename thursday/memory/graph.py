@@ -17,8 +17,17 @@ from thursday.shared.ids import new_id
 from thursday.shared.models import utcnow
 
 ENTITY_KINDS = (
-    "person", "project", "task", "document", "event", "device",
-    "decision", "location", "skill", "object", "organization",
+    "person",
+    "project",
+    "task",
+    "document",
+    "event",
+    "device",
+    "decision",
+    "location",
+    "skill",
+    "object",
+    "organization",
 )
 
 
@@ -74,8 +83,14 @@ class KnowledgeGraph:
         return self._entities.get(entity_id)
 
     def relate(
-        self, src: Entity | UUID, dst: Entity | UUID, kind: str, *, source: str = "inference",
-        weight: float = 1.0, **attributes: Any,
+        self,
+        src: Entity | UUID,
+        dst: Entity | UUID,
+        kind: str,
+        *,
+        source: str = "inference",
+        weight: float = 1.0,
+        **attributes: Any,
     ) -> Relationship:
         src_id = src.id if isinstance(src, Entity) else src
         dst_id = dst.id if isinstance(dst, Entity) else dst
@@ -87,7 +102,9 @@ class KnowledgeGraph:
         self._in[dst_id].append(rel)
         return rel
 
-    def neighbours(self, entity_id: UUID, *, kind: str | None = None) -> list[tuple[Relationship, Entity]]:
+    def neighbours(
+        self, entity_id: UUID, *, kind: str | None = None
+    ) -> list[tuple[Relationship, Entity]]:
         out = [
             (rel, self._entities[rel.dst])
             for rel in self._out.get(entity_id, [])

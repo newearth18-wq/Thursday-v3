@@ -18,10 +18,28 @@ class ComputerAgent(BaseAgent):
     spec = AgentSpec(
         name="computer",
         description="Operates the user's machines: applications, files, processes, screen.",
-        capabilities=["app_control", "file", "os", "open", "read", "write", "diagnostics", "screen"],
+        capabilities=[
+            "app_control",
+            "file",
+            "os",
+            "open",
+            "read",
+            "write",
+            "diagnostics",
+            "screen",
+        ],
         tools=[
-            "open_app", "close_app", "open_file", "read_file", "write_file", "list_dir",
-            "search_files", "process_status", "system_info", "read_active_window", "screenshot",
+            "open_app",
+            "close_app",
+            "open_file",
+            "read_file",
+            "write_file",
+            "list_dir",
+            "search_files",
+            "process_status",
+            "system_info",
+            "read_active_window",
+            "screenshot",
         ],
         permission_ceiling=PermissionLevel.MODIFY,
         default_budget=Budget(seconds=60, tool_calls=8, usd=0.02),
@@ -37,7 +55,9 @@ class ComputerAgent(BaseAgent):
         action = str(contract.inputs.get("action", ""))
         args = dict(contract.inputs.get("args", {}))
         if not action:
-            return AgentResult(agent=self.spec.name, ok=False, error="no action supplied in the contract")
+            return AgentResult(
+                agent=self.spec.name, ok=False, error="no action supplied in the contract"
+            )
 
         # SEE — read the machine's state before acting, so verification has a baseline.
         before = await self._observe(action, args, ctx)
@@ -45,14 +65,20 @@ class ComputerAgent(BaseAgent):
         # ACT
         result = await ctx.call_tool(
             ToolCall(
-                tool=action, args=args, task_id=contract.task_id, step_id=contract.step_id,
+                tool=action,
+                args=args,
+                task_id=contract.task_id,
+                step_id=contract.step_id,
                 reason=contract.objective,
             )
         )
         if not result.ok:
             return AgentResult(
-                agent=self.spec.name, ok=False, error=result.error or f"{action} failed",
-                tool_results=[result], evidence=[{"before": before}],
+                agent=self.spec.name,
+                ok=False,
+                error=result.error or f"{action} failed",
+                tool_results=[result],
+                evidence=[{"before": before}],
             )
 
         # VERIFY — an independent second look, not a re-read of the same return value.
@@ -78,8 +104,13 @@ class ComputerAgent(BaseAgent):
         """The SEE step. Cheap, read-only, and specific to what the action will change."""
         try:
             if action in ("open_app", "close_app") and args.get("name"):
-                probe = await ctx.call_tool(ToolCall(tool="process_status", args={"name": args["name"]}))
-                return {"processes": probe.data.get("processes", []), "running": probe.data.get("running")}
+                probe = await ctx.call_tool(
+                    ToolCall(tool="process_status", args={"name": args["name"]})
+                )
+                return {
+                    "processes": probe.data.get("processes", []),
+                    "running": probe.data.get("running"),
+                }
             if action in ("write_file", "delete", "move") and args.get("path"):
                 probe = await ctx.call_tool(
                     ToolCall(tool="list_dir", args={"path": _parent_of(str(args["path"]))})

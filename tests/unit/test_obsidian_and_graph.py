@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from itertools import pairwise
+
 import pytest
 
 from thursday.memory.graph import KnowledgeGraph
@@ -25,8 +27,11 @@ def test_the_vault_structure_matches_the_documented_layout(vault):
 def test_a_note_carries_frontmatter_that_links_it_back(vault):
     memory_id = new_id()
     path = vault.memory_note(
-        memory_id=memory_id, layer="semantic", content="โครงการ Alpha ใช้ pgvector",
-        source="user", confidence=0.9,
+        memory_id=memory_id,
+        layer="semantic",
+        content="โครงการ Alpha ใช้ pgvector",
+        source="user",
+        confidence=0.9,
     )
     text = path.read_text(encoding="utf-8")
     assert f"thursday_id: {memory_id}" in text
@@ -41,7 +46,9 @@ def test_a_note_carries_frontmatter_that_links_it_back(vault):
 def test_the_vault_refuses_credential_material_outright(vault):
     """§8 — redacting is not enough; a secret must never reach a plaintext vault at all."""
     with pytest.raises(SecretLeakBlocked):
-        vault.write_note(folder="00 Inbox", title="keys", body="OPENAI_API_KEY=sk-proj-abcdefghijklmnopqrstu")
+        vault.write_note(
+            folder="00 Inbox", title="keys", body="OPENAI_API_KEY=sk-proj-abcdefghijklmnopqrstu"
+        )
     with pytest.raises(SecretLeakBlocked):
         vault.write_note(folder="00 Inbox", title="ghp_abcdefghijklmnopqrstuvwx", body="fine")
     assert list((vault.root / "00 Inbox").iterdir()) == []
@@ -79,7 +86,7 @@ def test_search_finds_notes_by_content(vault):
 
 
 def test_filenames_are_made_safe_without_becoming_meaningless():
-    assert safe_filename('report: Q1/Q2 <draft>') == "report- Q1-Q2 -draft-"
+    assert safe_filename("report: Q1/Q2 <draft>") == "report- Q1-Q2 -draft-"
     assert safe_filename("") == "untitled"
     assert safe_filename("รายงานคะแนน") == "รายงานคะแนน"
 
@@ -122,7 +129,7 @@ def test_upsert_merges_attributes_instead_of_duplicating():
 def test_traversal_is_bounded_by_the_hop_limit():
     graph = KnowledgeGraph()
     chain = [graph.upsert_entity(kind="object", name=f"n{i}") for i in range(5)]
-    for a, b in zip(chain, chain[1:], strict=False):
+    for a, b in pairwise(chain):
         graph.relate(a, b, "next")
     assert len(graph.traverse(chain[0].id, hops=1)) == 1
     assert len(graph.traverse(chain[0].id, hops=3)) == 3

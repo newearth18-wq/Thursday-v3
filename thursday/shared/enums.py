@@ -30,12 +30,23 @@ _TERMINAL_STATES = frozenset({TaskState.COMPLETED, TaskState.FAILED, TaskState.C
 TASK_TRANSITIONS: dict[TaskState, frozenset[TaskState]] = {
     TaskState.NEW: frozenset({TaskState.PLANNING, TaskState.CANCELLED, TaskState.FAILED}),
     TaskState.PLANNING: frozenset(
-        {TaskState.RUNNING, TaskState.WAITING_APPROVAL, TaskState.BLOCKED,
-         TaskState.CANCELLED, TaskState.FAILED}
+        {
+            TaskState.RUNNING,
+            TaskState.WAITING_APPROVAL,
+            TaskState.BLOCKED,
+            TaskState.CANCELLED,
+            TaskState.FAILED,
+        }
     ),
     TaskState.RUNNING: frozenset(
-        {TaskState.WAITING, TaskState.WAITING_APPROVAL, TaskState.BLOCKED,
-         TaskState.VERIFYING, TaskState.CANCELLED, TaskState.FAILED}
+        {
+            TaskState.WAITING,
+            TaskState.WAITING_APPROVAL,
+            TaskState.BLOCKED,
+            TaskState.VERIFYING,
+            TaskState.CANCELLED,
+            TaskState.FAILED,
+        }
     ),
     TaskState.WAITING: frozenset({TaskState.RUNNING, TaskState.CANCELLED, TaskState.FAILED}),
     TaskState.WAITING_APPROVAL: frozenset(

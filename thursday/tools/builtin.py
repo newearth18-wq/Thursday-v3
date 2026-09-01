@@ -84,7 +84,9 @@ class MemorySearchTool:
         started = time.perf_counter()
         layers = [MemoryLayer(v) for v in call.args.get("layers", [])]
         records = await self._memory.recall(  # type: ignore[attr-defined]
-            MemoryQuery(text=str(call.args.get("query", "")), layers=layers, k=int(call.args.get("k", 6)))
+            MemoryQuery(
+                text=str(call.args.get("query", "")), layers=layers, k=int(call.args.get("k", 6))
+            )
         )
         return ToolResult(
             call_id=call.id,
@@ -94,8 +96,11 @@ class MemorySearchTool:
             data={
                 "memories": [
                     {
-                        "content": r.content, "layer": str(r.layer), "confidence": r.confidence,
-                        "source": str(r.source), "score": round(r.score or 0.0, 3),
+                        "content": r.content,
+                        "layer": str(r.layer),
+                        "confidence": r.confidence,
+                        "source": str(r.source),
+                        "score": round(r.score or 0.0, 3),
                     }
                     for r in records
                 ]
@@ -194,7 +199,9 @@ class ObsidianSearchTool:
 
     async def run(self, call: ToolCall, ctx: Any) -> ToolResult:
         started = time.perf_counter()
-        hits = self._vault.search(str(call.args.get("query", "")), limit=int(call.args.get("limit", 10)))  # type: ignore[attr-defined]
+        hits = self._vault.search(
+            str(call.args.get("query", "")), limit=int(call.args.get("limit", 10))
+        )  # type: ignore[attr-defined]
         return ToolResult(
             call_id=call.id,
             tool=self.spec.name,
@@ -220,7 +227,10 @@ class ClockTool:
     async def run(self, call: ToolCall, ctx: Any) -> ToolResult:
         now = datetime.now(UTC)
         return ToolResult(
-            call_id=call.id, tool=self.spec.name, ok=True, verified=True,
+            call_id=call.id,
+            tool=self.spec.name,
+            ok=True,
+            verified=True,
             data={"iso": now.isoformat(), "weekday": now.strftime("%A"), "epoch": now.timestamp()},
         )
 
@@ -260,7 +270,11 @@ class WebSearchTool:
             )
         results = await self._provider.search(str(call.args["query"]), k=int(call.args.get("k", 5)))  # type: ignore[attr-defined]
         return ToolResult(
-            call_id=call.id, tool=self.spec.name, ok=True, verified=True, data={"results": results},
+            call_id=call.id,
+            tool=self.spec.name,
+            ok=True,
+            verified=True,
+            data={"results": results},
             cost_usd=self.spec.cost_usd,
         )
 
@@ -268,93 +282,174 @@ class WebSearchTool:
 #: Device actions promoted to tools, with the spec the router reasons over.
 DEVICE_TOOL_SPECS: dict[str, ToolSpec] = {
     "open_app": ToolSpec(
-        name="open_app", description="Launch an application on a device and verify it started.",
-        capabilities=["app_control", "open"], permission=PermissionLevel.OPEN,
-        control_tier=ControlTier.OS_API, risk=RiskLevel.LOW, latency_ms=1500,
-        requires_device=True, local_only=True,
-        input_schema={"name": "string"}, output_schema={"app": "string", "pid": "int?"},
+        name="open_app",
+        description="Launch an application on a device and verify it started.",
+        capabilities=["app_control", "open"],
+        permission=PermissionLevel.OPEN,
+        control_tier=ControlTier.OS_API,
+        risk=RiskLevel.LOW,
+        latency_ms=1500,
+        requires_device=True,
+        local_only=True,
+        input_schema={"name": "string"},
+        output_schema={"app": "string", "pid": "int?"},
     ),
     "close_app": ToolSpec(
-        name="close_app", description="Close an application on a device.",
-        capabilities=["app_control"], permission=PermissionLevel.MODIFY,
-        control_tier=ControlTier.OS_API, risk=RiskLevel.LOW, latency_ms=900,
-        requires_device=True, local_only=True, input_schema={"name": "string"},
+        name="close_app",
+        description="Close an application on a device.",
+        capabilities=["app_control"],
+        permission=PermissionLevel.MODIFY,
+        control_tier=ControlTier.OS_API,
+        risk=RiskLevel.LOW,
+        latency_ms=900,
+        requires_device=True,
+        local_only=True,
+        input_schema={"name": "string"},
     ),
     "open_file": ToolSpec(
-        name="open_file", description="Open a file with its registered handler.",
-        capabilities=["file", "open"], permission=PermissionLevel.OPEN,
-        control_tier=ControlTier.OS_API, latency_ms=1200, requires_device=True, local_only=True,
+        name="open_file",
+        description="Open a file with its registered handler.",
+        capabilities=["file", "open"],
+        permission=PermissionLevel.OPEN,
+        control_tier=ControlTier.OS_API,
+        latency_ms=1200,
+        requires_device=True,
+        local_only=True,
         input_schema={"path": "string"},
     ),
     "read_file": ToolSpec(
-        name="read_file", description="Read a text file from a device.",
-        capabilities=["file", "read"], permission=PermissionLevel.READ,
-        control_tier=ControlTier.OS_API, latency_ms=80, requires_device=True, local_only=True,
+        name="read_file",
+        description="Read a text file from a device.",
+        capabilities=["file", "read"],
+        permission=PermissionLevel.READ,
+        control_tier=ControlTier.OS_API,
+        latency_ms=80,
+        requires_device=True,
+        local_only=True,
         input_schema={"path": "string"},
     ),
     "write_file": ToolSpec(
-        name="write_file", description="Write text to a file and verify the contents.",
-        capabilities=["file", "write"], permission=PermissionLevel.MODIFY,
-        control_tier=ControlTier.OS_API, risk=RiskLevel.MEDIUM, latency_ms=120,
-        requires_device=True, local_only=True, input_schema={"path": "string", "content": "string"},
+        name="write_file",
+        description="Write text to a file and verify the contents.",
+        capabilities=["file", "write"],
+        permission=PermissionLevel.MODIFY,
+        control_tier=ControlTier.OS_API,
+        risk=RiskLevel.MEDIUM,
+        latency_ms=120,
+        requires_device=True,
+        local_only=True,
+        input_schema={"path": "string", "content": "string"},
     ),
     "list_dir": ToolSpec(
-        name="list_dir", description="List the contents of a directory.",
-        capabilities=["file", "read"], permission=PermissionLevel.READ,
-        control_tier=ControlTier.OS_API, latency_ms=60, requires_device=True, local_only=True,
+        name="list_dir",
+        description="List the contents of a directory.",
+        capabilities=["file", "read"],
+        permission=PermissionLevel.READ,
+        control_tier=ControlTier.OS_API,
+        latency_ms=60,
+        requires_device=True,
+        local_only=True,
         input_schema={"path": "string"},
     ),
     "search_files": ToolSpec(
-        name="search_files", description="Find files by glob pattern, newest first.",
-        capabilities=["file", "search"], permission=PermissionLevel.READ,
-        control_tier=ControlTier.OS_API, latency_ms=400, requires_device=True, local_only=True,
+        name="search_files",
+        description="Find files by glob pattern, newest first.",
+        capabilities=["file", "search"],
+        permission=PermissionLevel.READ,
+        control_tier=ControlTier.OS_API,
+        latency_ms=400,
+        requires_device=True,
+        local_only=True,
         input_schema={"root": "string", "pattern": "string"},
     ),
     "delete": ToolSpec(
-        name="delete", description="Delete a path (moved to quarantine so it stays undoable).",
-        capabilities=["file", "delete"], permission=PermissionLevel.MODIFY,
-        control_tier=ControlTier.OS_API, risk=RiskLevel.HIGH, latency_ms=100,
-        requires_device=True, local_only=True, reversible=True, input_schema={"path": "string"},
+        name="delete",
+        description="Delete a path (moved to quarantine so it stays undoable).",
+        capabilities=["file", "delete"],
+        permission=PermissionLevel.MODIFY,
+        control_tier=ControlTier.OS_API,
+        risk=RiskLevel.HIGH,
+        latency_ms=100,
+        requires_device=True,
+        local_only=True,
+        reversible=True,
+        input_schema={"path": "string"},
     ),
     "screenshot": ToolSpec(
-        name="screenshot", description="Capture the screen of a device.",
-        capabilities=["screen", "vision"], permission=PermissionLevel.READ,
-        control_tier=ControlTier.OS_API, latency_ms=600, requires_device=True, local_only=True,
+        name="screenshot",
+        description="Capture the screen of a device.",
+        capabilities=["screen", "vision"],
+        permission=PermissionLevel.READ,
+        control_tier=ControlTier.OS_API,
+        latency_ms=600,
+        requires_device=True,
+        local_only=True,
     ),
     "read_active_window": ToolSpec(
-        name="read_active_window", description="Report the focused window title.",
-        capabilities=["screen"], permission=PermissionLevel.READ,
-        control_tier=ControlTier.OS_API, latency_ms=200, requires_device=True, local_only=True,
+        name="read_active_window",
+        description="Report the focused window title.",
+        capabilities=["screen"],
+        permission=PermissionLevel.READ,
+        control_tier=ControlTier.OS_API,
+        latency_ms=200,
+        requires_device=True,
+        local_only=True,
     ),
     "process_status": ToolSpec(
-        name="process_status", description="Check whether a process is running on a device.",
-        capabilities=["app_control", "read"], permission=PermissionLevel.READ,
-        control_tier=ControlTier.OS_API, latency_ms=250, requires_device=True, local_only=True,
+        name="process_status",
+        description="Check whether a process is running on a device.",
+        capabilities=["app_control", "read"],
+        permission=PermissionLevel.READ,
+        control_tier=ControlTier.OS_API,
+        latency_ms=250,
+        requires_device=True,
+        local_only=True,
         input_schema={"name": "string"},
     ),
     "system_info": ToolSpec(
-        name="system_info", description="Report a device's OS, CPU, memory and disk.",
-        capabilities=["read", "diagnostics"], permission=PermissionLevel.READ,
-        control_tier=ControlTier.OS_API, latency_ms=300, requires_device=True, local_only=True,
+        name="system_info",
+        description="Report a device's OS, CPU, memory and disk.",
+        capabilities=["read", "diagnostics"],
+        permission=PermissionLevel.READ,
+        control_tier=ControlTier.OS_API,
+        latency_ms=300,
+        requires_device=True,
+        local_only=True,
     ),
     "run_shell": ToolSpec(
-        name="run_shell", description="Run a shell command. High risk; approval required.",
-        capabilities=["shell"], permission=PermissionLevel.MODIFY,
-        control_tier=ControlTier.OS_API, risk=RiskLevel.HIGH, latency_ms=800,
-        requires_device=True, local_only=True, reversible=False,
+        name="run_shell",
+        description="Run a shell command. High risk; approval required.",
+        capabilities=["shell"],
+        permission=PermissionLevel.MODIFY,
+        control_tier=ControlTier.OS_API,
+        risk=RiskLevel.HIGH,
+        latency_ms=800,
+        requires_device=True,
+        local_only=True,
+        reversible=False,
         input_schema={"command": "string"},
     ),
     "notify": ToolSpec(
-        name="notify", description="Show a notification on a device.",
-        capabilities=["notify"], permission=PermissionLevel.OPEN,
-        control_tier=ControlTier.OS_API, latency_ms=150, requires_device=True, local_only=True,
+        name="notify",
+        description="Show a notification on a device.",
+        capabilities=["notify"],
+        permission=PermissionLevel.OPEN,
+        control_tier=ControlTier.OS_API,
+        latency_ms=150,
+        requires_device=True,
+        local_only=True,
         input_schema={"title": "string", "body": "string"},
     ),
 }
 
 
 def register_builtin_tools(
-    registry: object, *, hub: object, memory: object, vault: object, web_search_provider: object | None = None
+    registry: object,
+    *,
+    hub: object,
+    memory: object,
+    vault: object,
+    web_search_provider: object | None = None,
 ) -> None:
     """Wire the standard toolset. Called once by the DI container."""
     for action_name, spec in DEVICE_TOOL_SPECS.items():

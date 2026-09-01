@@ -50,7 +50,9 @@ class WhisperSTT:
         import io
 
         def run() -> str:
-            segments, _ = self._load().transcribe(io.BytesIO(audio), language=language, vad_filter=True)
+            segments, _ = self._load().transcribe(
+                io.BytesIO(audio), language=language, vad_filter=True
+            )
             return " ".join(segment.text for segment in segments).strip()
 
         return await asyncio.to_thread(run)
@@ -66,7 +68,9 @@ class TextStubTTS:
     name = "text-stub"
     local = True
 
-    async def synthesize(self, text: str, *, mode: str = "NORMAL", voice: str | None = None) -> bytes:
+    async def synthesize(
+        self, text: str, *, mode: str = "NORMAL", voice: str | None = None
+    ) -> bytes:
         profile = VOICE_PROFILES.get(VoiceMode(mode), VOICE_PROFILES[VoiceMode.NORMAL])
         return json.dumps(
             {"text": text, "mode": mode, "voice": voice or "thursday-neutral", **profile},
@@ -84,14 +88,22 @@ class PiperTTS:
         self.model_path = model_path
         self.sample_rate = sample_rate
 
-    async def synthesize(self, text: str, *, mode: str = "NORMAL", voice: str | None = None) -> bytes:
+    async def synthesize(
+        self, text: str, *, mode: str = "NORMAL", voice: str | None = None
+    ) -> bytes:
         import asyncio
 
         profile = VOICE_PROFILES.get(VoiceMode(mode), VOICE_PROFILES[VoiceMode.NORMAL])
         process = await asyncio.create_subprocess_exec(
-            "piper", "--model", self.model_path, "--length_scale", str(1 / float(profile["rate"])),
-            "--output_file", "-",
-            stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE,
+            "piper",
+            "--model",
+            self.model_path,
+            "--length_scale",
+            str(1 / float(profile["rate"])),
+            "--output_file",
+            "-",
+            stdin=asyncio.subprocess.PIPE,
+            stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.DEVNULL,
         )
         stdout, _ = await process.communicate(text.encode())
@@ -116,7 +128,9 @@ class KeywordWakeWord:
 class EnergyVAD:
     """Voice activity detection by frame energy — enough to segment push-to-talk audio."""
 
-    def __init__(self, *, threshold: float = 0.02, frame_ms: int = 30, sample_rate: int = 16000) -> None:
+    def __init__(
+        self, *, threshold: float = 0.02, frame_ms: int = 30, sample_rate: int = 16000
+    ) -> None:
         self.threshold = threshold
         self.frame_ms = frame_ms
         self.sample_rate = sample_rate

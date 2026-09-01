@@ -33,9 +33,7 @@ _PRIVATE_EN = re.compile(
     r"phone\s*number|do\s*not\s*share)\b"
 )
 _PRIVATE_TH = re.compile(r"(ส่วนตัว|ห้ามเผยแพร่|ความลับ|ลับเฉพาะ|ที่อยู่บ้าน|เบอร์โทร)")
-_PUBLIC_EN = re.compile(
-    r"(?i)\b(weather|news|definition|wikipedia|public\s*holiday|time\s*zone)\b"
-)
+_PUBLIC_EN = re.compile(r"(?i)\b(weather|news|definition|wikipedia|public\s*holiday|time\s*zone)\b")
 _PUBLIC_TH = re.compile(r"(พยากรณ์อากาศ|สภาพอากาศ|ข่าววันนี้|แปลว่า|วันหยุดราชการ)")
 
 

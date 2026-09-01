@@ -31,8 +31,11 @@ class BaseAgent(ABC):
                 Event(kind="agent.failed", payload={"agent": self.spec.name, "error": str(exc)})
             )
             return AgentResult(
-                agent=self.spec.name, ok=False, error=f"{type(exc).__name__}: {exc}",
-                duration_ms=(time.perf_counter() - started) * 1000, spend=ctx.spend,
+                agent=self.spec.name,
+                ok=False,
+                error=f"{type(exc).__name__}: {exc}",
+                duration_ms=(time.perf_counter() - started) * 1000,
+                spend=ctx.spend,
             )
 
         result.duration_ms = (time.perf_counter() - started) * 1000

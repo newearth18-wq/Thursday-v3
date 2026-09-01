@@ -48,7 +48,9 @@ class StepOutcome:
 
     @property
     def ok(self) -> bool:
-        return bool(self.result and self.result.ok and self.verification and self.verification.passed)
+        return bool(
+            self.result and self.result.ok and self.verification and self.verification.passed
+        )
 
 
 @dataclass
@@ -112,7 +114,7 @@ class AgentOrchestrator:
         await self._tasks.set_plan(task.id, plan)  # type: ignore[attr-defined]
         await self._tasks.transition(task.id, TaskState.RUNNING)  # type: ignore[attr-defined]
 
-        while (ready := plan.ready_steps()):
+        while ready := plan.ready_steps():
             if self._tasks.is_cancelled(task.id):  # type: ignore[attr-defined]
                 break
             # Independent steps run together; dependent ones wait for the frontier to clear.
@@ -130,7 +132,9 @@ class AgentOrchestrator:
                     step.status = TaskState.FAILED
                     step.error = str(step_outcome)
                     outcome.outcomes.append(
-                        StepOutcome(step=step, result=None, verification=None, error=str(step_outcome))
+                        StepOutcome(
+                            step=step, result=None, verification=None, error=str(step_outcome)
+                        )
                     )
                     return outcome
                 outcome.outcomes.append(step_outcome)
@@ -190,25 +194,34 @@ class AgentOrchestrator:
 
             try:
                 result = await asyncio.wait_for(
-                    agent.run(contract, ctx), timeout=contract.deadline_s  # type: ignore[attr-defined]
+                    agent.run(contract, ctx),
+                    timeout=contract.deadline_s,  # type: ignore[attr-defined]
                 )
             except ApprovalRequired:
                 raise
             except PermissionDenied as exc:
                 # Not retryable: doing it again produces the same refusal.
-                return StepOutcome(step=step, result=None, verification=None, error=exc.message, attempts=attempt)
+                return StepOutcome(
+                    step=step, result=None, verification=None, error=exc.message, attempts=attempt
+                )
             except (DeviceUnavailable, TimeoutError) as exc:
                 critique = f"the previous attempt failed: {exc}"
-                last = StepOutcome(step=step, result=None, verification=None, error=str(exc), attempts=attempt)
+                last = StepOutcome(
+                    step=step, result=None, verification=None, error=str(exc), attempts=attempt
+                )
                 continue
             except BudgetExceeded as exc:
-                return StepOutcome(step=step, result=None, verification=None, error=exc.message, attempts=attempt)
+                return StepOutcome(
+                    step=step, result=None, verification=None, error=exc.message, attempts=attempt
+                )
 
             self._tasks.charge(task.id, result.spend)  # type: ignore[attr-defined]
             verification = await self._supervisor.verify(  # type: ignore[attr-defined]
                 contract, result, attempt=attempt, max_attempts=step.max_attempts
             )
-            outcome = StepOutcome(step=step, result=result, verification=verification, attempts=attempt)
+            outcome = StepOutcome(
+                step=step, result=result, verification=verification, attempts=attempt
+            )
             self._agents.record_outcome(agent.spec.name, success=verification.passed)  # type: ignore[attr-defined]
 
             if verification.passed:
@@ -244,7 +257,9 @@ class AgentOrchestrator:
             step.name = alt.spec.name  # type: ignore[attr-defined]
             return await self._run_step(task, step, context, wait_for_approval)
 
-        return last or StepOutcome(step=step, result=None, verification=None, error="the step produced no result")
+        return last or StepOutcome(
+            step=step, result=None, verification=None, error="the step produced no result"
+        )
 
     # ------------------------------------------------------------------ selection
 
@@ -258,12 +273,15 @@ class AgentOrchestrator:
         )
         if candidate is None:
             raise ThursdayError(
-                f"no agent is available for {step.name!r}", step=step.name,
+                f"no agent is available for {step.name!r}",
+                step=step.name,
                 capabilities=_capabilities_for(step),
             )
         return self._agents.get(candidate.spec.name)  # type: ignore[attr-defined]
 
-    def _alternative_agent(self, failed: object, step: PlanStep, context: ContextPackage) -> object | None:
+    def _alternative_agent(
+        self, failed: object, step: PlanStep, context: ContextPackage
+    ) -> object | None:
         candidate = self._agents.select(  # type: ignore[attr-defined]
             capabilities=_capabilities_for(step),
             available_tools=self._tools.names(),  # type: ignore[attr-defined]
@@ -273,7 +291,9 @@ class AgentOrchestrator:
             return None
         return self._agents.get(candidate.spec.name)  # type: ignore[attr-defined]
 
-    def _resolve_device(self, step: PlanStep, context: ContextPackage) -> tuple[UUID | None, str | None]:
+    def _resolve_device(
+        self, step: PlanStep, context: ContextPackage
+    ) -> tuple[UUID | None, str | None]:
         if step.kind is not StepKind.AGENT or not step.args.get("action"):
             return context.world.active_device_id, context.world.active_device_name
         resolution = self._device_router.resolve(  # type: ignore[attr-defined]

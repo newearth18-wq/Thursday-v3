@@ -44,10 +44,21 @@ class FakeAdapter(OSAdapter):
 
     def capabilities(self) -> DeviceCapabilities:
         return DeviceCapabilities(
-            open_app=True, close_app=True, open_file=True, write_file=True, delete_file=True,
-            list_dir=True, search_files=True, run_shell=True, process_status=True,
-            system_info=True, read_active_window=True, clipboard=True, notify=True,
-            volume=True, speaker=True,
+            open_app=True,
+            close_app=True,
+            open_file=True,
+            write_file=True,
+            delete_file=True,
+            list_dir=True,
+            search_files=True,
+            run_shell=True,
+            process_status=True,
+            system_info=True,
+            read_active_window=True,
+            clipboard=True,
+            notify=True,
+            volume=True,
+            speaker=True,
         )
 
     def can_read_window(self) -> bool:

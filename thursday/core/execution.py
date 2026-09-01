@@ -98,10 +98,16 @@ class ToolExecutor:
         if verdict.decision is PolicyDecision.BLOCK:
             self._audit.record(  # type: ignore[attr-defined]
                 AuditEntry(
-                    actor="agent" if agent else "thursday", agent=agent, tool=call.tool,
-                    action=call.tool, resource=resource, task_id=call.task_id,
-                    input_summary=redact_dict(call.args), result="blocked",
-                    permission_decision=verdict.decision.value, error=verdict.reason,
+                    actor="agent" if agent else "thursday",
+                    agent=agent,
+                    tool=call.tool,
+                    action=call.tool,
+                    resource=resource,
+                    task_id=call.task_id,
+                    input_summary=redact_dict(call.args),
+                    result="blocked",
+                    permission_decision=verdict.decision.value,
+                    error=verdict.reason,
                 )
             )
             raise PermissionDenied(verdict.reason, tool=call.tool, rule=verdict.rule)
@@ -110,11 +116,17 @@ class ToolExecutor:
         if verdict.decision is PolicyDecision.ASK:
             approval = await self._approvals.request(  # type: ignore[attr-defined]
                 ApprovalRequest(
-                    action=call.tool, agent=agent, device_id=call.device_id,
-                    device_name=device_name, resource=resource, risk=verdict.risk,
-                    level=verdict.level, reversible=spec.reversible,
+                    action=call.tool,
+                    agent=agent,
+                    device_id=call.device_id,
+                    device_name=device_name,
+                    resource=resource,
+                    risk=verdict.risk,
+                    level=verdict.level,
+                    reversible=spec.reversible,
                     expected_outcome=call.reason or spec.description,
-                    task_id=call.task_id, step_id=call.step_id,
+                    task_id=call.task_id,
+                    step_id=call.step_id,
                 )
             )
             approval_id = approval.id
@@ -126,13 +138,21 @@ class ToolExecutor:
             if decided.state.value != "approved":
                 self._audit.record(  # type: ignore[attr-defined]
                     AuditEntry(
-                        actor="user", agent=agent, tool=call.tool, action=call.tool,
-                        resource=resource, task_id=call.task_id, result="blocked",
-                        permission_decision=f"ASK/{decided.state.value}", approval_id=approval.id,
+                        actor="user",
+                        agent=agent,
+                        tool=call.tool,
+                        action=call.tool,
+                        resource=resource,
+                        task_id=call.task_id,
+                        result="blocked",
+                        permission_decision=f"ASK/{decided.state.value}",
+                        approval_id=approval.id,
                     )
                 )
                 raise PermissionDenied(
-                    f"the request was {decided.state.value}", tool=call.tool, approval_id=str(approval.id)
+                    f"the request was {decided.state.value}",
+                    tool=call.tool,
+                    approval_id=str(approval.id),
                 )
 
         started = time.perf_counter()
@@ -141,16 +161,26 @@ class ToolExecutor:
         except Exception as exc:
             self._audit.record(  # type: ignore[attr-defined]
                 AuditEntry(
-                    actor="agent" if agent else "thursday", agent=agent, tool=call.tool,
-                    action=call.tool, resource=resource, task_id=call.task_id,
-                    input_summary=redact_dict(call.args), result="failed",
-                    permission_decision=verdict.decision.value, approval_id=approval_id,
+                    actor="agent" if agent else "thursday",
+                    agent=agent,
+                    tool=call.tool,
+                    action=call.tool,
+                    resource=resource,
+                    task_id=call.task_id,
+                    input_summary=redact_dict(call.args),
+                    result="failed",
+                    permission_decision=verdict.decision.value,
+                    approval_id=approval_id,
                     error=f"{type(exc).__name__}: {exc}",
                 )
             )
             await self._bus.publish(  # type: ignore[attr-defined]
-                Event(kind="tool.failed", task_id=call.task_id, device_id=call.device_id,
-                      payload={"tool": call.tool, "error": str(exc)})
+                Event(
+                    kind="tool.failed",
+                    task_id=call.task_id,
+                    device_id=call.device_id,
+                    payload={"tool": call.tool, "error": str(exc)},
+                )
             )
             raise
 
@@ -160,27 +190,39 @@ class ToolExecutor:
         if self._tasks is not None and call.task_id is not None:
             self._tasks.charge(  # type: ignore[attr-defined]
                 call.task_id,
-                Spend(tool_calls=1, usd=result.cost_usd,
-                      seconds=(time.perf_counter() - started)),
+                Spend(tool_calls=1, usd=result.cost_usd, seconds=(time.perf_counter() - started)),
             )
 
         self._audit.record(  # type: ignore[attr-defined]
             AuditEntry(
-                actor="agent" if agent else "thursday", agent=agent, tool=call.tool,
-                action=call.tool, resource=resource, task_id=call.task_id,
-                device_id=call.device_id, input_summary=redact_dict(call.args),
+                actor="agent" if agent else "thursday",
+                agent=agent,
+                tool=call.tool,
+                action=call.tool,
+                resource=resource,
+                task_id=call.task_id,
+                device_id=call.device_id,
+                input_summary=redact_dict(call.args),
                 output_summary=redact_dict({"evidence": result.evidence}),
-                result="ok" if result.ok and result.verified else ("failed" if not result.ok else "unverified"),
-                permission_decision=verdict.decision.value, approval_id=approval_id,
+                result="ok"
+                if result.ok and result.verified
+                else ("failed" if not result.ok else "unverified"),
+                permission_decision=verdict.decision.value,
+                approval_id=approval_id,
                 error=result.error,
             )
         )
         await self._bus.publish(  # type: ignore[attr-defined]
             Event(
-                kind="tool.executed", task_id=call.task_id, device_id=call.device_id,
+                kind="tool.executed",
+                task_id=call.task_id,
+                device_id=call.device_id,
                 payload={
-                    "tool": call.tool, "resource": resource, "ok": result.ok,
-                    "verified": result.verified, "agent": agent,
+                    "tool": call.tool,
+                    "resource": resource,
+                    "ok": result.ok,
+                    "verified": result.verified,
+                    "agent": agent,
                 },
             )
         )
@@ -246,11 +288,15 @@ class AgentContext:
         return await self._memory.write(write)  # type: ignore[attr-defined]
 
     async def think(self, request: LLMRequest) -> LLMResponse:
-        request = request.model_copy(update={"sensitivity": max(request.sensitivity, self.sensitivity)})
+        request = request.model_copy(
+            update={"sensitivity": max(request.sensitivity, self.sensitivity)}
+        )
         response, decision = await self._models.complete(request, offline=self.offline)  # type: ignore[attr-defined]
         self.spend.tokens += response.tokens_in + response.tokens_out
         self.spend.usd += response.cost_usd
-        log.debug("agent_thought", agent=self.agent, model=decision.provider_name, tier=str(decision.tier))
+        log.debug(
+            "agent_thought", agent=self.agent, model=decision.provider_name, tier=str(decision.tier)
+        )
         return response
 
     async def emit(self, event: Event) -> None:

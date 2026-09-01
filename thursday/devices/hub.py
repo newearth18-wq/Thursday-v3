@@ -104,7 +104,8 @@ class WebSocketDeviceSession:
         except TimeoutError as exc:
             raise DeviceActionFailed(
                 f"{self.name} did not answer within {action.timeout_s:g}s",
-                device=self.name, action=action.action,
+                device=self.name,
+                action=action.action,
             ) from exc
         finally:
             self._pending.pop(action.id, None)
@@ -160,8 +161,12 @@ class DeviceHub:
             location_context=location_context,
         )
         self._known[session.device_id] = summary
-        log.info("device_connected", device=session.name, os=session.os, transport=session.transport)
-        await self._emit("device.connected", session.device_id, {"name": session.name, "os": session.os})
+        log.info(
+            "device_connected", device=session.name, os=session.os, transport=session.transport
+        )
+        await self._emit(
+            "device.connected", session.device_id, {"name": session.name, "os": session.os}
+        )
         return summary
 
     async def unregister(self, device_id: UUID) -> None:
@@ -210,7 +215,8 @@ class DeviceHub:
             # Refuse here, before dispatch: an unsupported action must not look like a failure.
             raise DeviceActionFailed(
                 f"{session.name} does not support {action.action!r}",
-                device=session.name, capability=spec.capability,
+                device=session.name,
+                capability=spec.capability,
             )
 
         started = time.perf_counter()
@@ -247,7 +253,9 @@ class DeviceHub:
         log.warning("all_devices_disconnected", count=len(device_ids), reason=reason)
         return len(device_ids)
 
-    async def _emit(self, kind: str, device_id: UUID, payload: dict, *, task_id: UUID | None = None) -> None:
+    async def _emit(
+        self, kind: str, device_id: UUID, payload: dict, *, task_id: UUID | None = None
+    ) -> None:
         if self._bus is None:
             return
         await self._bus.publish(  # type: ignore[attr-defined]

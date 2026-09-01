@@ -51,10 +51,14 @@ async def test_completion_requires_a_passing_verification(tasks):
     await tasks.transition(task.id, TaskState.VERIFYING)
 
     with pytest.raises(ThursdayError):
-        await tasks.complete(task.id, result={}, verification=VerificationReport(verdict=AgentVerdict.RETRY))
+        await tasks.complete(
+            task.id, result={}, verification=VerificationReport(verdict=AgentVerdict.RETRY)
+        )
     assert tasks.get(task.id).status is TaskState.VERIFYING
 
-    await tasks.complete(task.id, result={"ok": True}, verification=VerificationReport(verdict=AgentVerdict.PASS))
+    await tasks.complete(
+        task.id, result={"ok": True}, verification=VerificationReport(verdict=AgentVerdict.PASS)
+    )
     assert tasks.get(task.id).status is TaskState.COMPLETED
     assert tasks.get(task.id).progress == 1.0
 

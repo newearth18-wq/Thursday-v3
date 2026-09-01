@@ -81,20 +81,36 @@ _DEFAULTS: tuple[ActionPolicy, ...] = (
     ActionPolicy("run_shell", PermissionLevel.MODIFY, PolicyDecision.ASK, RiskLevel.HIGH, False),
     ActionPolicy("run_script", PermissionLevel.MODIFY, PolicyDecision.ASK, RiskLevel.HIGH, False),
     ActionPolicy("send_email", PermissionLevel.EXTERNAL, PolicyDecision.ASK, RiskLevel.HIGH, False),
-    ActionPolicy("send_message", PermissionLevel.EXTERNAL, PolicyDecision.ASK, RiskLevel.HIGH, False),
-    ActionPolicy("http_post", PermissionLevel.EXTERNAL, PolicyDecision.ASK, RiskLevel.MEDIUM, False),
+    ActionPolicy(
+        "send_message", PermissionLevel.EXTERNAL, PolicyDecision.ASK, RiskLevel.HIGH, False
+    ),
+    ActionPolicy(
+        "http_post", PermissionLevel.EXTERNAL, PolicyDecision.ASK, RiskLevel.MEDIUM, False
+    ),
     ActionPolicy("calendar_write", PermissionLevel.EXTERNAL, PolicyDecision.ASK, RiskLevel.MEDIUM),
-    ActionPolicy("purchase", PermissionLevel.EXTERNAL, PolicyDecision.ASK, RiskLevel.CRITICAL, False),
+    ActionPolicy(
+        "purchase", PermissionLevel.EXTERNAL, PolicyDecision.ASK, RiskLevel.CRITICAL, False
+    ),
     ActionPolicy("publish", PermissionLevel.EXTERNAL, PolicyDecision.ASK, RiskLevel.HIGH, False),
     # level 4–5: the machine itself
-    ActionPolicy("install_software", PermissionLevel.SYSTEM, PolicyDecision.ASK, RiskLevel.HIGH, False),
-    ActionPolicy("uninstall_software", PermissionLevel.SYSTEM, PolicyDecision.ASK, RiskLevel.HIGH, False),
-    ActionPolicy("service_control", PermissionLevel.SYSTEM, PolicyDecision.ASK, RiskLevel.HIGH, False),
-    ActionPolicy("registry_write", PermissionLevel.SYSTEM, PolicyDecision.ASK, RiskLevel.HIGH, False),
+    ActionPolicy(
+        "install_software", PermissionLevel.SYSTEM, PolicyDecision.ASK, RiskLevel.HIGH, False
+    ),
+    ActionPolicy(
+        "uninstall_software", PermissionLevel.SYSTEM, PolicyDecision.ASK, RiskLevel.HIGH, False
+    ),
+    ActionPolicy(
+        "service_control", PermissionLevel.SYSTEM, PolicyDecision.ASK, RiskLevel.HIGH, False
+    ),
+    ActionPolicy(
+        "registry_write", PermissionLevel.SYSTEM, PolicyDecision.ASK, RiskLevel.HIGH, False
+    ),
     ActionPolicy("power", PermissionLevel.SYSTEM, PolicyDecision.ASK, RiskLevel.HIGH, False),
     ActionPolicy("lock", PermissionLevel.SYSTEM, PolicyDecision.ASK, RiskLevel.LOW),
     ActionPolicy("elevate", PermissionLevel.ADMIN, PolicyDecision.ASK, RiskLevel.CRITICAL, False),
-    ActionPolicy("credential_change", PermissionLevel.ADMIN, PolicyDecision.ASK, RiskLevel.CRITICAL, False),
+    ActionPolicy(
+        "credential_change", PermissionLevel.ADMIN, PolicyDecision.ASK, RiskLevel.CRITICAL, False
+    ),
 )
 
 
@@ -109,7 +125,9 @@ class PolicyTable:
         """Unknown actions are ASK, not AUTO — fail closed."""
         policy = self._policies.get(action)
         if policy is None:
-            return ActionPolicy(action, PermissionLevel.MODIFY, PolicyDecision.ASK, RiskLevel.MEDIUM)
+            return ActionPolicy(
+                action, PermissionLevel.MODIFY, PolicyDecision.ASK, RiskLevel.MEDIUM
+            )
         override = self._overrides.get(action)
         if override is None or action in HARD_BLOCKED:
             return policy
@@ -117,7 +135,11 @@ class PolicyTable:
             # A user may loosen level 0–3, but never silently auto-approve system/admin work.
             return policy
         return ActionPolicy(
-            policy.action, policy.level, override, policy.risk, policy.reversible,
+            policy.action,
+            policy.level,
+            override,
+            policy.risk,
+            policy.reversible,
             policy.bulk_threshold,
         )
 

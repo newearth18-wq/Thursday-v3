@@ -34,8 +34,8 @@ async def test_a_launch_is_verified_by_observing_the_process(executor):
 async def test_a_launch_that_leaves_no_process_is_reported_unverified(tmp_path):
     executor = NodeExecutor(FakeAdapter(fail_launch=True), allowed_roots=[tmp_path])
     result = await executor.execute(DeviceAction(action="open_app", args={"name": "chrome"}))
-    assert result.ok is True          # the command itself did not error
-    assert result.verified is False   # ...but nothing confirms it worked
+    assert result.ok is True  # the command itself did not error
+    assert result.verified is False  # ...but nothing confirms it worked
     assert result.succeeded is False  # so it is not a success
     assert result.undo is None
 
@@ -78,7 +78,9 @@ async def test_the_node_refuses_paths_outside_its_allowed_roots(executor):
 
 async def test_traversal_out_of_a_root_is_refused(executor, tmp_path):
     result = await executor.execute(
-        DeviceAction(action="read_file", args={"path": str(tmp_path / ".." / ".." / "etc" / "passwd")})
+        DeviceAction(
+            action="read_file", args={"path": str(tmp_path / ".." / ".." / "etc" / "passwd")}
+        )
     )
     assert not result.ok
 
@@ -110,7 +112,9 @@ async def test_the_hub_refuses_an_unadvertised_action_before_dispatch(tmp_path):
     adapter.capabilities = lambda: DeviceCapabilities(open_app=True)
     hub = DeviceHub()
     session = LoopbackDeviceSession(
-        device_id=new_id(), name="Limited-PC", executor=NodeExecutor(adapter, allowed_roots=[tmp_path])
+        device_id=new_id(),
+        name="Limited-PC",
+        executor=NodeExecutor(adapter, allowed_roots=[tmp_path]),
     )
     await hub.register(session)
     with pytest.raises(DeviceActionFailed, match="does not support"):
@@ -120,7 +124,8 @@ async def test_the_hub_refuses_an_unadvertised_action_before_dispatch(tmp_path):
 async def test_invoking_a_disconnected_device_says_so(tmp_path):
     hub = DeviceHub()
     session = LoopbackDeviceSession(
-        device_id=new_id(), name="Gone-PC",
+        device_id=new_id(),
+        name="Gone-PC",
         executor=NodeExecutor(FakeAdapter(), allowed_roots=[tmp_path]),
     )
     await hub.register(session)
@@ -145,8 +150,12 @@ def test_protocol_frames_round_trip():
     from thursday.shared.models import DeviceCapabilities, DeviceTelemetry
 
     hello = Hello(
-        device_id=new_id(), name="Office-PC", os="Windows",
-        capabilities=DeviceCapabilities(open_app=True), telemetry=DeviceTelemetry(), nonce="abc",
+        device_id=new_id(),
+        name="Office-PC",
+        os="Windows",
+        capabilities=DeviceCapabilities(open_app=True),
+        telemetry=DeviceTelemetry(),
+        nonce="abc",
     )
     decoded = parse_frame(dump_frame(hello))
     assert isinstance(decoded, Hello)
@@ -171,14 +180,17 @@ async def two_devices(tmp_path):
     office, home = new_id(), new_id()
     await hub.register(
         LoopbackDeviceSession(
-            device_id=office, name="Office-PC",
+            device_id=office,
+            name="Office-PC",
             executor=NodeExecutor(FakeAdapter(), allowed_roots=[tmp_path]),
         ),
         location_context="office",
     )
     await hub.register(
         LoopbackDeviceSession(
-            device_id=home, name="Home-Laptop", kind="laptop",
+            device_id=home,
+            name="Home-Laptop",
+            kind="laptop",
             executor=NodeExecutor(FakeAdapter(), allowed_roots=[tmp_path]),
         ),
         location_context="home",
@@ -229,7 +241,9 @@ async def test_an_explicit_location_narrows_and_never_widens(two_devices):
 async def test_a_required_capability_filters_the_candidates(two_devices):
     hub, office, _ = two_devices
     resolution = DeviceRouter(hub).resolve(
-        "this", world=WorldStateSnapshot(active_device_id=office),
-        origin_device_id=office, required_capability="camera",
+        "this",
+        world=WorldStateSnapshot(active_device_id=office),
+        origin_device_id=office,
+        required_capability="camera",
     )
     assert resolution.device is None

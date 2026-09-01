@@ -92,9 +92,13 @@ class ContextEngine:
         # A privacy zone can strip a surface out of the package entirely (§68) — the
         # cheapest way to guarantee it never reaches a model is for it not to be here.
         if self._zones is not None:
-            if self._zones.forbids("screen", device_id=turn.device_id, location=world.location_context):
+            if self._zones.forbids(
+                "screen", device_id=turn.device_id, location=world.location_context
+            ):
                 screen = None
-            if self._zones.forbids("camera", device_id=turn.device_id, location=world.location_context):
+            if self._zones.forbids(
+                "camera", device_id=turn.device_id, location=world.location_context
+            ):
                 gesture = None
 
         package = ContextPackage(

@@ -99,7 +99,9 @@ async def device_socket(websocket: WebSocket) -> None:
         frame = parse_frame(hello_raw)
         if not isinstance(frame, Hello):
             await websocket.send_text(
-                ErrorFrame(code="protocol_error", message="expected HELLO", fatal=True).model_dump_json()
+                ErrorFrame(
+                    code="protocol_error", message="expected HELLO", fatal=True
+                ).model_dump_json()
             )
             await websocket.close(code=4400)
             return

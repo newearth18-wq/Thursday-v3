@@ -31,7 +31,9 @@ class WorldState:
         self._snapshot.online_devices = list(devices)
         self._snapshot.updated_at = datetime.now(UTC)
 
-    def note_action(self, *, action: str, resource: str = "", device_id: UUID | None = None) -> None:
+    def note_action(
+        self, *, action: str, resource: str = "", device_id: UUID | None = None
+    ) -> None:
         """Feeds "ทำต่อ" / "undo that" / "the file just now"."""
         entry = {
             "action": action,

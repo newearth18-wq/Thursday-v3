@@ -63,8 +63,14 @@ def create_app(settings: Settings | None = None, container: Container | None = N
         return JSONResponse(status_code=status, content=error_body(exc, current_trace_id()))
 
     api_prefix = "/api/v1"
-    for router in (conversation.router, tasks_router(), devices.router, memory.router,
-                   approvals.router, system.router):
+    for router in (
+        conversation.router,
+        tasks_router(),
+        devices.router,
+        memory.router,
+        approvals.router,
+        system.router,
+    ):
         app.include_router(router, prefix=api_prefix)
     app.include_router(realtime_router, prefix=api_prefix)
 

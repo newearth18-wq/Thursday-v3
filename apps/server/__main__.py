@@ -1,6 +1,6 @@
 """Thursday Core server.
 
-    python -m apps.server
+python -m apps.server
 """
 
 from __future__ import annotations

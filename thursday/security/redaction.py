@@ -21,7 +21,10 @@ PATTERNS: list[tuple[str, re.Pattern[str]]] = [
     ("google_key", re.compile(r"AIza[0-9A-Za-z_\-]{35}")),
     ("slack_token", re.compile(r"xox[baprs]-[A-Za-z0-9\-]{10,}")),
     ("jwt", re.compile(r"eyJ[A-Za-z0-9_\-]{10,}\.[A-Za-z0-9_\-]{10,}\.[A-Za-z0-9_\-]{10,}")),
-    ("private_key", re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]+?-----END [A-Z ]*PRIVATE KEY-----")),
+    (
+        "private_key",
+        re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]+?-----END [A-Z ]*PRIVATE KEY-----"),
+    ),
     ("bearer", re.compile(r"(?i)\bbearer\s+[A-Za-z0-9._\-]{16,}")),
     (
         "assignment",
@@ -94,8 +97,18 @@ def redact_dict(data: dict, redactor: SecretRedactor | None = None) -> dict:
 
 
 _SENSITIVE_KEYS = {
-    "password", "passwd", "pwd", "secret", "token", "api_key", "apikey",
-    "access_token", "refresh_token", "client_secret", "private_key", "authorization",
+    "password",
+    "passwd",
+    "pwd",
+    "secret",
+    "token",
+    "api_key",
+    "apikey",
+    "access_token",
+    "refresh_token",
+    "client_secret",
+    "private_key",
+    "authorization",
 }
 
 

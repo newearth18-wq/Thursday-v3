@@ -122,7 +122,10 @@ class PermissionEngine:
         surface = _ACTION_SURFACE.get(req.action)
         if surface:
             zone = self.zones.forbids(
-                surface, device_id=req.device_id, location=location, mode=mode,
+                surface,
+                device_id=req.device_id,
+                location=location,
+                mode=mode,
                 now=datetime.now(UTC).time(),
             )
             if zone:
@@ -136,7 +139,11 @@ class PermissionEngine:
 
         # 3b. A SECRET payload may not leave the machine (§34, T8).
         if req.sensitivity >= DataSensitivity.SECRET and req.action in (
-            "cloud_inference", "http_post", "send_email", "send_message", "publish",
+            "cloud_inference",
+            "http_post",
+            "send_email",
+            "send_message",
+            "publish",
         ):
             return PermissionVerdict(
                 decision=PolicyDecision.BLOCK,
@@ -173,12 +180,12 @@ class PermissionEngine:
                 and not any(fnmatch(req.resource, s) for s in permissions.path_scopes)
             ):
                 return PermissionVerdict(
-                        decision=PolicyDecision.BLOCK,
-                        reason=f"{req.resource!r} is outside this context's path scopes",
-                        rule="path_scope",
-                        level=level,
-                        risk=risk,
-                    )
+                    decision=PolicyDecision.BLOCK,
+                    reason=f"{req.resource!r} is outside this context's path scopes",
+                    rule="path_scope",
+                    level=level,
+                    risk=risk,
+                )
 
         # 5. A standing, scoped, unexpired grant.
         if (grant := self._find_grant(req)) is not None:
@@ -209,21 +216,24 @@ class PermissionEngine:
                 decision=PolicyDecision.ASK,
                 reason=f"level {level.name} actions affect the world outside this machine",
                 rule="external_level",
-                level=level, risk=risk,
+                level=level,
+                risk=risk,
             )
         if risk in (RiskLevel.HIGH, RiskLevel.CRITICAL):
             return PermissionVerdict(
                 decision=PolicyDecision.ASK,
                 reason=f"risk is {risk.value}",
                 rule="high_risk",
-                level=level, risk=risk,
+                level=level,
+                risk=risk,
             )
         if not reversible:
             return PermissionVerdict(
                 decision=PolicyDecision.ASK,
                 reason="the action has no undo path",
                 rule="irreversible",
-                level=level, risk=risk,
+                level=level,
+                risk=risk,
             )
         if policy.bulk_threshold is not None and req.object_count > policy.bulk_threshold:
             return PermissionVerdict(
@@ -233,7 +243,8 @@ class PermissionEngine:
                     "threshold for unattended changes"
                 ),
                 rule="blast_radius",
-                level=level, risk=risk,
+                level=level,
+                risk=risk,
             )
 
         # 8. Ordinary, reversible, in-scope work.
@@ -242,14 +253,16 @@ class PermissionEngine:
                 decision=PolicyDecision.AUTO,
                 reason=f"{req.action!r} is a reversible level-{int(level)} action in scope",
                 rule="policy_default_auto",
-                level=level, risk=risk,
+                level=level,
+                risk=risk,
             )
 
         return PermissionVerdict(
             decision=PolicyDecision.ASK,
             reason="no rule authorises this automatically",
             rule="fail_closed",
-            level=level, risk=risk,
+            level=level,
+            risk=risk,
         )
 
 

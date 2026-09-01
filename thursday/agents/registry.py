@@ -110,7 +110,9 @@ class AgentRegistry:
         candidates.sort(key=lambda c: c.score, reverse=True)
         best = candidates[0]
         log.debug(
-            "agent_selected", agent=best.spec.name, score=round(best.score, 3),
+            "agent_selected",
+            agent=best.spec.name,
+            score=round(best.score, 3),
             over=[c.spec.name for c in candidates[1:3]],
         )
         return best if best.score >= MIN_SELECTION_CONFIDENCE else None

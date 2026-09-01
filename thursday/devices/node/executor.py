@@ -34,7 +34,9 @@ class NodeExecutor:
         self.adapter = adapter
         #: A second line of defence behind the core's path scopes — the node refuses
         #: to touch anything outside these roots even if the core asked it to.
-        self.allowed_roots = [Path(p).expanduser().resolve() for p in (allowed_roots or [Path.home()])]
+        self.allowed_roots = [
+            Path(p).expanduser().resolve() for p in (allowed_roots or [Path.home()])
+        ]
 
     async def execute(self, action: DeviceAction) -> DeviceActionResult:
         started = time.perf_counter()
@@ -80,7 +82,9 @@ class NodeExecutor:
     # ------------------------------------------------------------------ handlers
     # Each returns (data, evidence, verified, undo).
 
-    async def _do_open_app(self, args: dict[str, Any]) -> tuple[dict, dict, bool, UndoRecord | None]:
+    async def _do_open_app(
+        self, args: dict[str, Any]
+    ) -> tuple[dict, dict, bool, UndoRecord | None]:
         name = str(args["name"])
         launch = await self.adapter.launch(name, args.get("args"))
 
@@ -111,7 +115,9 @@ class NodeExecutor:
         )
         return {"app": name, **launch}, evidence, verified, undo
 
-    async def _do_close_app(self, args: dict[str, Any]) -> tuple[dict, dict, bool, UndoRecord | None]:
+    async def _do_close_app(
+        self, args: dict[str, Any]
+    ) -> tuple[dict, dict, bool, UndoRecord | None]:
         name = str(args["name"])
         before = await self.adapter.find_processes(name)
         result = await self.adapter.terminate(name, force=bool(args.get("force")))
@@ -129,7 +135,9 @@ class NodeExecutor:
             ),
         )
 
-    async def _do_open_file(self, args: dict[str, Any]) -> tuple[dict, dict, bool, UndoRecord | None]:
+    async def _do_open_file(
+        self, args: dict[str, Any]
+    ) -> tuple[dict, dict, bool, UndoRecord | None]:
         path = self._resolve(args["path"])
         result = await self.adapter.open_path(str(path))
         await asyncio.sleep(LAUNCH_SETTLE_S)
@@ -138,7 +146,9 @@ class NodeExecutor:
         verified = bool(result.get("pid")) or bool(window)
         return {"path": str(path)}, {"active_window": window, **result}, verified, None
 
-    async def _do_read_file(self, args: dict[str, Any]) -> tuple[dict, dict, bool, UndoRecord | None]:
+    async def _do_read_file(
+        self, args: dict[str, Any]
+    ) -> tuple[dict, dict, bool, UndoRecord | None]:
         path = self._resolve(args["path"])
         limit = int(args.get("max_bytes", 200_000))
 
@@ -154,9 +164,12 @@ class NodeExecutor:
         text, size, digest = await asyncio.to_thread(read)
         return {"path": str(path), "content": text}, {"size": size, "sha256": digest}, True, None
 
-    async def _do_write_file(self, args: dict[str, Any]) -> tuple[dict, dict, bool, UndoRecord | None]:
+    async def _do_write_file(
+        self, args: dict[str, Any]
+    ) -> tuple[dict, dict, bool, UndoRecord | None]:
         path = self._resolve(args["path"])
         content = str(args["content"])
+
         def write() -> tuple[str | None, str, str, int]:
             before = path.read_text(encoding="utf-8") if path.exists() else None
             path.parent.mkdir(parents=True, exist_ok=True)
@@ -178,7 +191,9 @@ class NodeExecutor:
             ),
         )
 
-    async def _do_create_folder(self, args: dict[str, Any]) -> tuple[dict, dict, bool, UndoRecord | None]:
+    async def _do_create_folder(
+        self, args: dict[str, Any]
+    ) -> tuple[dict, dict, bool, UndoRecord | None]:
         path = self._resolve(args["path"])
         existed = path.exists()
         path.mkdir(parents=True, exist_ok=True)
@@ -253,24 +268,32 @@ class NodeExecutor:
             ),
         )
 
-    async def _do_list_dir(self, args: dict[str, Any]) -> tuple[dict, dict, bool, UndoRecord | None]:
+    async def _do_list_dir(
+        self, args: dict[str, Any]
+    ) -> tuple[dict, dict, bool, UndoRecord | None]:
         path = self._resolve(args["path"])
         limit = int(args.get("limit", 200))
 
         def listing() -> list[dict[str, Any]]:
             return [
-                {"name": child.name, "is_dir": child.is_dir(),
-                 "size": child.stat().st_size if child.is_file() else None}
+                {
+                    "name": child.name,
+                    "is_dir": child.is_dir(),
+                    "size": child.stat().st_size if child.is_file() else None,
+                }
                 for child in sorted(path.iterdir())[:limit]
             ]
 
         entries = await asyncio.to_thread(listing)
         return {"path": str(path), "entries": entries}, {"count": len(entries)}, True, None
 
-    async def _do_search_files(self, args: dict[str, Any]) -> tuple[dict, dict, bool, UndoRecord | None]:
+    async def _do_search_files(
+        self, args: dict[str, Any]
+    ) -> tuple[dict, dict, bool, UndoRecord | None]:
         root = self._resolve(args["root"])
         pattern = str(args["pattern"])
         limit = int(args.get("limit", 50))
+
         def scan() -> list[dict[str, Any]]:
             found: list[dict[str, Any]] = []
             for path in root.rglob(pattern):
@@ -283,11 +306,15 @@ class NodeExecutor:
         matches.sort(key=lambda m: m["mtime"], reverse=True)
         return {"matches": matches}, {"count": len(matches)}, True, None
 
-    async def _do_read_active_window(self, args: dict[str, Any]) -> tuple[dict, dict, bool, UndoRecord | None]:
+    async def _do_read_active_window(
+        self, args: dict[str, Any]
+    ) -> tuple[dict, dict, bool, UndoRecord | None]:
         title = await self.adapter.active_window()
         return {"title": title}, {"available": title is not None}, True, None
 
-    async def _do_screenshot(self, args: dict[str, Any]) -> tuple[dict, dict, bool, UndoRecord | None]:
+    async def _do_screenshot(
+        self, args: dict[str, Any]
+    ) -> tuple[dict, dict, bool, UndoRecord | None]:
         image = await self.adapter.screenshot(**args)
         return (
             {"format": "png", "bytes": len(image)},
@@ -296,13 +323,17 @@ class NodeExecutor:
             None,
         )
 
-    async def _do_run_shell(self, args: dict[str, Any]) -> tuple[dict, dict, bool, UndoRecord | None]:
+    async def _do_run_shell(
+        self, args: dict[str, Any]
+    ) -> tuple[dict, dict, bool, UndoRecord | None]:
         result = await self.adapter.run_shell(
             str(args["command"]), timeout=float(args.get("timeout", 30))
         )
         return result, {"exit_code": result["exit_code"]}, result["exit_code"] == 0, None
 
-    async def _do_process_status(self, args: dict[str, Any]) -> tuple[dict, dict, bool, UndoRecord | None]:
+    async def _do_process_status(
+        self, args: dict[str, Any]
+    ) -> tuple[dict, dict, bool, UndoRecord | None]:
         processes = await self.adapter.find_processes(str(args["name"]))
         return (
             {"running": bool(processes), "processes": processes[:10]},
@@ -311,7 +342,9 @@ class NodeExecutor:
             None,
         )
 
-    async def _do_system_info(self, args: dict[str, Any]) -> tuple[dict, dict, bool, UndoRecord | None]:
+    async def _do_system_info(
+        self, args: dict[str, Any]
+    ) -> tuple[dict, dict, bool, UndoRecord | None]:
         import platform
 
         telemetry = await self.adapter.telemetry()
@@ -324,11 +357,15 @@ class NodeExecutor:
         }
         return info, {"collected": True}, True, None
 
-    async def _do_clipboard_get(self, args: dict[str, Any]) -> tuple[dict, dict, bool, UndoRecord | None]:
+    async def _do_clipboard_get(
+        self, args: dict[str, Any]
+    ) -> tuple[dict, dict, bool, UndoRecord | None]:
         text = await self.adapter.clipboard_get()
         return {"text": text}, {"length": len(text)}, True, None
 
-    async def _do_clipboard_set(self, args: dict[str, Any]) -> tuple[dict, dict, bool, UndoRecord | None]:
+    async def _do_clipboard_set(
+        self, args: dict[str, Any]
+    ) -> tuple[dict, dict, bool, UndoRecord | None]:
         previous = ""
         # An unreadable clipboard costs the undo record, not the action.
         with contextlib.suppress(Exception):
@@ -352,11 +389,15 @@ class NodeExecutor:
         await self.adapter.notify(str(args["title"]), str(args["body"]))
         return {"delivered": True}, {}, True, None
 
-    async def _do_get_volume(self, args: dict[str, Any]) -> tuple[dict, dict, bool, UndoRecord | None]:
+    async def _do_get_volume(
+        self, args: dict[str, Any]
+    ) -> tuple[dict, dict, bool, UndoRecord | None]:
         level = await self.adapter.get_volume()
         return {"level": level}, {}, True, None
 
-    async def _do_set_volume(self, args: dict[str, Any]) -> tuple[dict, dict, bool, UndoRecord | None]:
+    async def _do_set_volume(
+        self, args: dict[str, Any]
+    ) -> tuple[dict, dict, bool, UndoRecord | None]:
         previous = None
         with contextlib.suppress(Exception):
             previous = await self.adapter.get_volume()
@@ -387,9 +428,7 @@ class NodeExecutor:
             resolved = path.resolve()
         except OSError as exc:
             raise ValueError(f"cannot resolve path {raw!r}") from exc
-        if not any(
-            resolved == root or root in resolved.parents for root in self.allowed_roots
-        ):
+        if not any(resolved == root or root in resolved.parents for root in self.allowed_roots):
             raise PermissionError(
                 f"{resolved} is outside this node's allowed roots "
                 f"({', '.join(str(r) for r in self.allowed_roots)})"

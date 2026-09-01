@@ -43,7 +43,9 @@ def safe_filename(title: str, *, max_length: int = 120) -> str:
 
 
 class ObsidianVault:
-    def __init__(self, root: Path, *, redactor: SecretRedactor | None = None, enabled: bool = True) -> None:
+    def __init__(
+        self, root: Path, *, redactor: SecretRedactor | None = None, enabled: bool = True
+    ) -> None:
         self.root = Path(root)
         self.enabled = enabled
         self._redactor = redactor or SecretRedactor()
@@ -103,7 +105,9 @@ class ObsidianVault:
         if path.exists():
             return self.append_section(path, f"{when:%H:%M}", entry)
         return self.write_note(
-            folder="08 Daily", title=title, body=f"## {when:%H:%M}\n\n{entry}\n",
+            folder="08 Daily",
+            title=title,
+            body=f"## {when:%H:%M}\n\n{entry}\n",
             frontmatter={"type": "daily", "date": title},
         )
 
@@ -143,16 +147,22 @@ class ObsidianVault:
             overwrite=False,
         )
 
-    def project_page(self, *, name: str, goal: str, status: str, sections: dict[str, str]) -> Path | None:
+    def project_page(
+        self, *, name: str, goal: str, status: str, sections: dict[str, str]
+    ) -> Path | None:
         body = f"**Goal** — {goal}\n\n**Status** — {status}\n\n" + "\n\n".join(
             f"## {heading}\n\n{content}" for heading, content in sections.items()
         )
         return self.write_note(
-            folder="01 Projects", title=name, body=body,
+            folder="01 Projects",
+            title=name,
+            body=body,
             frontmatter={"type": "project", "status": status},
         )
 
-    def memory_note(self, *, memory_id: UUID, layer: str, content: str, source: str, confidence: float) -> Path | None:
+    def memory_note(
+        self, *, memory_id: UUID, layer: str, content: str, source: str, confidence: float
+    ) -> Path | None:
         return self.write_note(
             folder="03 Knowledge",
             title=content[:60],

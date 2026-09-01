@@ -53,7 +53,9 @@ class PgVectorStore:
 
     name = "pgvector"
 
-    def __init__(self, session_factory: Any, *, table: str = "memories", dimensions: int = 768) -> None:
+    def __init__(
+        self, session_factory: Any, *, table: str = "memories", dimensions: int = 768
+    ) -> None:
         self._session_factory = session_factory
         self._table = table
         self._dimensions = dimensions

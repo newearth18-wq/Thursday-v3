@@ -29,7 +29,10 @@ async def world(c: Container = Depends(get_container)) -> dict:
 async def agents(c: Container = Depends(get_container)) -> dict:
     return {
         "agents": [
-            {**spec.model_dump(mode="json"), "success_rate": round(c.agents.success_rate(spec.name), 3)}
+            {
+                **spec.model_dump(mode="json"),
+                "success_rate": round(c.agents.success_rate(spec.name), 3),
+            }
             for spec in c.agents.specs()
         ]
     }
@@ -42,7 +45,9 @@ async def tools(c: Container = Depends(get_container)) -> dict:
 
 @router.get("/audit")
 async def audit(
-    task_id: UUID | None = None, tool: str | None = None, limit: int = 100,
+    task_id: UUID | None = None,
+    tool: str | None = None,
+    limit: int = 100,
     c: Container = Depends(get_container),
 ) -> dict:
     entries = c.audit.entries(task_id=task_id, tool=tool, limit=limit)
@@ -66,7 +71,9 @@ async def undo(action_id: UUID, c: Container = Depends(get_container)) -> dict:
 
 
 @router.post("/emergency/stop")
-async def emergency_stop(request: EmergencyStopRequest, c: Container = Depends(get_container)) -> dict:
+async def emergency_stop(
+    request: EmergencyStopRequest, c: Container = Depends(get_container)
+) -> dict:
     """§69. A plain endpoint on purpose — it must work when the model is down."""
     return {"scope": request.scope, "actions": await c.emergency_stop(request.scope)}
 

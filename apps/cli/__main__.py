@@ -93,8 +93,10 @@ async def run_embedded(args: argparse.Namespace) -> None:
     container.world.update(active_device_id=device_id, active_device_name=args.device_name)
 
     print(BANNER)
-    print(f"{DIM}device: {args.device_name} · model: {settings.llm_backend} · "
-          f"offline: {settings.offline} · roots: {', '.join(str(r) for r in roots)}{RESET}\n")
+    print(
+        f"{DIM}device: {args.device_name} · model: {settings.llm_backend} · "
+        f"offline: {settings.offline} · roots: {', '.join(str(r) for r in roots)}{RESET}\n"
+    )
 
     session_id = new_id()
     loop = asyncio.get_running_loop()
@@ -137,8 +139,10 @@ async def handle_command(container, line: str, session_id: UUID) -> bool:
         if not pending:
             print("  nothing pending")
         for index, approval in enumerate(pending, start=1):
-            print(f"  {index}. {approval.action} on {approval.resource or '—'} "
-                  f"(risk {approval.risk}, reversible={approval.reversible})")
+            print(
+                f"  {index}. {approval.action} on {approval.resource or '—'} "
+                f"(risk {approval.risk}, reversible={approval.reversible})"
+            )
     elif command in ("/approve", "/reject"):
         pending = container.approvals.pending()
         index = int(rest[0]) - 1 if rest and rest[0].isdigit() else 0
@@ -160,14 +164,18 @@ async def handle_command(container, line: str, session_id: UUID) -> bool:
 
         records = await container.memory.recall(MemoryQuery(text=" ".join(rest), k=8))
         for record in records:
-            print(f"  [{record.layer:10} {record.source:9} conf {record.confidence:.2f} "
-                  f"score {record.score or 0:.2f}] {record.content[:90]}")
+            print(
+                f"  [{record.layer:10} {record.source:9} conf {record.confidence:.2f} "
+                f"score {record.score or 0:.2f}] {record.content[:90]}"
+            )
         if not records:
             print("  nothing recalled")
     elif command == "/audit":
         for entry in container.audit.entries(limit=20):
-            print(f"  {entry.ts:%H:%M:%S} {entry.action:18} {entry.result:10} "
-                  f"perm={entry.permission_decision or '—'}")
+            print(
+                f"  {entry.ts:%H:%M:%S} {entry.action:18} {entry.result:10} "
+                f"perm={entry.permission_decision or '—'}"
+            )
         print(f"  chain intact: {container.audit.verify_chain()}")
     elif command == "/undo":
         record = container.undo.last()
@@ -217,8 +225,10 @@ async def run_remote(args: argparse.Namespace) -> None:
             body = response.json()
             session_id = body["session_id"]
             print(f"Thursday> {body['text']}")
-            print(f"{DIM}          [{body['voice_mode']} · confidence {body['confidence']:.2f}"
-                  f"{'' if body['verified'] else ' · unverified'}]{RESET}")
+            print(
+                f"{DIM}          [{body['voice_mode']} · confidence {body['confidence']:.2f}"
+                f"{'' if body['verified'] else ' · unverified'}]{RESET}"
+            )
 
 
 def main() -> None:

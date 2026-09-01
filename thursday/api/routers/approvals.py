@@ -33,11 +33,15 @@ async def decide(
     if c.approvals.get(approval_id) is None:
         raise HTTPException(status_code=404, detail="unknown approval")
     if request.decision not in {*_SCOPES, "reject"}:
-        raise HTTPException(status_code=400, detail="decision must be approve, approve_once, always_allow or reject")
+        raise HTTPException(
+            status_code=400, detail="decision must be approve, approve_once, always_allow or reject"
+        )
 
     approve = request.decision != "reject"
     scope = request.scope or _SCOPES.get(request.decision, ApprovalScope.ONCE)
-    approval = await c.approvals.decide(approval_id, approve=approve, scope=scope, note=request.note)
+    approval = await c.approvals.decide(
+        approval_id, approve=approve, scope=scope, note=request.note
+    )
     return approval.model_dump(mode="json")
 
 

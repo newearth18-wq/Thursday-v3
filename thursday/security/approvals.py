@@ -32,7 +32,9 @@ class ApprovalService:
 
     async def request(self, approval: ApprovalRequest) -> ApprovalRequest:
         """Register a pending approval and announce it. Does not block."""
-        approval.expires_at = approval.expires_at or datetime.now(UTC) + timedelta(seconds=self._ttl)
+        approval.expires_at = approval.expires_at or datetime.now(UTC) + timedelta(
+            seconds=self._ttl
+        )
         approval.consequence_of_refusal = approval.consequence_of_refusal or (
             "the task stops here and nothing is changed"
         )
@@ -119,7 +121,11 @@ class ApprovalService:
     def pending(self) -> list[ApprovalRequest]:
         now = datetime.now(UTC)
         for approval in self._pending.values():
-            if approval.state is ApprovalState.PENDING and approval.expires_at and approval.expires_at <= now:
+            if (
+                approval.state is ApprovalState.PENDING
+                and approval.expires_at
+                and approval.expires_at <= now
+            ):
                 approval.state = ApprovalState.EXPIRED
         return [a for a in self._pending.values() if a.state is ApprovalState.PENDING]
 

@@ -55,7 +55,9 @@ async def test_conversation_continues_within_a_session(client):
     assert len(history["turns"]) >= 4  # two owner turns, two replies
 
 
-async def test_direct_device_control_still_passes_the_permission_engine(client, office_pc, tmp_path):
+async def test_direct_device_control_still_passes_the_permission_engine(
+    client, office_pc, tmp_path
+):
     """There is no back door around the Permission Engine, not even for the API."""
     allowed = await client.post(
         f"/api/v1/devices/{office_pc.device_id}/action",
@@ -95,8 +97,11 @@ async def test_memory_write_reports_an_honest_refusal(client):
 async def test_memory_search_returns_scored_records_without_embeddings(client):
     await client.post(
         "/api/v1/memory",
-        json={"content": "โครงการ Alpha ใช้ Postgres และ pgvector", "layer": "semantic",
-              "importance": 0.8},
+        json={
+            "content": "โครงการ Alpha ใช้ Postgres และ pgvector",
+            "layer": "semantic",
+            "importance": 0.8,
+        },
     )
     body = (await client.get("/api/v1/memory/search", params={"q": "Alpha", "k": 3})).json()
     assert body["memories"]
@@ -118,7 +123,8 @@ async def test_emergency_stop_locks_down_and_can_be_released(client, office_pc):
 
     # While locked down, even an ordinary action is refused.
     refused = await client.post(
-        f"/api/v1/devices/{office_pc.device_id}/action", json={"action": "open_app", "args": {"name": "chrome"}}
+        f"/api/v1/devices/{office_pc.device_id}/action",
+        json={"action": "open_app", "args": {"name": "chrome"}},
     )
     assert refused.status_code == 403
 

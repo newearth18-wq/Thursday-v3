@@ -42,24 +42,39 @@ class ResearchAgent(BaseAgent):
         question = str(contract.inputs.get("question") or contract.objective)
         findings: list[dict[str, Any]] = []
 
-        memory_hit = await ctx.call_tool(ToolCall(tool="memory_search", args={"query": question, "k": 5}))
+        memory_hit = await ctx.call_tool(
+            ToolCall(tool="memory_search", args={"query": question, "k": 5})
+        )
         for record in memory_hit.data.get("memories", []):
             findings.append(
-                {"source": f"memory/{record['layer']}", "content": record["content"],
-                 "confidence": record["confidence"]}
+                {
+                    "source": f"memory/{record['layer']}",
+                    "content": record["content"],
+                    "confidence": record["confidence"],
+                }
             )
 
-        vault_hit = await ctx.call_tool(ToolCall(tool="obsidian_search", args={"query": question, "limit": 5}))
+        vault_hit = await ctx.call_tool(
+            ToolCall(tool="obsidian_search", args={"query": question, "limit": 5})
+        )
         for hit in vault_hit.data.get("hits", []):
-            findings.append({"source": f"vault/{hit['path']}", "content": hit["excerpt"], "confidence": 0.8})
+            findings.append(
+                {"source": f"vault/{hit['path']}", "content": hit["excerpt"], "confidence": 0.8}
+            )
 
         used_web = False
         if len(findings) < 2 and contract.permissions.network:
-            web_hit = await ctx.call_tool(ToolCall(tool="web_search", args={"query": question, "k": 5}))
+            web_hit = await ctx.call_tool(
+                ToolCall(tool="web_search", args={"query": question, "k": 5})
+            )
             used_web = web_hit.ok
             for row in web_hit.data.get("results", []):
                 findings.append(
-                    {"source": row.get("url", "web"), "content": row.get("snippet", ""), "confidence": 0.6}
+                    {
+                        "source": row.get("url", "web"),
+                        "content": row.get("snippet", ""),
+                        "confidence": 0.6,
+                    }
                 )
 
         if not findings:

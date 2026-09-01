@@ -15,7 +15,9 @@ router = APIRouter(prefix="/conversation", tags=["conversation"])
 
 
 @router.post("", response_model=ConversationResponse)
-async def talk(request: ConversationRequest, c: Container = Depends(get_container)) -> ConversationResponse:
+async def talk(
+    request: ConversationRequest, c: Container = Depends(get_container)
+) -> ConversationResponse:
     session_id = request.session_id or new_id()
     reply = await c.engine.handle_turn(
         session_id=session_id,

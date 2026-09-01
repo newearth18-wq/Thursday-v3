@@ -18,30 +18,39 @@ def memory() -> MemoryManager:
 
 async def test_small_talk_is_not_remembered(memory):
     for text in ("ครับ", "thanks", "ok", "สวัสดี"):
-        assert await memory.write(
-            MemoryWrite(layer=MemoryLayer.SEMANTIC, content=text, source=MemorySource.USER)
-        ) is None
+        assert (
+            await memory.write(
+                MemoryWrite(layer=MemoryLayer.SEMANTIC, content=text, source=MemorySource.USER)
+            )
+            is None
+        )
 
 
 async def test_credential_material_is_never_written(memory):
-    assert await memory.write(
-        MemoryWrite(
-            layer=MemoryLayer.SEMANTIC,
-            content="the deploy key is sk-ant-api03-abcdefghijklmnopqrstuvwxyz",
-            source=MemorySource.USER,
-            importance=1.0,
+    assert (
+        await memory.write(
+            MemoryWrite(
+                layer=MemoryLayer.SEMANTIC,
+                content="the deploy key is sk-ant-api03-abcdefghijklmnopqrstuvwxyz",
+                source=MemorySource.USER,
+                importance=1.0,
+            )
         )
-    ) is None
+        is None
+    )
 
 
 async def test_secret_classified_content_is_never_written(memory):
-    assert await memory.write(
-        MemoryWrite(
-            layer=MemoryLayer.PREFERENCE,
-            content="something quite ordinary",
-            sensitivity=DataSensitivity.SECRET,
+    assert (
+        await memory.write(
+            MemoryWrite(
+                layer=MemoryLayer.PREFERENCE,
+                content="something quite ordinary",
+                sensitivity=DataSensitivity.SECRET,
+            )
         )
-    ) is None
+        is None
+    )
 
 
 async def test_durable_user_statements_are_remembered(memory):
@@ -58,9 +67,10 @@ async def test_durable_user_statements_are_remembered(memory):
 
 async def test_a_memory_disabled_zone_stops_all_writes(memory):
     memory.memory_disabled = True
-    assert await memory.write(
-        MemoryWrite(layer=MemoryLayer.PREFERENCE, content="anything at all")
-    ) is None
+    assert (
+        await memory.write(MemoryWrite(layer=MemoryLayer.PREFERENCE, content="anything at all"))
+        is None
+    )
 
 
 async def test_identical_content_deduplicates_rather_than_accumulating(memory):
@@ -77,14 +87,20 @@ async def test_identical_content_deduplicates_rather_than_accumulating(memory):
 async def test_a_weaker_source_does_not_overwrite_a_stronger_one(memory):
     await memory.write(
         MemoryWrite(
-            layer=MemoryLayer.PREFERENCE, key="report_format",
-            content="ผู้ใช้ชอบรายงานเป็น PDF", source=MemorySource.USER, confidence=0.9,
+            layer=MemoryLayer.PREFERENCE,
+            key="report_format",
+            content="ผู้ใช้ชอบรายงานเป็น PDF",
+            source=MemorySource.USER,
+            confidence=0.9,
         )
     )
     await memory.write(
         MemoryWrite(
-            layer=MemoryLayer.PREFERENCE, key="report_format",
-            content="ผู้ใช้ชอบรายงานเป็น Word", source=MemorySource.AGENT, confidence=0.5,
+            layer=MemoryLayer.PREFERENCE,
+            key="report_format",
+            content="ผู้ใช้ชอบรายงานเป็น Word",
+            source=MemorySource.AGENT,
+            confidence=0.5,
         )
     )
     conflicts = memory.conflicts()
@@ -98,14 +114,20 @@ async def test_a_weaker_source_does_not_overwrite_a_stronger_one(memory):
 async def test_a_stronger_source_supersedes_with_a_link_not_an_overwrite(memory):
     old = await memory.write(
         MemoryWrite(
-            layer=MemoryLayer.PREFERENCE, key="deadline",
-            content="ส่งงานวันศุกร์", source=MemorySource.AGENT, confidence=0.6,
+            layer=MemoryLayer.PREFERENCE,
+            key="deadline",
+            content="ส่งงานวันศุกร์",
+            source=MemorySource.AGENT,
+            confidence=0.6,
         )
     )
     new = await memory.write(
         MemoryWrite(
-            layer=MemoryLayer.PREFERENCE, key="deadline",
-            content="ส่งงานวันพฤหัสบดี", source=MemorySource.USER, confidence=0.95,
+            layer=MemoryLayer.PREFERENCE,
+            key="deadline",
+            content="ส่งงานวันพฤหัสบดี",
+            source=MemorySource.USER,
+            confidence=0.95,
         )
     )
     assert old is not None and new is not None
@@ -115,12 +137,22 @@ async def test_a_stronger_source_supersedes_with_a_link_not_an_overwrite(memory)
 
 async def test_recall_excludes_superseded_records_by_default(memory):
     await memory.write(
-        MemoryWrite(layer=MemoryLayer.PREFERENCE, key="k", content="ค่าเดิม",
-                    source=MemorySource.AGENT, confidence=0.5)
+        MemoryWrite(
+            layer=MemoryLayer.PREFERENCE,
+            key="k",
+            content="ค่าเดิม",
+            source=MemorySource.AGENT,
+            confidence=0.5,
+        )
     )
     await memory.write(
-        MemoryWrite(layer=MemoryLayer.PREFERENCE, key="k", content="ค่าใหม่",
-                    source=MemorySource.USER, confidence=0.95)
+        MemoryWrite(
+            layer=MemoryLayer.PREFERENCE,
+            key="k",
+            content="ค่าใหม่",
+            source=MemorySource.USER,
+            confidence=0.95,
+        )
     )
     hits = await memory.recall(MemoryQuery(text="ค่า", layers=[MemoryLayer.PREFERENCE], k=5))
     assert [h.content for h in hits] == ["ค่าใหม่"]
@@ -128,12 +160,21 @@ async def test_recall_excludes_superseded_records_by_default(memory):
 
 async def test_pinned_records_outrank_their_raw_score(memory):
     await memory.write(
-        MemoryWrite(layer=MemoryLayer.SEMANTIC, content="โครงการ Alpha ใช้ Postgres",
-                    source=MemorySource.USER, importance=0.7)
+        MemoryWrite(
+            layer=MemoryLayer.SEMANTIC,
+            content="โครงการ Alpha ใช้ Postgres",
+            source=MemorySource.USER,
+            importance=0.7,
+        )
     )
     pinned = await memory.write(
-        MemoryWrite(layer=MemoryLayer.SEMANTIC, content="เจ้าของชื่อ Supakit",
-                    source=MemorySource.USER, importance=0.7, pinned=True)
+        MemoryWrite(
+            layer=MemoryLayer.SEMANTIC,
+            content="เจ้าของชื่อ Supakit",
+            source=MemorySource.USER,
+            importance=0.7,
+            pinned=True,
+        )
     )
     hits = await memory.recall(MemoryQuery(text="โครงการ Alpha", k=2))
     assert pinned is not None
@@ -145,7 +186,8 @@ async def test_working_memory_expires_and_is_swept(memory):
 
     record = await memory.write(
         MemoryWrite(
-            layer=MemoryLayer.WORKING, content="the file being processed is grades.xlsx",
+            layer=MemoryLayer.WORKING,
+            content="the file being processed is grades.xlsx",
             expires_at=datetime.now(UTC) - timedelta(seconds=1),
         )
     )

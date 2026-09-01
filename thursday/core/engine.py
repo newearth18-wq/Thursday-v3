@@ -63,21 +63,34 @@ class ThursdayEngine:
     ) -> ThursdayReply:
         trace_id = bind_trace_id()
         turn = ConversationTurn(
-            session_id=session_id, role="user", text=text, device_id=device_id, modality=modality  # type: ignore[arg-type]
+            session_id=session_id,
+            role="user",
+            text=text,
+            device_id=device_id,
+            modality=modality,  # type: ignore[arg-type]
         )
         self.c.context_engine.record_turn(turn)
         await self.c.bus.publish(
-            Event(kind="conversation.turn.received", session_id=session_id, device_id=device_id,
-                  payload={"length": len(text), "modality": modality})
+            Event(
+                kind="conversation.turn.received",
+                session_id=session_id,
+                device_id=device_id,
+                payload={"length": len(text), "modality": modality},
+            )
         )
 
         language = self.c.composer.language_of(text)
 
         # 2–3. Context and privacy classification.
         context = await self.c.context_engine.build(
-            turn, screen=screen, selection=selection, gesture=gesture,
-            budget=Budget(usd=self.c.settings.default_task_budget_usd,
-                          seconds=self.c.settings.default_task_budget_seconds),
+            turn,
+            screen=screen,
+            selection=selection,
+            gesture=gesture,
+            budget=Budget(
+                usd=self.c.settings.default_task_budget_usd,
+                seconds=self.c.settings.default_task_budget_seconds,
+            ),
             offline=self.c.settings.offline,
         )
 
@@ -85,7 +98,9 @@ class ThursdayEngine:
         try:
             intent = await self.c.reasoning.understand(context)
         except PrivacyViolation as exc:
-            return self._finish(session_id, self.c.composer.blocked(reason=exc.message, language=language))
+            return self._finish(
+                session_id, self.c.composer.blocked(reason=exc.message, language=language)
+            )
 
         log.info("intent", kind=str(intent.kind), confidence=intent.confidence, trace_id=trace_id)
 
@@ -98,7 +113,9 @@ class ThursdayEngine:
                 return self._finish(
                     session_id,
                     self.c.composer.answer(
-                        intent.direct_answer, language=language, confidence=intent.confidence,
+                        intent.direct_answer,
+                        language=language,
+                        confidence=intent.confidence,
                         people_present=context.world.people_present,
                     ),
                 )
@@ -132,21 +149,29 @@ class ThursdayEngine:
             )
         except ApprovalRequired as exc:
             approval = self.c.approvals.get(UUID(exc.details["approval_id"]))
-            return self._finish(session_id, self.c.composer.needs_approval(approval, language=language))
+            return self._finish(
+                session_id, self.c.composer.needs_approval(approval, language=language)
+            )
         except PermissionDenied as exc:
             await self.c.tasks.fail(task.id, exc.message)
-            return self._finish(session_id, self.c.composer.blocked(reason=exc.message, language=language))
+            return self._finish(
+                session_id, self.c.composer.blocked(reason=exc.message, language=language)
+            )
         except DeviceUnavailable as exc:
             await self.c.tasks.fail(task.id, exc.message)
             question = exc.details.get("question") or exc.message
             return self._finish(session_id, self.c.composer.clarify(question, language=language))
         except BudgetExceeded as exc:
             await self.c.tasks.fail(task.id, exc.message)
-            return self._finish(session_id, self.c.composer.failure(reason=exc.message, language=language))
+            return self._finish(
+                session_id, self.c.composer.failure(reason=exc.message, language=language)
+            )
 
         if outcome.approval_required is not None:
             approval = self.c.approvals.get(UUID(outcome.approval_required.details["approval_id"]))
-            return self._finish(session_id, self.c.composer.needs_approval(approval, language=language))
+            return self._finish(
+                session_id, self.c.composer.needs_approval(approval, language=language)
+            )
 
         reply = await self._report(task, outcome, context, intent, language)
         await self._remember(turn, intent, context, reply, outcome=outcome)
@@ -154,7 +179,9 @@ class ThursdayEngine:
 
     # ------------------------------------------------------------------ reporting
 
-    async def _report(self, task, outcome, context: ContextPackage, intent, language: str) -> ThursdayReply:
+    async def _report(
+        self, task, outcome, context: ContextPackage, intent, language: str
+    ) -> ThursdayReply:
         people = context.world.people_present
         summary = outcome.summary()
 
@@ -169,43 +196,64 @@ class ThursdayEngine:
             answer = outcome.outcomes[-1].result.output.get("answer") if outcome.outcomes else None
             if answer:
                 return self.c.composer.answer(
-                    answer, language=language, confidence=verification.confidence,
-                    citations=_citations(outcome), people_present=people,
+                    answer,
+                    language=language,
+                    confidence=verification.confidence,
+                    citations=_citations(outcome),
+                    people_present=people,
                 )
             return self.c.composer.success(
-                summary=summary, verification=verification, language=language, intent=intent,
-                citations=_citations(outcome), people_present=people,
+                summary=summary,
+                verification=verification,
+                language=language,
+                intent=intent,
+                citations=_citations(outcome),
+                people_present=people,
             )
 
         failure = outcome.first_failure()
         error = _explain_failure(failure)
-        await self.c.tasks.fail(task.id, error, verification=failure.verification if failure else None)
+        await self.c.tasks.fail(
+            task.id, error, verification=failure.verification if failure else None
+        )
 
         # A step that ran but could not be confirmed is reported as unverified, not failed —
         # the difference matters to the person deciding what to do next (§76).
         if failure and failure.verification and failure.result and failure.result.ok:
             return self.c.composer.unverified(
-                summary=failure.result.summary or summary, verification=failure.verification,
-                language=language, intent=intent, people_present=people,
+                summary=failure.result.summary or summary,
+                verification=failure.verification,
+                language=language,
+                intent=intent,
+                people_present=people,
             )
         if outcome.partial:
             return self.c.composer.partial_failure(
-                done=summary, failed=failure.step.name if failure else "the remaining work",
-                preserved="ผมเก็บผลลัพธ์ส่วนที่สำเร็จไว้แล้ว" if language == "th"
+                done=summary,
+                failed=failure.step.name if failure else "the remaining work",
+                preserved="ผมเก็บผลลัพธ์ส่วนที่สำเร็จไว้แล้ว"
+                if language == "th"
                 else "I kept what did complete",
-                language=language, people_present=people,
+                language=language,
+                people_present=people,
             )
         return self.c.composer.failure(reason=error, language=language, people_present=people)
 
-    async def _answer_directly(self, intent, context: ContextPackage, language: str) -> ThursdayReply:
+    async def _answer_directly(
+        self, intent, context: ContextPackage, language: str
+    ) -> ThursdayReply:
         if intent.direct_answer:
             return self.c.composer.answer(
-                intent.direct_answer, language=language, confidence=intent.confidence,
+                intent.direct_answer,
+                language=language,
+                confidence=intent.confidence,
                 people_present=context.world.people_present,
             )
         if intent.kind is IntentKind.STATUS:
             return self.c.composer.answer(
-                self._status_text(context, language), language=language, confidence=0.95,
+                self._status_text(context, language),
+                language=language,
+                confidence=0.95,
                 people_present=context.world.people_present,
             )
         text = await self.c.reasoning.answer(context)
@@ -214,7 +262,10 @@ class ThursdayEngine:
             for m in context.memories[:3]
         ]
         return self.c.composer.answer(
-            text, language=language, confidence=0.7, citations=citations,
+            text,
+            language=language,
+            confidence=0.7,
+            citations=citations,
             people_present=context.world.people_present,
         )
 
@@ -271,9 +322,12 @@ class ThursdayEngine:
             self.c.queue.cancel(task.id)
             await self.c.tasks.cancel(task.id, reason="owner said stop")
             cancelled += 1
-        await self.c.bus.publish(Event(kind="conversation.interrupted", payload={"cancelled": cancelled}))
+        await self.c.bus.publish(
+            Event(kind="conversation.interrupted", payload={"cancelled": cancelled})
+        )
         state = (
-            f"ยกเลิกงานที่กำลังทำ {cancelled} รายการ" if language == "th" and cancelled
+            f"ยกเลิกงานที่กำลังทำ {cancelled} รายการ"
+            if language == "th" and cancelled
             else (f"cancelled {cancelled} running task(s)" if cancelled else "")
         )
         return self.c.composer.stopped(language=language, state=state)
@@ -308,7 +362,9 @@ class ThursdayEngine:
                         content="; ".join(
                             f"{o.step.name}: {o.step.objective}" for o in outcome.outcomes
                         ),
-                        structured={"steps": [o.step.model_dump(mode="json") for o in outcome.outcomes]},
+                        structured={
+                            "steps": [o.step.model_dump(mode="json") for o in outcome.outcomes]
+                        },
                         importance=0.7,
                         confidence=0.85,
                         source=MemorySource.AGENT,

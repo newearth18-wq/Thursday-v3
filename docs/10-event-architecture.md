@@ -8,9 +8,15 @@ Handlers must be idempotent by `event.id`.
 
 ```python
 class Event(BaseModel):
-    id: UUID; kind: str; source: str
-    user_id: UUID; device_id: UUID | None; task_id: UUID | None
-    payload: dict; trace_id: str; occurred_at: datetime
+    id: UUID
+    kind: str
+    source: str
+    user_id: UUID
+    device_id: UUID | None
+    task_id: UUID | None
+    payload: dict
+    trace_id: str
+    occurred_at: datetime
 ```
 
 ## 10.2 Topics (§79)

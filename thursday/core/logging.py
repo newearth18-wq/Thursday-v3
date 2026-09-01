@@ -34,7 +34,9 @@ def _redact(_logger: Any, _name: str, event: dict[str, Any]) -> dict[str, Any]:
 
 
 def configure_logging(*, level: str = "INFO", json_output: bool = False) -> None:
-    logging.basicConfig(format="%(message)s", stream=sys.stdout, level=getattr(logging, level.upper(), logging.INFO))
+    logging.basicConfig(
+        format="%(message)s", stream=sys.stdout, level=getattr(logging, level.upper(), logging.INFO)
+    )
     renderer = (
         structlog.processors.JSONRenderer()
         if json_output

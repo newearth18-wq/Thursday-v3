@@ -47,8 +47,11 @@ class DarwinAdapter(OSAdapter):
 
     async def _osascript(self, script: str, *, timeout: float = 15.0) -> str:
         process = await asyncio.create_subprocess_exec(
-            "osascript", "-e", script,
-            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+            "osascript",
+            "-e",
+            script,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
         )
         stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=timeout)
         if process.returncode != 0:
@@ -67,7 +70,9 @@ class DarwinAdapter(OSAdapter):
     async def find_processes(self, name: str) -> list[dict[str, Any]]:
         app = self.resolve_executable(name) or name
         result = await self.run_shell(f"pgrep -f {shlex.quote(app)}", timeout=5)
-        return [{"pid": int(line), "name": app} for line in result["stdout"].split() if line.isdigit()]
+        return [
+            {"pid": int(line), "name": app} for line in result["stdout"].split() if line.isdigit()
+        ]
 
     async def active_window(self) -> str | None:
         try:
@@ -103,7 +108,7 @@ class DarwinAdapter(OSAdapter):
         await self.run_shell(f"printf %s {shlex.quote(text)} | pbcopy", timeout=5)
 
     async def notify(self, title: str, body: str) -> None:
-        await self._osascript(f'display notification {body!r} with title {title!r}')
+        await self._osascript(f"display notification {body!r} with title {title!r}")
 
     async def get_volume(self) -> float:
         return float(await self._osascript("output volume of (get volume settings)")) / 100

@@ -14,7 +14,9 @@ from thursday.shared.enums import PolicyDecision, TaskState, VoiceMode
 from thursday.shared.models import ActionRequest
 
 
-async def test_open_app_is_verified_before_success_is_reported(container, office_pc, adapter, session_id):
+async def test_open_app_is_verified_before_success_is_reported(
+    container, office_pc, adapter, session_id
+):
     reply = await container.engine.handle_turn(
         session_id=session_id, text="Thursday เปิด chrome", device_id=office_pc.device_id
     )
@@ -81,7 +83,9 @@ async def test_approval_gates_a_risky_tool_call(container, office_pc, tmp_path, 
     target = tmp_path / "scratch.txt"
     target.write_text("delete me", encoding="utf-8")
     call = ToolCall(
-        tool="delete", args={"path": str(target)}, device_id=office_pc.device_id,
+        tool="delete",
+        args={"path": str(target)},
+        device_id=office_pc.device_id,
         reason="tidy up the scratch file",
     )
 

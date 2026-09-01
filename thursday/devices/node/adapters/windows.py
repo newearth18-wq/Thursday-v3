@@ -58,8 +58,13 @@ class WindowsAdapter(OSAdapter):
 
     async def _powershell(self, script: str, *, timeout: float = 30.0) -> dict[str, Any]:
         process = await asyncio.create_subprocess_exec(
-            "powershell.exe", "-NoProfile", "-NonInteractive", "-Command", script,
-            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+            "powershell.exe",
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command",
+            script,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
         )
         stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=timeout)
         return {
@@ -99,7 +104,11 @@ class WindowsAdapter(OSAdapter):
             return []
         rows = data if isinstance(data, list) else [data]
         return [
-            {"pid": row.get("Id"), "name": row.get("ProcessName"), "window": row.get("MainWindowTitle")}
+            {
+                "pid": row.get("Id"),
+                "name": row.get("ProcessName"),
+                "window": row.get("MainWindowTitle"),
+            }
             for row in rows
         ]
 
@@ -144,6 +153,7 @@ class WindowsAdapter(OSAdapter):
             f"$bmp.Save('{target}');",
             timeout=30,
         )
+
         def read() -> bytes:
             data = target.read_bytes()
             target.unlink(missing_ok=True)
@@ -172,7 +182,7 @@ class WindowsAdapter(OSAdapter):
         result = await self._powershell(
             "Add-Type -TypeDefinition @'\n"
             "using System.Runtime.InteropServices;\n"
-            "[Guid(\"5CDF2C82-841E-4546-9722-0CF74078229A\"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]\n"
+            '[Guid("5CDF2C82-841E-4546-9722-0CF74078229A"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]\n'
             "interface IAudioEndpointVolume { int _(); int __(); int ___(); int ____();\n"
             "  int SetMasterVolumeLevelScalar(float v, System.Guid g); int _____();\n"
             "  int GetMasterVolumeLevelScalar(out float v); }\n"

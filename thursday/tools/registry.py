@@ -17,8 +17,11 @@ from thursday.shared.models import ToolSpec
 log = get_logger(__name__)
 
 _RISK_WEIGHT = {
-    RiskLevel.NONE: 0.0, RiskLevel.LOW: 0.1, RiskLevel.MEDIUM: 0.35,
-    RiskLevel.HIGH: 0.7, RiskLevel.CRITICAL: 1.0,
+    RiskLevel.NONE: 0.0,
+    RiskLevel.LOW: 0.1,
+    RiskLevel.MEDIUM: 0.35,
+    RiskLevel.HIGH: 0.7,
+    RiskLevel.CRITICAL: 1.0,
 }
 
 

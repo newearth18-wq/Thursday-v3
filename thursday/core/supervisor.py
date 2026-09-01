@@ -106,7 +106,9 @@ class Supervisor:
         return {
             "name": "output_schema",
             "ok": not missing,
-            "detail": f"missing fields: {', '.join(missing)}" if missing else "all required fields present",
+            "detail": f"missing fields: {', '.join(missing)}"
+            if missing
+            else "all required fields present",
             # Missing fields after a hard failure are a symptom of it, not a separate fault.
             "recoverable": _is_retryable(result.error),
         }
@@ -152,23 +154,27 @@ class Supervisor:
         if isinstance(percentages, list) and percentages:
             total = sum(float(p) for p in percentages if isinstance(p, int | float))
             ok = 99.0 <= total <= 101.0
-            checks.append({
-                "name": "percentages_total",
-                "ok": ok,
-                "detail": f"percentages sum to {total:.2f}",
-                "recoverable": True,
-            })
+            checks.append(
+                {
+                    "name": "percentages_total",
+                    "ok": ok,
+                    "detail": f"percentages sum to {total:.2f}",
+                    "recoverable": True,
+                }
+            )
 
         for count_key in ("count", "total", "processed"):
             declared = output.get(count_key)
             items = output.get("items") or output.get("rows") or output.get("records")
             if isinstance(declared, int) and isinstance(items, list):
-                checks.append({
-                    "name": f"{count_key}_matches_items",
-                    "ok": declared == len(items),
-                    "detail": f"declared {declared}, found {len(items)}",
-                    "recoverable": True,
-                })
+                checks.append(
+                    {
+                        "name": f"{count_key}_matches_items",
+                        "ok": declared == len(items),
+                        "detail": f"declared {declared}, found {len(items)}",
+                        "recoverable": True,
+                    }
+                )
         return checks
 
     def _check_criteria(self, contract: JobContract, result: AgentResult) -> list[dict[str, Any]]:
@@ -179,21 +185,25 @@ class Supervisor:
             if match := re.match(r"output\.(\w+)\s+is\s+(true|false)", lowered):
                 field, expected = match.group(1), match.group(2) == "true"
                 actual = bool(result.output.get(field))
-                checks.append({
-                    "name": f"criterion:{criterion}",
-                    "ok": actual == expected,
-                    "detail": f"output.{field} = {actual}",
-                    "recoverable": _is_retryable(result.error),
-                })
+                checks.append(
+                    {
+                        "name": f"criterion:{criterion}",
+                        "ok": actual == expected,
+                        "detail": f"output.{field} = {actual}",
+                        "recoverable": _is_retryable(result.error),
+                    }
+                )
             elif match := re.match(r"output\.(\w+)\s+is\s+not\s+empty", lowered):
                 field = match.group(1)
                 value = result.output.get(field)
-                checks.append({
-                    "name": f"criterion:{criterion}",
-                    "ok": bool(value),
-                    "detail": f"output.{field} is {'set' if value else 'empty'}",
-                    "recoverable": _is_retryable(result.error),
-                })
+                checks.append(
+                    {
+                        "name": f"criterion:{criterion}",
+                        "ok": bool(value),
+                        "detail": f"output.{field} is {'set' if value else 'empty'}",
+                        "recoverable": _is_retryable(result.error),
+                    }
+                )
         return checks
 
     def _needs_judgement(

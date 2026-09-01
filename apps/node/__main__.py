@@ -132,7 +132,9 @@ class NodeClient:
                         # Actions run concurrently so one slow action cannot block the socket.
                         task = asyncio.create_task(self._handle(ws, frame))
                         self._running[frame.action_id] = task
-                        task.add_done_callback(lambda _, a=frame.action_id: self._running.pop(a, None))
+                        task.add_done_callback(
+                            lambda _, a=frame.action_id: self._running.pop(a, None)
+                        )
                     elif isinstance(frame, ShutdownFrame):
                         log.info("node_shutdown_requested", reason=frame.reason)
                         return
@@ -150,15 +152,23 @@ class NodeClient:
     async def _handle(self, ws, frame: ActionFrame) -> None:
         result = await self.executor.execute(
             DeviceAction(
-                id=frame.action_id, action=frame.action, args=frame.args,
-                timeout_s=frame.timeout_s, trace_id=frame.trace_id,
+                id=frame.action_id,
+                action=frame.action,
+                args=frame.args,
+                timeout_s=frame.timeout_s,
+                trace_id=frame.trace_id,
             )
         )
         await ws.send(
             ActionResultFrame(
-                action_id=frame.action_id, ok=result.ok, verified=result.verified,
-                evidence=result.evidence, data=result.data, error=result.error,
-                duration_ms=result.duration_ms, undo=result.undo,
+                action_id=frame.action_id,
+                ok=result.ok,
+                verified=result.verified,
+                evidence=result.evidence,
+                data=result.data,
+                error=result.error,
+                duration_ms=result.duration_ms,
+                undo=result.undo,
             ).model_dump_json()
         )
 
@@ -167,9 +177,13 @@ def main() -> None:
     parser = argparse.ArgumentParser(prog="thursday-node", description="Thursday device node")
     parser.add_argument("--name", default=platform.node(), help="device name the owner will speak")
     parser.add_argument("--core", default="ws://127.0.0.1:8000/api/v1/device")
-    parser.add_argument("--kind", default="desktop", choices=["desktop", "laptop", "server", "phone"])
     parser.add_argument(
-        "--allow-root", action="append", default=None,
+        "--kind", default="desktop", choices=["desktop", "laptop", "server", "phone"]
+    )
+    parser.add_argument(
+        "--allow-root",
+        action="append",
+        default=None,
         help="a directory this node may touch (repeatable). Defaults to the home directory.",
     )
     parser.add_argument("--key-file", default=str(Path.home() / ".thursday" / "node.json"))
@@ -187,7 +201,9 @@ def main() -> None:
         kind=args.kind,
     )
     log.info(
-        "node_starting", name=args.name, os=executor.adapter.os_name,
+        "node_starting",
+        name=args.name,
+        os=executor.adapter.os_name,
         roots=[str(r) for r in roots],
     )
     try:

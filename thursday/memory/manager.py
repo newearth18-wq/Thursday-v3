@@ -78,7 +78,9 @@ class MemoryManager:
 
     # ------------------------------------------------------------------ write policy
 
-    def should_write(self, write: MemoryWrite, *, is_small_talk: bool | None = None) -> tuple[bool, str]:
+    def should_write(
+        self, write: MemoryWrite, *, is_small_talk: bool | None = None
+    ) -> tuple[bool, str]:
         """Return (decision, reason). Reasons are logged so the policy stays auditable."""
         if self.memory_disabled:
             return False, "memory is disabled by an active privacy zone"
@@ -102,7 +104,10 @@ class MemoryManager:
             return True, f"importance {write.importance:.2f} is above threshold"
         if write.layer is MemoryLayer.WORKING:
             return True, "task-scoped working memory"
-        return False, f"nothing durable in a {write.layer} write of importance {write.importance:.2f}"
+        return (
+            False,
+            f"nothing durable in a {write.layer} write of importance {write.importance:.2f}",
+        )
 
     async def write(
         self, write: MemoryWrite, *, force: bool = False, detect_conflicts: bool = True
@@ -122,10 +127,15 @@ class MemoryManager:
         embedding = (await self._embedder.embed([redacted.text]))[0]  # type: ignore[attr-defined]
 
         # Dedupe and conflict detection run against current records in the same layer.
-        near = self._nearest(embedding, layer=write.layer, key=write.key) if detect_conflicts else None
+        near = (
+            self._nearest(embedding, layer=write.layer, key=write.key) if detect_conflicts else None
+        )
         if near is not None:
             existing, similarity = near
-            if similarity >= DEDUPE_SIMILARITY and existing.content.strip() == redacted.text.strip():
+            if (
+                similarity >= DEDUPE_SIMILARITY
+                and existing.content.strip() == redacted.text.strip()
+            ):
                 existing.access_count += 1
                 existing.confidence = max(existing.confidence, write.confidence)
                 existing.last_accessed_at = utcnow()

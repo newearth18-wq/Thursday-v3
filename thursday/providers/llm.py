@@ -36,9 +36,7 @@ class RuleBasedLLM:
     local = True
 
     async def complete(self, request: LLMRequest) -> LLMResponse:
-        user_text = next(
-            (m.content for m in reversed(request.messages) if m.role == "user"), ""
-        )
+        user_text = next((m.content for m in reversed(request.messages) if m.role == "user"), "")
         if request.json_schema:
             payload = self._structured(request, user_text)
             return LLMResponse(
@@ -188,7 +186,9 @@ class AnthropicLLM:
         "claude-opus-5": (15.0, 75.0),
     }
 
-    def __init__(self, model: str, vault: object, key_handle: str, *, tier: ModelTier = ModelTier.STANDARD) -> None:
+    def __init__(
+        self, model: str, vault: object, key_handle: str, *, tier: ModelTier = ModelTier.STANDARD
+    ) -> None:
         self.model = model
         self.name = f"anthropic:{model}"
         self.tier = tier

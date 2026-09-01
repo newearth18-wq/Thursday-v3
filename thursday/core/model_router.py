@@ -99,7 +99,9 @@ class ModelRouter:
                 "refusing to send SECRET-classified content to a non-local model",
                 provider=getattr(provider, "name", "unknown"),
             )
-        return RouteDecision(tier=tier, provider_name=getattr(provider, "name", "?"), reasons=tuple(reasons))
+        return RouteDecision(
+            tier=tier, provider_name=getattr(provider, "name", "?"), reasons=tuple(reasons)
+        )
 
     def _resolve(self, tier: ModelTier) -> object | None:
         provider = self.providers.get(tier)
@@ -117,7 +119,10 @@ class ModelRouter:
     ) -> tuple[LLMResponse, RouteDecision]:
         text = " ".join(m.content for m in request.messages if m.role == "user")
         decision = self.choose(
-            text=text, sensitivity=request.sensitivity, offline=offline, prefer=prefer or request.tier
+            text=text,
+            sensitivity=request.sensitivity,
+            offline=offline,
+            prefer=prefer or request.tier,
         )
         provider = self.providers[decision.tier]
         name = getattr(provider, "name", "?")

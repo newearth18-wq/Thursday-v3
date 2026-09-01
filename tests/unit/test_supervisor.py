@@ -58,7 +58,9 @@ async def test_a_dispatched_but_unobserved_action_never_passes(supervisor):
 
 
 async def test_a_missing_output_field_is_a_retry(supervisor):
-    report = await supervisor.verify(contract(), AgentResult(agent="computer", ok=True, output={"action": "x"}))
+    report = await supervisor.verify(
+        contract(), AgentResult(agent="computer", ok=True, output={"action": "x"})
+    )
     assert report.verdict is AgentVerdict.RETRY
     assert "verified" in report.critique
 
@@ -93,16 +95,24 @@ async def test_research_output_without_sources_fails_provenance(supervisor):
 async def test_failures_a_repeat_cannot_fix_escalate_immediately(supervisor):
     report = await supervisor.verify(
         contract(),
-        AgentResult(agent="computer", ok=False, error="FileNotFoundError: no executable for 'chrome'"),
+        AgentResult(
+            agent="computer", ok=False, error="FileNotFoundError: no executable for 'chrome'"
+        ),
     )
     assert report.verdict is AgentVerdict.ESCALATE
 
 
 async def test_transient_failures_are_retried_within_the_attempt_budget(supervisor):
-    result = AgentResult(agent="computer", ok=False, error="TimeoutError: the device did not answer")
-    assert (await supervisor.verify(contract(), result, attempt=1, max_attempts=2)).verdict is AgentVerdict.RETRY
+    result = AgentResult(
+        agent="computer", ok=False, error="TimeoutError: the device did not answer"
+    )
+    assert (
+        await supervisor.verify(contract(), result, attempt=1, max_attempts=2)
+    ).verdict is AgentVerdict.RETRY
     # Once the attempts are spent, it becomes the owner's problem rather than a loop (§96).
-    assert (await supervisor.verify(contract(), result, attempt=2, max_attempts=2)).verdict is AgentVerdict.ESCALATE
+    assert (
+        await supervisor.verify(contract(), result, attempt=2, max_attempts=2)
+    ).verdict is AgentVerdict.ESCALATE
 
 
 async def test_the_offline_verifier_escalates_rather_than_fabricating_a_pass():

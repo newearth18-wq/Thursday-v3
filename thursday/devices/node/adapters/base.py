@@ -29,11 +29,23 @@ class OSAdapter(ABC):
 
     def capabilities(self) -> DeviceCapabilities:
         return DeviceCapabilities(
-            open_app=True, close_app=True, open_file=True, write_file=True, delete_file=True,
-            list_dir=True, search_files=True, run_shell=True, screenshot=self.can_screenshot(),
-            read_active_window=self.can_read_window(), clipboard=self.can_clipboard(),
-            notify=self.can_notify(), volume=self.can_volume(), process_status=True,
-            system_info=True, power=True, speaker=True,
+            open_app=True,
+            close_app=True,
+            open_file=True,
+            write_file=True,
+            delete_file=True,
+            list_dir=True,
+            search_files=True,
+            run_shell=True,
+            screenshot=self.can_screenshot(),
+            read_active_window=self.can_read_window(),
+            clipboard=self.can_clipboard(),
+            notify=self.can_notify(),
+            volume=self.can_volume(),
+            process_status=True,
+            system_info=True,
+            power=True,
+            speaker=True,
         )
 
     def can_screenshot(self) -> bool:
@@ -52,7 +64,9 @@ class OSAdapter(ABC):
         return False
 
     async def telemetry(self) -> DeviceTelemetry:
-        telemetry = DeviceTelemetry(current_user=os.environ.get("USER") or os.environ.get("USERNAME"))
+        telemetry = DeviceTelemetry(
+            current_user=os.environ.get("USER") or os.environ.get("USERNAME")
+        )
         try:
             import psutil
 

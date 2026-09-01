@@ -38,7 +38,9 @@ def test_outward_facing_actions_require_approval(engine):
 
 def test_unknown_actions_fail_closed(engine):
     """An action nobody declared is ASK, never AUTO."""
-    assert engine.decide(ActionRequest(action="frobnicate_the_thing")).decision is PolicyDecision.ASK
+    assert (
+        engine.decide(ActionRequest(action="frobnicate_the_thing")).decision is PolicyDecision.ASK
+    )
 
 
 def test_hard_blocked_actions_have_no_override_path(engine):
@@ -63,7 +65,9 @@ def test_a_user_may_loosen_low_levels_but_not_system_ones():
 
 
 def test_blast_radius_turns_an_automatic_action_into_a_question(engine):
-    assert engine.decide(ActionRequest(action="move", object_count=3)).decision is PolicyDecision.AUTO
+    assert (
+        engine.decide(ActionRequest(action="move", object_count=3)).decision is PolicyDecision.AUTO
+    )
     verdict = engine.decide(ActionRequest(action="move", object_count=342))
     assert verdict.decision is PolicyDecision.ASK
     assert verdict.rule == "blast_radius"
@@ -94,13 +98,19 @@ def test_an_agent_cannot_exceed_its_ceiling(engine):
 
 def test_path_scopes_confine_an_agent(engine):
     permissions = PermissionSet(max_level=PermissionLevel.MODIFY, path_scopes=["/home/u/work/*"])
-    assert engine.decide(
-        ActionRequest(action="write_file", resource="/home/u/work/report.md"),
-        permissions=permissions,
-    ).decision is PolicyDecision.AUTO
-    assert engine.decide(
-        ActionRequest(action="write_file", resource="/etc/passwd"), permissions=permissions
-    ).decision is PolicyDecision.BLOCK
+    assert (
+        engine.decide(
+            ActionRequest(action="write_file", resource="/home/u/work/report.md"),
+            permissions=permissions,
+        ).decision
+        is PolicyDecision.AUTO
+    )
+    assert (
+        engine.decide(
+            ActionRequest(action="write_file", resource="/etc/passwd"), permissions=permissions
+        ).decision
+        is PolicyDecision.BLOCK
+    )
 
 
 def test_grants_are_scoped_and_expire(engine):
@@ -109,21 +119,28 @@ def test_grants_are_scoped_and_expire(engine):
             action="send_email", resource_glob="*@school.ac.th", scope=ApprovalScope.ALWAYS
         )
     )
-    assert engine.decide(
-        ActionRequest(action="send_email", resource="dean@school.ac.th")
-    ).decision is PolicyDecision.AUTO
-    assert engine.decide(
-        ActionRequest(action="send_email", resource="someone@elsewhere.com")
-    ).decision is PolicyDecision.ASK
+    assert (
+        engine.decide(ActionRequest(action="send_email", resource="dean@school.ac.th")).decision
+        is PolicyDecision.AUTO
+    )
+    assert (
+        engine.decide(ActionRequest(action="send_email", resource="someone@elsewhere.com")).decision
+        is PolicyDecision.ASK
+    )
 
 
 def test_an_expired_grant_stops_working(engine):
     engine.add_grant(
         PermissionGrant(
-            action="send_email", resource_glob="*", expires_at=datetime.now(UTC) - timedelta(minutes=1)
+            action="send_email",
+            resource_glob="*",
+            expires_at=datetime.now(UTC) - timedelta(minutes=1),
         )
     )
-    assert engine.decide(ActionRequest(action="send_email", resource="x@y.z")).decision is PolicyDecision.ASK
+    assert (
+        engine.decide(ActionRequest(action="send_email", resource="x@y.z")).decision
+        is PolicyDecision.ASK
+    )
 
 
 def test_always_allow_always_gets_an_expiry(engine):
@@ -141,14 +158,18 @@ def test_secret_payloads_may_not_leave_the_machine(engine):
 
 def test_a_privacy_zone_blocks_the_surface_it_names():
     device_id = new_id()
-    zones = PrivacyZoneRegistry([PrivacyZone(name="bedroom", device_ids={device_id}, camera_disabled=True)])
+    zones = PrivacyZoneRegistry(
+        [PrivacyZone(name="bedroom", device_ids={device_id}, camera_disabled=True)]
+    )
     engine = PermissionEngine(zones=zones)
-    assert engine.decide(
-        ActionRequest(action="camera_capture", device_id=device_id)
-    ).decision is PolicyDecision.BLOCK
-    assert engine.decide(
-        ActionRequest(action="camera_capture", device_id=new_id())
-    ).decision is not PolicyDecision.BLOCK
+    assert (
+        engine.decide(ActionRequest(action="camera_capture", device_id=device_id)).decision
+        is PolicyDecision.BLOCK
+    )
+    assert (
+        engine.decide(ActionRequest(action="camera_capture", device_id=new_id())).decision
+        is not PolicyDecision.BLOCK
+    )
 
 
 def test_lockdown_permits_only_reading(engine):

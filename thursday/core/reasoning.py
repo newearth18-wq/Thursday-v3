@@ -43,7 +43,11 @@ class ReasoningEngine:
     async def understand(self, context: ContextPackage) -> Intent:
         if (match := intent_rules.parse(context.turn.text, wake_word=self._wake_word)) is not None:
             if match.confident:
-                log.debug("intent_from_rules", kind=str(match.intent.kind), confidence=match.intent.confidence)
+                log.debug(
+                    "intent_from_rules",
+                    kind=str(match.intent.kind),
+                    confidence=match.intent.confidence,
+                )
                 return self._anchor(match.intent, context)
             rule_hint: Intent | None = match.intent
         else:
@@ -83,7 +87,9 @@ class ReasoningEngine:
             )
         except (ValueError, TypeError) as exc:
             return Intent(
-                kind=IntentKind.CLARIFY, objective=context.turn.text, confidence=0.2,
+                kind=IntentKind.CLARIFY,
+                objective=context.turn.text,
+                confidence=0.2,
                 rationale=f"malformed classification: {exc}",
             )
         return self._anchor(intent, context)
@@ -110,13 +116,18 @@ class ReasoningEngine:
         if intent.target_device is None and world.active_device_name:
             intent.target_device = "this"
         entities = dict(intent.entities)
-        if entities.get("path") in ("that file", "ไฟล์นั้น", "the file", "") and world.last_referenced_file:
+        if (
+            entities.get("path") in ("that file", "ไฟล์นั้น", "the file", "")
+            and world.last_referenced_file
+        ):
             entities["path"] = world.last_referenced_file
             intent.entities = entities
             intent.rationale += " (resolved 'that file' from world state)"
         return intent
 
-    def _render(self, context: ContextPackage, hint: Intent | None, *, include_detail: str | None = None) -> str:
+    def _render(
+        self, context: ContextPackage, hint: Intent | None, *, include_detail: str | None = None
+    ) -> str:
         lines: list[str] = []
         world = context.world
         lines.append("## Current state")
@@ -148,7 +159,9 @@ class ReasoningEngine:
         if context.selection and context.selection.text:
             lines.append(f"\n## Selected text\n{context.selection.text[:800]}")
         if context.gesture:
-            lines.append(f"\n## Gesture\n- {context.gesture.gesture} at {context.gesture.pointing_at}")
+            lines.append(
+                f"\n## Gesture\n- {context.gesture.gesture} at {context.gesture.pointing_at}"
+            )
 
         if context.history:
             lines.append("\n## Recent conversation")

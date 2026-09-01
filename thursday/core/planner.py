@@ -48,7 +48,9 @@ class Planner:
         args = self._args_for(action, intent)
         criteria = ["output.verified is true"]
         if action in ("open_app", "close_app"):
-            criteria.append(f"the {action.split('_')[0]} of {args.get('name')} is observable on the device")
+            criteria.append(
+                f"the {action.split('_')[0]} of {args.get('name')} is observable on the device"
+            )
         return Plan(
             objective=intent.objective,
             rationale=f"single device action ({action}) delegated to the computer agent",
@@ -73,7 +75,9 @@ class Planner:
                 objective=intent.objective,
                 rationale="answered from the device registry and world state",
             )
-        return Plan(objective=intent.objective, rationale="answered from world state and the task list")
+        return Plan(
+            objective=intent.objective, rationale="answered from world state and the task list"
+        )
 
     def _recall_plan(self, intent: Intent, context: ContextPackage) -> Plan:
         return Plan(
