@@ -19,10 +19,12 @@ _factory: async_sessionmaker[AsyncSession] | None = None
 
 def init_engine(settings: Settings) -> AsyncEngine:
     global _engine, _factory
+    url = settings.resolved_database_url
     _engine = create_async_engine(
-        settings.database_url,
+        url,
         echo=settings.debug,
-        pool_pre_ping=not settings.database_url.startswith("sqlite"),
+        # SQLite has no connection to keep alive; pre-ping only costs a round trip there.
+        pool_pre_ping=not url.startswith("sqlite"),
         future=True,
     )
     _factory = async_sessionmaker(_engine, expire_on_commit=False, class_=AsyncSession)
