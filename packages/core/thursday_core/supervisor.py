@@ -1,4 +1,4 @@
-"""Supervisor (§18, §76).
+"""Supervisor (PART 15).
 
 Agent output is never trusted because an agent produced it. Verification runs in a fixed
 order and stops early: deterministic checks first (schema, completeness, arithmetic,
@@ -48,10 +48,55 @@ def _is_retryable(error: str | None) -> bool:
     return not (error and any(marker in error for marker in NON_RETRYABLE_ERRORS))
 
 
+#: PART 15 — work of these kinds is never accepted on the agent's own word, whatever the
+#: deterministic checks say. Keyed on what the contract or the output contains.
+MANDATORY_SUPERVISION_MARKERS: tuple[str, ...] = (
+    "calculat",
+    "คำนวณ",  # a calculation
+    "report",
+    "รายงาน",  # a report
+    "code",
+    "โค้ด",
+    "script",  # a code change
+    "email",
+    "send",
+    "publish",  # an external action
+    "delete",
+    "remove",
+    "ลบ",  # a destructive action
+)
+
+
 class Supervisor:
     def __init__(self, models: object | None = None, *, use_llm_critique: bool = True) -> None:
         self._models = models
         self._use_llm = use_llm_critique
+
+    def is_mandatory(self, contract: JobContract, result: AgentResult) -> tuple[bool, str]:
+        """PART 15. Whether this work *must* be supervised, and why.
+
+        Returns a reason as well as a verdict, because "we checked this because it wrote a
+        file" is the kind of thing an owner asks about later.
+        """
+        haystack = " ".join(
+            [contract.objective, contract.instructions, result.summary, *contract.success_criteria]
+        ).lower()
+        for marker in MANDATORY_SUPERVISION_MARKERS:
+            if marker in haystack:
+                return True, f"the work involves {marker!r}"
+        if any(not t.spec_reversible for t in result.tool_results if hasattr(t, "spec_reversible")):
+            return True, "the work included an irreversible action"
+        if any(
+            t.tool.startswith(("file.write", "file.delete", "file.move"))
+            for t in result.tool_results
+        ):
+            return True, "the work modified files"
+        if any(
+            t.tool.split(".")[0] in ("email", "message", "social", "purchase", "http")
+            for t in result.tool_results
+        ):
+            return True, "the work reached outside this machine"
+        return False, "no mandatory-supervision trigger"
 
     async def verify(
         self, contract: JobContract, result: AgentResult, *, attempt: int = 1, max_attempts: int = 2
@@ -74,21 +119,33 @@ class Supervisor:
             if not critique_check["ok"]:
                 blocking = [critique_check]
 
+        mandatory, why = self.is_mandatory(contract, result)
+
         if not blocking:
             return VerificationReport(
                 verdict=AgentVerdict.PASS,
                 checks=checks,
+                reason=why if mandatory else "all checks passed",
                 confidence=self._confidence(checks),
+                quality_score=self._quality(checks, result),
+                issues=[c["detail"] for c in checks if not c["ok"]],
             )
 
         critique = "; ".join(f"{c['name']}: {c['detail']}" for c in blocking)
+        issues = [f"{c['name']}: {c['detail']}" for c in checks if not c["ok"]]
         # A failure that more effort could plausibly fix is a RETRY; one that needs a
         # decision, a permission, or a human is an ESCALATE.
         recoverable = all(c.get("recoverable", True) for c in blocking) and attempt < max_attempts
         verdict = AgentVerdict.RETRY if recoverable else AgentVerdict.ESCALATE
         log.info("supervisor_verdict", agent=result.agent, verdict=verdict, failures=len(blocking))
         return VerificationReport(
-            verdict=verdict, checks=checks, critique=critique, confidence=self._confidence(checks)
+            verdict=verdict,
+            checks=checks,
+            critique=critique,
+            reason=why if mandatory else "one or more checks failed",
+            confidence=self._confidence(checks),
+            quality_score=self._quality(checks, result),
+            issues=issues,
         )
 
     # ------------------------------------------------------------------ checks
@@ -207,15 +264,39 @@ class Supervisor:
                 )
         return checks
 
+    def _quality(self, checks: list[dict[str, Any]], result: AgentResult) -> float:
+        """How *good* the work is, separately from whether it passed.
+
+        A result can satisfy every criterion and still be thin — no evidence, no summary,
+        a hedged confidence. A caller deciding whether to re-run wants to know that.
+        """
+        if not checks:
+            return 0.5
+        passed = sum(1 for c in checks if c["ok"]) / len(checks)
+        substance = 0.0
+        if result.summary:
+            substance += 0.1
+        if result.evidence:
+            substance += 0.1
+        if all(t.verified for t in result.tool_results) and result.tool_results:
+            substance += 0.1
+        penalty = 0.05 * len(result.warnings)
+        return round(
+            max(0.0, min(1.0, 0.7 * passed + substance + 0.2 * result.confidence - penalty)), 2
+        )
+
     def _needs_judgement(
         self, contract: JobContract, result: AgentResult, checks: list[dict[str, Any]]
     ) -> bool:
-        """Only spend a model call when the deterministic checks cannot settle it."""
+        """Only spend a model call when the deterministic checks cannot settle it —
+        or when PART 15 says this kind of work is never taken on trust."""
         if not self._use_llm or self._models is None:
+            return False
+        if not result.output:
             return False
         machine_checked = {c["name"].removeprefix("criterion:") for c in checks}
         unchecked = [c for c in contract.success_criteria if c not in machine_checked]
-        return bool(unchecked) and bool(result.output)
+        return bool(unchecked) or self.is_mandatory(contract, result)[0]
 
     async def _llm_critique(self, contract: JobContract, result: AgentResult) -> dict[str, Any]:
         request = LLMRequest(

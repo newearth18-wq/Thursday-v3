@@ -20,7 +20,9 @@ from thursday_shared.enums import (
     DataSensitivity,
     DeviceStatus,
     IntentKind,
+    MemoryDecision,
     MemoryLayer,
+    MemoryRelation,
     MemorySource,
     ModelTier,
     NotificationPriority,
@@ -286,6 +288,71 @@ class MemoryWrite(Base):
     expires_at: datetime | None = None
 
 
+class MemoryCandidate(Base):
+    """PART 39. A proposal to remember something — not yet a memory.
+
+    ``reason_to_store`` is required in spirit: if nothing can be said about why this is
+    worth keeping, that is itself the answer.
+    """
+
+    content: str
+    layer: MemoryLayer = MemoryLayer.SEMANTIC
+    key: str | None = None
+    structured: dict[str, Any] = Field(default_factory=dict)
+    importance: float = 0.5
+    confidence: float = 0.7
+    source: MemorySource = MemorySource.INFERENCE
+    source_ref: str | None = None
+    sensitivity: DataSensitivity = DataSensitivity.PRIVATE
+    project_id: UUID | None = None
+    task_id: UUID | None = None
+    reason_to_store: str = ""
+    #: Set when an agent proposes the write, so PART 76's rule can be applied.
+    proposed_by: str | None = None
+    pinned: bool = False
+    expires_at: datetime | None = None
+
+    def to_write(self) -> MemoryWrite:
+        return MemoryWrite(
+            layer=self.layer,
+            content=self.content,
+            key=self.key,
+            structured=self.structured,
+            importance=self.importance,
+            confidence=self.confidence,
+            source=self.source,
+            source_ref=self.source_ref,
+            project_id=self.project_id,
+            task_id=self.task_id,
+            sensitivity=self.sensitivity,
+            pinned=self.pinned,
+            expires_at=self.expires_at,
+        )
+
+
+class MemoryJudgement(Base):
+    """The write policy's answer, with its reasoning attached (PART 39)."""
+
+    decision: MemoryDecision
+    reason: str
+    ttl_hours: float | None = None
+
+    @property
+    def stores(self) -> bool:
+        return self.decision in (MemoryDecision.STORE, MemoryDecision.TEMPORARY)
+
+
+class MemoryLink(Base):
+    """PART 41. A typed edge between two memories, kept instead of an overwrite."""
+
+    id: UUID = Field(default_factory=new_id)
+    from_id: UUID
+    to_id: UUID
+    relation: MemoryRelation
+    detected_at: datetime = Field(default_factory=utcnow)
+    note: str = ""
+
+
 class MemoryQuery(Base):
     text: str = ""
     layers: list[MemoryLayer] = Field(default_factory=list)
@@ -532,53 +599,113 @@ class PermissionSet(Base):
 
 
 class JobContract(Base):
-    """§17. No agent runs without one."""
+    """PART 14's ``AgentJob``. No agent runs without one.
 
+    The contract is what makes an agent's output judgeable: the success criteria are fixed
+    *before* the work starts, so the Supervisor is checking against a standard rather than
+    against whatever the agent decided to produce.
+    """
+
+    job_id: UUID = Field(default_factory=new_id)
     task_id: UUID
     step_id: UUID
     agent: str
+    #: What to achieve. The agent's own prompt says how.
     objective: str
+    instructions: str = ""
     inputs: dict[str, Any] = Field(default_factory=dict)
+    context: dict[str, Any] = Field(default_factory=dict)
+    allowed_tools: list[str] = Field(default_factory=list)
     output_schema: dict[str, Any] = Field(default_factory=dict)
     success_criteria: list[str] = Field(default_factory=list)
     permissions: PermissionSet = Field(default_factory=PermissionSet)
     deadline_s: float = 120.0
     budget: Budget = Field(default_factory=Budget)
-    critique: str | None = None  # populated on an informed retry (§18)
+    #: Populated on an informed retry — the Supervisor's critique of the last attempt.
+    critique: str | None = None
     trace_id: str = Field(default_factory=current_trace_id)
 
 
+#: PART 14's ``AgentJob`` is this contract; the alias keeps the brief's vocabulary usable.
+AgentJob = JobContract
+
+
 class AgentSpec(Base):
+    """PART 11. What an agent declares about itself, so the Router can choose without
+    the owner ever being asked to."""
+
     name: str
     description: str
+    agent_type: str = "specialist"
     capabilities: list[str] = Field(default_factory=list)
     tools: list[str] = Field(default_factory=list)
+    supported_input: list[str] = Field(default_factory=lambda: ["text"])
+    supported_output: list[str] = Field(default_factory=lambda: ["text"])
     permission_ceiling: PermissionLevel = PermissionLevel.READ
     default_budget: Budget = Field(default_factory=Budget)
     model_tier: ModelTier = ModelTier.STANDARD
+    #: Rough cost per run, for the Router's cost term. Not billing.
+    cost_profile: Literal["free", "cheap", "moderate", "expensive"] = "cheap"
+    latency_profile: Literal["instant", "fast", "moderate", "slow"] = "fast"
+    #: LOCAL_ONLY means this agent must never see cloud-routed content.
+    privacy_profile: Literal["local_only", "local_preferred", "any"] = "any"
     temporary: bool = False
     system_prompt: str = ""
 
 
+class AgentSelection(Base):
+    """PART 13. Which agent, and *why* — a routing decision that cannot be explained is a
+    routing decision that cannot be debugged."""
+
+    agent: str
+    score: float
+    reasons: list[str] = Field(default_factory=list)
+    runners_up: list[tuple[str, float]] = Field(default_factory=list)
+    #: Below the registry's floor, Thursday asks a clarifying question instead of guessing.
+    confident: bool = True
+
+
 class AgentResult(Base):
+    """PART 14. What an agent hands back — including how sure it is, and what it did."""
+
     agent: str
     ok: bool
+    job_id: UUID | None = None
     output: dict[str, Any] = Field(default_factory=dict)
     summary: str = ""
+    #: What the claim rests on. The Supervisor checks provenance against this.
     evidence: list[dict[str, Any]] = Field(default_factory=list)
+    #: Every action the agent took, in order — the audit trail's raw material.
+    actions_taken: list[str] = Field(default_factory=list)
     tool_results: list[ToolResult] = Field(default_factory=list)
+    confidence: float = 0.8
+    warnings: list[str] = Field(default_factory=list)
     error: str | None = None
     duration_ms: float = 0.0
     spend: Spend = Field(default_factory=Spend)
 
+    @property
+    def status(self) -> str:
+        if not self.ok:
+            return "failed"
+        return "ok" if all(t.verified for t in self.tool_results) else "unverified"
+
 
 class VerificationReport(Base):
-    """§18, §76. ``verdict`` gates the word 'success'."""
+    """PART 15's ``SupervisorResult``. ``verdict`` gates the word "success".
+
+    ``quality_score`` is deliberately separate from ``verdict``: work can pass every check
+    and still be mediocre, and a caller deciding whether to re-run wants to know which.
+    """
 
     verdict: AgentVerdict
     checks: list[dict[str, Any]] = Field(default_factory=list)
     critique: str = ""
+    reason: str = ""
     confidence: float = 0.5
+    #: 0–1. How good the work is, given that it passed.
+    quality_score: float = 0.0
+    issues: list[str] = Field(default_factory=list)
 
     @property
     def passed(self) -> bool:
@@ -586,6 +713,10 @@ class VerificationReport(Base):
 
     def failures(self) -> list[dict[str, Any]]:
         return [c for c in self.checks if not c.get("ok", False)]
+
+
+#: PART 15's name for the same object.
+SupervisorResult = VerificationReport
 
 
 # --------------------------------------------------------------------------- permissions
@@ -759,6 +890,122 @@ class ThursdayReply(Base):
     detail: str | None = None
     verified: bool = True
     trace_id: str = Field(default_factory=current_trace_id)
+
+
+class Attachment(Base):
+    """A file the owner handed to Thursday with the request."""
+
+    name: str
+    media_type: str = "application/octet-stream"
+    path: str | None = None
+    size: int | None = None
+
+
+class UserRequest(Base):
+    """PART 6. One input model for every modality.
+
+    Everything the owner can put in front of Thursday arrives here — typed text, a
+    transcript, a camera frame, what is on screen, where they are pointing. Growing this
+    by adding a field beats growing ``handle_turn(**kwargs)`` by adding a keyword, because
+    the API boundary and the multimodal resolver both need the same shape.
+    """
+
+    user_id: UUID | None = None
+    device_id: UUID | None = None
+    conversation_id: UUID = Field(default_factory=new_id)
+    text: str = ""
+    #: Raw audio, when the caller has not transcribed it. STT runs core-side.
+    audio: bytes | None = None
+    #: A camera frame or an image the owner attached.
+    image: bytes | None = None
+    screen_context: ScreenContext | None = None
+    selection_context: SelectionContext | None = None
+    gesture_context: GestureContext | None = None
+    attachments: list[Attachment] = Field(default_factory=list)
+    modality: Literal["text", "voice", "vision", "gesture", "event"] = "text"
+    #: Block until an approval is answered, rather than returning the request to the caller.
+    wait_for_approval: bool = False
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+    @property
+    def is_multimodal(self) -> bool:
+        return any((self.image, self.screen_context, self.gesture_context, self.attachments))
+
+
+class UiEvent(Base):
+    """Something the interface should do in response — highlight, open a panel, animate."""
+
+    kind: str
+    payload: dict[str, Any] = Field(default_factory=dict)
+
+
+class SpeechDirective(Base):
+    """How the reply should be spoken, and where. Audio is synthesised at the edge."""
+
+    text: str
+    voice_mode: VoiceMode = VoiceMode.NORMAL
+    voice: str = "thursday-neutral"
+    device_id: UUID | None = None
+    interruptible: bool = True
+
+
+class ThursdayResponse(Base):
+    """PART 6. What the owner receives, whatever surface they are on."""
+
+    text: str
+    speech: SpeechDirective | None = None
+    task_id: UUID | None = None
+    status: TaskState | None = None
+    conversation_id: UUID | None = None
+    voice_mode: VoiceMode = VoiceMode.NORMAL
+    avatar_state: str = "IDLE"
+    confidence: float = 1.0
+    #: False when an action was dispatched but its effect could not be observed (PART 5.1).
+    verified: bool = True
+    detail: str | None = None
+    intent: Intent | None = None
+    citations: list[Citation] = Field(default_factory=list)
+    approvals: list[ApprovalRequest] = Field(default_factory=list)
+    actions: list[dict[str, Any]] = Field(default_factory=list)
+    ui_events: list[UiEvent] = Field(default_factory=list)
+    trace_id: str = Field(default_factory=current_trace_id)
+
+    @classmethod
+    def from_reply(
+        cls,
+        reply: ThursdayReply,
+        *,
+        conversation_id: UUID | None = None,
+        status: TaskState | None = None,
+        voice: str = "thursday-neutral",
+        device_id: UUID | None = None,
+    ) -> ThursdayResponse:
+        return cls(
+            text=reply.text,
+            speech=SpeechDirective(
+                text=reply.text, voice_mode=reply.voice_mode, voice=voice, device_id=device_id
+            ),
+            task_id=reply.task_id,
+            status=status,
+            conversation_id=conversation_id,
+            voice_mode=reply.voice_mode,
+            avatar_state=reply.avatar_state,
+            confidence=reply.confidence,
+            verified=reply.verified,
+            detail=reply.detail,
+            intent=reply.intent,
+            citations=reply.citations,
+            approvals=reply.approvals,
+            ui_events=[
+                UiEvent(kind="avatar.state", payload={"state": reply.avatar_state}),
+                *(
+                    [UiEvent(kind="approval.required", payload={"count": len(reply.approvals)})]
+                    if reply.approvals
+                    else []
+                ),
+            ],
+            trace_id=reply.trace_id,
+        )
 
 
 class LLMMessage(Base):

@@ -86,52 +86,144 @@ async def test_identical_content_deduplicates_rather_than_accumulating(memory):
 async def test_a_weaker_source_does_not_overwrite_a_stronger_one(memory):
     await memory.write(
         MemoryWrite(
-            layer=MemoryLayer.PREFERENCE,
-            key="report_format",
-            content="ผู้ใช้ชอบรายงานเป็น PDF",
+            layer=MemoryLayer.SEMANTIC,
+            key="deadline",
+            content="กำหนดส่งคือวันศุกร์",
             source=MemorySource.USER,
             confidence=0.9,
+            importance=0.8,
         )
     )
     await memory.write(
         MemoryWrite(
-            layer=MemoryLayer.PREFERENCE,
-            key="report_format",
-            content="ผู้ใช้ชอบรายงานเป็น Word",
+            layer=MemoryLayer.SEMANTIC,
+            key="deadline",
+            content="กำหนดส่งคือวันพุธ",
             source=MemorySource.AGENT,
             confidence=0.5,
+            importance=0.8,
         )
     )
     conflicts = memory.conflicts()
     assert len(conflicts) == 1
     assert conflicts[0].resolution == "pending"
-    # Both values survive so Thursday can report the contradiction rather than pick blindly.
-    assert memory.stats()["preference"] == 2
-    assert "PDF" in conflicts[0].old_value and "Word" in conflicts[0].new_value
+    # Both values survive, so Thursday can report the contradiction rather than pick blindly.
+    assert memory.stats()["semantic"] == 2
+    assert "ศุกร์" in conflicts[0].old_value and "พุธ" in conflicts[0].new_value
+
+    # PART 41 — the relationship is recorded, not implied.
+    from thursday_shared.enums import MemoryRelation
+
+    assert any(edge.relation is MemoryRelation.CONTRADICTS for edge in memory.links())
 
 
 async def test_a_stronger_source_supersedes_with_a_link_not_an_overwrite(memory):
+    from thursday_shared.enums import MemoryRelation
+
     old = await memory.write(
         MemoryWrite(
-            layer=MemoryLayer.PREFERENCE,
+            layer=MemoryLayer.SEMANTIC,
             key="deadline",
             content="ส่งงานวันศุกร์",
             source=MemorySource.AGENT,
             confidence=0.6,
+            importance=0.8,
         )
     )
     new = await memory.write(
         MemoryWrite(
-            layer=MemoryLayer.PREFERENCE,
+            layer=MemoryLayer.SEMANTIC,
             key="deadline",
             content="ส่งงานวันพฤหัสบดี",
             source=MemorySource.USER,
             confidence=0.95,
+            importance=0.8,
         )
     )
     assert old is not None and new is not None
     assert new.supersedes_id == old.id
     assert (await memory.get(old.id)).superseded_by_id == new.id
+    assert any(edge.relation is MemoryRelation.SUPERSEDES for edge in memory.links(new.id))
+
+
+# ------------------------------------------------------------------ PART 39 / PART 76
+
+
+async def test_the_judge_has_four_answers_not_two(memory):
+    """PART 39 — 'should I remember this?' has four honest answers."""
+    from thursday_shared.enums import MemoryDecision
+    from thursday_shared.models import MemoryCandidate
+
+    cases = {
+        MemoryDecision.IGNORE: MemoryCandidate(content="ครับ", source=MemorySource.USER),
+        MemoryDecision.STORE: MemoryCandidate(content="งาน Open House จัดวันที่ 12", importance=0.8),
+        MemoryDecision.TEMPORARY: MemoryCandidate(
+            content="กำลังประมวลผล grades.xlsx", layer=MemoryLayer.WORKING
+        ),
+        MemoryDecision.ASK_USER: MemoryCandidate(content="อาจจะประชุมวันอังคาร", confidence=0.3),
+    }
+    for expected, candidate in cases.items():
+        assert memory.judge(candidate).decision is expected, candidate.content
+
+
+async def test_an_agent_cannot_write_the_owners_preferences(memory):
+    """PART 76 — a document Thursday read may not redefine what the owner likes."""
+    from thursday_shared.enums import MemoryDecision
+    from thursday_shared.models import MemoryCandidate
+
+    judgement, record = await memory.propose(
+        MemoryCandidate(
+            content="ผู้ใช้ชอบรายงานเป็น Word",
+            layer=MemoryLayer.PREFERENCE,
+            source=MemorySource.AGENT,
+            proposed_by="document-agent",
+        )
+    )
+    assert judgement.decision is MemoryDecision.ASK_USER
+    assert record is None
+    assert memory.stats().get("preference", 0) == 0
+    assert len(memory.pending_confirmations()) == 1
+
+
+async def test_the_owner_may_state_a_preference_directly(memory):
+    from thursday_shared.enums import MemoryDecision
+    from thursday_shared.models import MemoryCandidate
+
+    judgement, record = await memory.propose(
+        MemoryCandidate(
+            content="ผู้ใช้ชอบรายงานเป็น PDF",
+            layer=MemoryLayer.PREFERENCE,
+            source=MemorySource.USER,
+        )
+    )
+    assert judgement.decision is MemoryDecision.STORE
+    assert record is not None
+
+
+async def test_confirming_a_candidate_makes_the_owner_its_source(memory):
+    """Accepting is what gives a preference the authority an agent could not give it."""
+    from thursday_shared.models import MemoryCandidate
+
+    await memory.propose(
+        MemoryCandidate(
+            content="ผู้ใช้ชอบรายงานเป็น Word",
+            layer=MemoryLayer.PREFERENCE,
+            source=MemorySource.AGENT,
+        )
+    )
+    record = await memory.confirm(0, accept=True)
+    assert record is not None
+    assert record.source is MemorySource.USER
+    assert memory.pending_confirmations() == []
+
+
+async def test_declining_a_candidate_stores_nothing(memory):
+    from thursday_shared.models import MemoryCandidate
+
+    await memory.propose(MemoryCandidate(content="อาจจะประชุมวันอังคาร", confidence=0.2))
+    assert await memory.confirm(0, accept=False) is None
+    assert memory.stats().get("semantic", 0) == 0
+    assert memory.pending_confirmations() == []
 
 
 async def test_recall_excludes_superseded_records_by_default(memory):

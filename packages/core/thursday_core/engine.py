@@ -1,11 +1,13 @@
-"""ThursdayEngine — the request lifecycle from §1.2.
+"""ThursdayCore — the request pipeline from PART 7.
 
-    ingest → context → classify → route → understand → decide → authorize
-           → execute → verify → remember → report
+    INPUT → NORMALIZE → AUTHENTICATE → LOAD WORLD STATE → LOAD MEMORY
+          → LOAD DEVICE CONTEXT → BUILD CONTEXT → INTENT → PLANNING
+          → PERMISSION CHECK → EXECUTION → VERIFICATION → MEMORY DECISION
+          → WORLD STATE UPDATE → RESPONSE
 
-One method owns the whole path so the order cannot drift, and so the four steps that make
-this an operating system rather than a chat loop — classification, authorisation,
-verification, and the memory write decision — cannot be skipped by a new code path.
+One method owns the whole path, so the order cannot drift and the four steps that make this
+an operating system rather than a chat loop — classification, authorisation, verification,
+and the memory-write decision — cannot be skipped by a new code path.
 """
 
 from __future__ import annotations
@@ -39,6 +41,8 @@ from thursday_shared.models import (
     ScreenContext,
     SelectionContext,
     ThursdayReply,
+    ThursdayResponse,
+    UserRequest,
 )
 
 from thursday_core.logging import get_logger
@@ -46,9 +50,59 @@ from thursday_core.logging import get_logger
 log = get_logger(__name__)
 
 
-class ThursdayEngine:
+class ThursdayCore:
+    """The one entry point. Everything the owner says arrives through ``handle_request``."""
+
     def __init__(self, container: Any) -> None:
         self.c = container
+
+    # ------------------------------------------------------------------ PART 6 entry point
+
+    async def handle_request(self, request: UserRequest) -> ThursdayResponse:
+        """PART 6/7. One request in, one response out, whatever the modality.
+
+        NORMALIZE happens here: audio becomes a transcript before anything else looks at
+        the request, so the rest of the pipeline never has to care how the words arrived.
+        """
+        text = request.text
+        if not text and request.audio is not None:
+            text = await self._transcribe(request.audio)
+
+        if not text.strip():
+            reply = self.c.composer.clarify(
+                _clarify_question(self.c.composer.language_of(request.text)),
+                language=self.c.composer.language_of(request.text),
+            )
+            return ThursdayResponse.from_reply(reply, conversation_id=request.conversation_id)
+
+        reply = await self.handle_turn(
+            session_id=request.conversation_id,
+            text=text,
+            device_id=request.device_id,
+            modality=request.modality,
+            screen=request.screen_context,
+            selection=request.selection_context,
+            gesture=request.gesture_context,
+            wait_for_approval=request.wait_for_approval,
+        )
+        task = self.c.tasks.get(reply.task_id) if reply.task_id else None
+        return ThursdayResponse.from_reply(
+            reply,
+            conversation_id=request.conversation_id,
+            status=task.status if task else None,
+            voice=self.c.settings.voice_name,
+            device_id=request.device_id,
+        )
+
+    async def _transcribe(self, audio: bytes) -> str:
+        """Speech in, text out. The STT provider is a port; the core never knows which."""
+        stt = getattr(self.c, "stt", None)
+        if stt is None:
+            log.warning("no_stt_provider_configured")
+            return ""
+        return await stt.transcribe(audio)
+
+    # ------------------------------------------------------------------ the pipeline
 
     async def handle_turn(
         self,

@@ -108,6 +108,11 @@ class Container:
     spatial: Any = None
     gesture_mode: Any = None
 
+    # voice
+    stt: Any = None
+    tts: Any = None
+    wake_word: Any = None
+
     # conversation
     world: Any = None
     context_engine: Any = None
@@ -166,6 +171,15 @@ class Container:
                 "detail": (
                     f"{len(self.automations.list(enabled_only=True))} enabled, "
                     f"{len(self.routines.unproposed())} routine suggestions pending"
+                ),
+            }
+        )
+        checks.append(
+            {
+                "component": "voice",
+                "ok": True,
+                "detail": (
+                    f"wake={self.wake_word.keyword} stt={self.stt.name} tts={self.tts.name}"
                 ),
             }
         )
@@ -275,6 +289,9 @@ def build_container(settings: Settings | None = None, *, configure_logs: bool = 
     c.spatial = SpatialMemory()
     c.gesture_mode = GestureMode()
 
+    # -- voice ----------------------------------------------------------------
+    c.stt, c.tts, c.wake_word = _build_voice(settings)
+
     # -- conversation ---------------------------------------------------------
     c.world = WorldState()
     WorldStateProjector(c.world).attach(c.bus)
@@ -309,10 +326,12 @@ def build_container(settings: Settings | None = None, *, configure_logs: bool = 
     c.routines = RoutineLearner()
     c.routines.attach(c.bus)
 
-    from thursday_core.engine import ThursdayEngine
+    from thursday_core.engine import ThursdayCore
 
-    c.engine = ThursdayEngine(c)
+    c.engine = ThursdayCore(c)
     _register_undo_executors(c)
+
+    c.permissions.set_autonomy(settings.autonomy)
 
     log.info(
         "container_built",
@@ -321,6 +340,7 @@ def build_container(settings: Settings | None = None, *, configure_logs: bool = 
         tools=len(c.tools.names()),
         agents=len(c.agents.specs()),
         proactivity=settings.proactivity.name,
+        autonomy=settings.autonomy.name,
     )
     return c
 
@@ -336,6 +356,26 @@ def _build_vault(settings: Settings) -> Any:
         # the swap is a configuration change, not a code change.
         return ChainVault(EnvVault())
     return EnvVault()
+
+
+def _build_voice(settings: Settings) -> tuple[Any, Any, Any]:
+    """Wake word, STT and TTS. The stubs are text-driven, so the whole voice path — wake,
+    transcription, mode selection, routing — is exercisable in CI with no microphone."""
+    from thursday_voice.providers import (
+        KeywordWakeWord,
+        PiperTTS,
+        TextStubSTT,
+        TextStubTTS,
+        WhisperSTT,
+    )
+
+    stt: Any = WhisperSTT() if settings.stt_backend == "whisper" else TextStubSTT()
+    tts: Any = (
+        PiperTTS(model_path=str(settings.data_dir / "piper.onnx"))
+        if settings.tts_backend == "piper"
+        else TextStubTTS()
+    )
+    return stt, tts, KeywordWakeWord(settings.wake_word)
 
 
 def _build_embedder(settings: Settings) -> Any:

@@ -29,9 +29,16 @@ class ResearchAgent(BaseAgent):
         description="Finds and cross-checks information from memory, the vault and the web.",
         capabilities=["research", "search", "recall", "fact_check", "summarize"],
         tools=["memory.search", "obsidian.search", "web.search"],
+        agent_type="research",
+        supported_input=["text", "question"],
+        supported_output=["text", "citations"],
         permission_ceiling=PermissionLevel.READ,
         default_budget=Budget(seconds=90, tool_calls=6, usd=0.05),
         model_tier=ModelTier.STANDARD,
+        cost_profile="moderate",
+        latency_profile="moderate",
+        # It may reach the web, so it must not be handed SECRET content.
+        privacy_profile="any",
         system_prompt=(
             "You research questions for the owner. Cite the source of every claim. "
             "If the available sources do not answer the question, say what is missing "

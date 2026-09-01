@@ -44,9 +44,16 @@ class ComputerAgent(BaseAgent):
             "screen.capture",
             "browser.open",
         ],
+        agent_type="computer",
+        supported_input=["text", "command"],
+        supported_output=["text", "evidence"],
         permission_ceiling=PermissionLevel.MODIFY,
         default_budget=Budget(seconds=60, tool_calls=8, usd=0.02),
         model_tier=ModelTier.FAST,
+        cost_profile="cheap",
+        latency_profile="fast",
+        # It only ever touches the local machine, so it is safe for SECRET content.
+        privacy_profile="local_only",
         system_prompt=(
             "You operate a computer on the owner's behalf. Prefer APIs and application "
             "integration over GUI control. After every action, verify the effect before "

@@ -227,6 +227,28 @@ SOURCE_RANK: dict[MemorySource, int] = {
 }
 
 
+class MemoryDecision(StrEnum):
+    """PART 39. Four outcomes, because "should I remember this?" has four honest answers.
+
+    ``ASK_USER`` is the one that matters: a memory Thursday is unsure about should be
+    confirmed rather than guessed at, because a wrong long-term memory is worse than none.
+    """
+
+    STORE = "STORE"
+    TEMPORARY = "TEMPORARY"
+    IGNORE = "IGNORE"
+    ASK_USER = "ASK_USER"
+
+
+class MemoryRelation(StrEnum):
+    """PART 41. How one memory relates to another. Never a silent overwrite."""
+
+    SUPERSEDES = "supersedes"
+    CONTRADICTS = "contradicts"
+    UPDATES = "updates"
+    DERIVED_FROM = "derived_from"
+
+
 class IntentKind(StrEnum):
     """PART 9. Each category maps to the capabilities the Agent Router needs."""
 

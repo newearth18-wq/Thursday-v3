@@ -17,10 +17,20 @@ from uuid import UUID
 
 from thursday_core.logging import get_logger
 from thursday_security.redaction import SecretRedactor
-from thursday_shared.enums import SOURCE_RANK, DataSensitivity, MemoryLayer, MemorySource
+from thursday_shared.enums import (
+    SOURCE_RANK,
+    DataSensitivity,
+    MemoryDecision,
+    MemoryLayer,
+    MemoryRelation,
+    MemorySource,
+)
 from thursday_shared.models import (
     Event,
+    MemoryCandidate,
     MemoryConflict,
+    MemoryJudgement,
+    MemoryLink,
     MemoryQuery,
     MemoryRecord,
     MemoryWrite,
@@ -75,40 +85,143 @@ class MemoryManager:
         self._working_ttl = timedelta(hours=working_ttl_hours)
         self._records: dict[UUID, MemoryRecord] = {}
         self._conflicts: list[MemoryConflict] = []
-        self.memory_disabled = False  # flipped by a privacy zone (§68)
+        #: PART 41 — typed edges between memories, kept instead of overwrites.
+        self._links: list[MemoryLink] = []
+        #: PART 39 — candidates the owner still has to confirm.
+        self._pending_confirmation: list[MemoryCandidate] = []
+        self.memory_disabled = False  # flipped by a privacy zone (PART 68)
 
     # ------------------------------------------------------------------ write policy
+
+    def judge(self, candidate: MemoryCandidate) -> MemoryJudgement:
+        """PART 39. STORE, TEMPORARY, IGNORE or ASK_USER — with the reason attached.
+
+        The reason is logged and surfaced through the API, so the write policy is auditable
+        rather than a black box the owner has to take on trust.
+        """
+        text = candidate.content.strip()
+
+        # --- refusals: never stored, whatever else is true -----------------------
+        if self.memory_disabled:
+            return MemoryJudgement(
+                decision=MemoryDecision.IGNORE, reason="memory is disabled by a privacy zone"
+            )
+        if candidate.sensitivity >= DataSensitivity.SECRET:
+            return MemoryJudgement(
+                decision=MemoryDecision.IGNORE, reason="payload is classified SECRET"
+            )
+        if self._redactor.scan(text):
+            return MemoryJudgement(
+                decision=MemoryDecision.IGNORE, reason="content matches a credential pattern"
+            )
+        if not text:
+            return MemoryJudgement(decision=MemoryDecision.IGNORE, reason="empty content")
+        if _SMALL_TALK.match(text):
+            return MemoryJudgement(decision=MemoryDecision.IGNORE, reason="small talk")
+
+        # --- PART 76: an agent may not write the owner's preferences -------------
+        # A document Thursday read cannot redefine who the owner is or what they like.
+        # The proposal becomes a question instead of a fact.
+        if candidate.layer is MemoryLayer.PREFERENCE and candidate.source is not MemorySource.USER:
+            return MemoryJudgement(
+                decision=MemoryDecision.ASK_USER,
+                reason=(
+                    f"a preference proposed by {candidate.proposed_by or candidate.source} "
+                    "needs the owner's confirmation"
+                ),
+            )
+
+        # --- durable ------------------------------------------------------------
+        if candidate.layer in (MemoryLayer.PROCEDURAL, MemoryLayer.PROJECT):
+            return MemoryJudgement(
+                decision=MemoryDecision.STORE, reason=f"{candidate.layer} writes are durable"
+            )
+        if candidate.layer is MemoryLayer.PREFERENCE:
+            return MemoryJudgement(
+                decision=MemoryDecision.STORE, reason="the owner stated a preference"
+            )
+        if candidate.source is MemorySource.USER and _DURABLE_MARKERS.search(text):
+            return MemoryJudgement(
+                decision=MemoryDecision.STORE, reason="the owner asserted a durable fact"
+            )
+        if candidate.layer is MemoryLayer.EPISODIC and candidate.structured.get("outcome"):
+            return MemoryJudgement(decision=MemoryDecision.STORE, reason="a completed task outcome")
+        if candidate.importance >= 0.6:
+            return MemoryJudgement(
+                decision=MemoryDecision.STORE,
+                reason=f"importance {candidate.importance:.2f} is above the threshold",
+            )
+
+        # --- uncertain: keep briefly, or ask ------------------------------------
+        if candidate.layer is MemoryLayer.WORKING:
+            return MemoryJudgement(
+                decision=MemoryDecision.TEMPORARY,
+                reason="task-scoped working memory",
+                ttl_hours=self._working_ttl.total_seconds() / 3600,
+            )
+        if candidate.confidence < 0.5:
+            return MemoryJudgement(
+                decision=MemoryDecision.ASK_USER,
+                reason=f"confidence {candidate.confidence:.2f} is too low to store silently",
+            )
+        return MemoryJudgement(
+            decision=MemoryDecision.IGNORE,
+            reason=(
+                f"nothing durable in a {candidate.layer} write of importance "
+                f"{candidate.importance:.2f}"
+            ),
+        )
 
     def should_write(
         self, write: MemoryWrite, *, is_small_talk: bool | None = None
     ) -> tuple[bool, str]:
-        """Return (decision, reason). Reasons are logged so the policy stays auditable."""
-        if self.memory_disabled:
-            return False, "memory is disabled by an active privacy zone"
-        if write.sensitivity >= DataSensitivity.SECRET:
-            return False, "payload is classified SECRET"
-        if self._redactor.scan(write.content):
-            return False, "content matches a credential pattern"
-        text = write.content.strip()
-        if not text:
-            return False, "empty content"
-        if is_small_talk or _SMALL_TALK.match(text):
+        """Boolean view of :meth:`judge`, for callers that only need yes or no."""
+        if is_small_talk:
             return False, "small talk"
+        judgement = self.judge(_candidate_from(write))
+        return judgement.stores, judgement.reason
 
-        if write.layer in (MemoryLayer.PREFERENCE, MemoryLayer.PROCEDURAL, MemoryLayer.PROJECT):
-            return True, f"{write.layer} writes are always durable"
-        if write.source is MemorySource.USER and _DURABLE_MARKERS.search(text):
-            return True, "user asserted a durable fact or preference"
-        if write.layer is MemoryLayer.EPISODIC and write.structured.get("outcome"):
-            return True, "completed task outcome"
-        if write.importance >= 0.6:
-            return True, f"importance {write.importance:.2f} is above threshold"
-        if write.layer is MemoryLayer.WORKING:
-            return True, "task-scoped working memory"
-        return (
-            False,
-            f"nothing durable in a {write.layer} write of importance {write.importance:.2f}",
-        )
+    async def propose(
+        self, candidate: MemoryCandidate
+    ) -> tuple[MemoryJudgement, MemoryRecord | None]:
+        """The PART 39 path: judge first, store only if the judgement says so.
+
+        Returns the judgement as well as the record, so a caller can act on ASK_USER
+        instead of reading a missing record as "nothing happened".
+        """
+        judgement = self.judge(candidate)
+        if judgement.decision is MemoryDecision.ASK_USER:
+            self._pending_confirmation.append(candidate)
+            log.info("memory_needs_confirmation", reason=judgement.reason)
+            await self._emit_candidate("memory.confirmation_required", candidate, judgement)
+            return judgement, None
+        if not judgement.stores:
+            log.debug("memory_write_skipped", layer=str(candidate.layer), reason=judgement.reason)
+            return judgement, None
+
+        write = candidate.to_write()
+        if judgement.decision is MemoryDecision.TEMPORARY and write.expires_at is None:
+            write.expires_at = utcnow() + self._working_ttl
+        return judgement, await self.write(write, force=True)
+
+    def pending_confirmations(self) -> list[MemoryCandidate]:
+        """Candidates waiting on the owner's yes or no (PART 39, PART 76)."""
+        return list(self._pending_confirmation)
+
+    async def confirm(self, index: int, *, accept: bool) -> MemoryRecord | None:
+        """Resolve a pending candidate.
+
+        Accepting makes the owner its source, which is exactly what gives a preference the
+        authority it needs — and what an agent could not have given it.
+        """
+        if not 0 <= index < len(self._pending_confirmation):
+            raise IndexError(index)
+        candidate = self._pending_confirmation.pop(index)
+        if not accept:
+            return None
+        candidate.source = MemorySource.USER
+        candidate.confidence = max(candidate.confidence, 0.9)
+        return await self.write(candidate.to_write(), force=True)
 
     async def write(
         self, write: MemoryWrite, *, force: bool = False, detect_conflicts: bool = True
@@ -185,6 +298,7 @@ class MemoryManager:
         if old is not None:
             old.superseded_by_id = record.id
             record.supersedes_id = old.id
+            self.link(record.id, old.id, MemoryRelation.SUPERSEDES, note="stronger source")
             await self._emit("memory.superseded", record, replaced=str(old.id))
         return record
 
@@ -317,9 +431,23 @@ class MemoryManager:
             embedding=embedding,
         )
         await self._store(record)
+        self.link(record.id, existing.id, MemoryRelation.CONTRADICTS, note=conflict.describe())
         log.warning("memory_conflict", detail=conflict.describe())
         await self._emit("memory.conflict", record, conflict=conflict.describe())
         return record
+
+    def link(
+        self, from_id: UUID, to_id: UUID, relation: MemoryRelation, *, note: str = ""
+    ) -> MemoryLink:
+        """PART 41 — record *how* two memories relate, instead of overwriting one."""
+        edge = MemoryLink(from_id=from_id, to_id=to_id, relation=relation, note=note)
+        self._links.append(edge)
+        return edge
+
+    def links(self, memory_id: UUID | None = None) -> list[MemoryLink]:
+        if memory_id is None:
+            return list(self._links)
+        return [edge for edge in self._links if memory_id in (edge.from_id, edge.to_id)]
 
     def conflicts(self, *, pending_only: bool = True) -> list[MemoryConflict]:
         return [c for c in self._conflicts if not pending_only or c.resolution == "pending"]
@@ -362,6 +490,24 @@ class MemoryManager:
             [(record.id, record.embedding or [], {"layer": str(record.layer)})]
         )
 
+    async def _emit_candidate(
+        self, kind: str, candidate: MemoryCandidate, judgement: MemoryJudgement
+    ) -> None:
+        if self._bus is None:
+            return
+        await self._bus.publish(  # type: ignore[attr-defined]
+            Event(
+                kind=kind,
+                task_id=candidate.task_id,
+                payload={
+                    "content": candidate.content[:200],
+                    "layer": str(candidate.layer),
+                    "decision": judgement.decision.value,
+                    "reason": judgement.reason,
+                },
+            )
+        )
+
     async def _emit(self, kind: str, record: MemoryRecord, **extra: object) -> None:
         if self._bus is None:
             return
@@ -372,3 +518,22 @@ class MemoryManager:
                 payload={"memory_id": str(record.id), "layer": str(record.layer), **extra},
             )
         )
+
+
+def _candidate_from(write: MemoryWrite) -> MemoryCandidate:
+    """Adapt the older write shape onto the PART 39 candidate the judge expects."""
+    return MemoryCandidate(
+        content=write.content,
+        layer=write.layer,
+        key=write.key,
+        structured=write.structured,
+        importance=write.importance,
+        confidence=write.confidence,
+        source=write.source,
+        source_ref=write.source_ref,
+        sensitivity=write.sensitivity,
+        project_id=write.project_id,
+        task_id=write.task_id,
+        pinned=write.pinned,
+        expires_at=write.expires_at,
+    )
