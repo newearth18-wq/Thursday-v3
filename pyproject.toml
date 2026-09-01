@@ -69,7 +69,8 @@ ignore = [
 #       so the parameter belongs on the signature rather than at every call site.
 
 [tool.ruff.lint.per-file-ignores]
-"tests/**" = ["S", "N806"]
+# Tests assert on paths directly; the blocking call is irrelevant in a test body.
+"tests/**" = ["S", "N806", "ASYNC240"]
 "migrations/**" = ["N999", "E", "F", "I", "UP"]
 # Shelling out is the adapters' entire job; path *resolution* is in-memory and the real
 # file I/O is already dispatched to worker threads.

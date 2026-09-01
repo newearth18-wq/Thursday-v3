@@ -15,18 +15,32 @@ from thursday.security.redaction import SecretRedactor
 from thursday.shared.enums import DataSensitivity
 
 #: Signals that push a payload up a level. Deliberately conservative.
-_HIGHLY_PRIVATE_MARKERS = re.compile(
-    r"(?i)\b(medical|diagnosis|prescription|salary|เงินเดือน|บัตรประชาชน|national\s*id|"
-    r"passport|หนังสือเดินทาง|bank\s*account|เลขบัญชี|credit\s*card|ssn|tax\s*id|"
-    r"therapy|mental\s*health|โรคประจำตัว)\b"
+#
+# Thai is written without spaces and ``\b`` does not delimit Thai script, so the markers
+# are split: Latin terms use word boundaries, Thai terms match as substrings. A single
+# combined pattern silently fails to match every Thai term in it.
+_HIGHLY_PRIVATE_EN = re.compile(
+    r"(?i)\b(medical|diagnosis|prescription|salary|payroll|national\s*id|passport|"
+    r"bank\s*account|credit\s*card|ssn|tax\s*id|therapy|mental\s*health|"
+    r"health\s*record)\b"
 )
-_PRIVATE_MARKERS = re.compile(
-    r"(?i)\b(personal|private|ส่วนตัว|ห้ามเผยแพร่|confidential|ลับ|internal\s*only|"
-    r"home\s*address|ที่อยู่บ้าน|phone\s*number|เบอร์โทร)\b"
+_HIGHLY_PRIVATE_TH = re.compile(
+    r"(เงินเดือน|บัตรประชาชน|หนังสือเดินทาง|เลขบัญชี|บัญชีธนาคาร|บัตรเครดิต|"
+    r"โรคประจำตัว|ผลตรวจสุขภาพ|ประวัติการรักษา|สุขภาพจิต|เลขประจำตัวผู้เสียภาษี)"
 )
-_PUBLIC_MARKERS = re.compile(
-    r"(?i)\b(weather|อากาศ|news|ข่าว|definition|แปลว่า|wikipedia|public\s*holiday|วันหยุด)\b"
+_PRIVATE_EN = re.compile(
+    r"(?i)\b(personal|private|confidential|internal\s*only|home\s*address|"
+    r"phone\s*number|do\s*not\s*share)\b"
 )
+_PRIVATE_TH = re.compile(r"(ส่วนตัว|ห้ามเผยแพร่|ความลับ|ลับเฉพาะ|ที่อยู่บ้าน|เบอร์โทร)")
+_PUBLIC_EN = re.compile(
+    r"(?i)\b(weather|news|definition|wikipedia|public\s*holiday|time\s*zone)\b"
+)
+_PUBLIC_TH = re.compile(r"(พยากรณ์อากาศ|สภาพอากาศ|ข่าววันนี้|แปลว่า|วันหยุดราชการ)")
+
+
+def _matches(text: str, latin: re.Pattern[str], thai: re.Pattern[str]) -> bool:
+    return bool(latin.search(text) or thai.search(text))
 
 
 @dataclass(frozen=True)
@@ -60,13 +74,13 @@ class PrivacyClassifier:
 
         level = DataSensitivity.INTERNAL
 
-        if _HIGHLY_PRIVATE_MARKERS.search(text):
+        if _matches(text, _HIGHLY_PRIVATE_EN, _HIGHLY_PRIVATE_TH):
             level = DataSensitivity.HIGHLY_PRIVATE
             reasons.append("sensitive_personal_marker")
-        elif _PRIVATE_MARKERS.search(text):
+        elif _matches(text, _PRIVATE_EN, _PRIVATE_TH):
             level = DataSensitivity.PRIVATE
             reasons.append("private_marker")
-        elif _PUBLIC_MARKERS.search(text) and len(text) < 240:
+        elif _matches(text, _PUBLIC_EN, _PUBLIC_TH) and len(text) < 240:
             level = DataSensitivity.PUBLIC
             reasons.append("public_topic")
 

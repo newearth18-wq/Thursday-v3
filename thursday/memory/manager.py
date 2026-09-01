@@ -104,7 +104,15 @@ class MemoryManager:
             return True, "task-scoped working memory"
         return False, f"nothing durable in a {write.layer} write of importance {write.importance:.2f}"
 
-    async def write(self, write: MemoryWrite, *, force: bool = False) -> MemoryRecord | None:
+    async def write(
+        self, write: MemoryWrite, *, force: bool = False, detect_conflicts: bool = True
+    ) -> MemoryRecord | None:
+        """Write a record, subject to the write policy.
+
+        ``detect_conflicts=False`` is used by ``supersede``, whose caller has already
+        resolved the contradiction — without it the new record would be compared against
+        the very record it replaces and recurse.
+        """
         allowed, reason = (True, "forced") if force else self.should_write(write)
         if not allowed:
             log.debug("memory_write_skipped", layer=str(write.layer), reason=reason)
@@ -114,7 +122,7 @@ class MemoryManager:
         embedding = (await self._embedder.embed([redacted.text]))[0]  # type: ignore[attr-defined]
 
         # Dedupe and conflict detection run against current records in the same layer.
-        near = self._nearest(embedding, layer=write.layer, key=write.key)
+        near = self._nearest(embedding, layer=write.layer, key=write.key) if detect_conflicts else None
         if near is not None:
             existing, similarity = near
             if similarity >= DEDUPE_SIMILARITY and existing.content.strip() == redacted.text.strip():
@@ -148,12 +156,23 @@ class MemoryManager:
         return record
 
     async def supersede(self, old_id: UUID, new: MemoryWrite) -> MemoryRecord:
+        """Replace a record with a newer one, keeping the link between them (§11).
+
+        The old record is retired *before* the new one is written so no retrieval can see
+        both as current, and conflict detection is skipped because the contradiction that
+        led here is already resolved.
+        """
         old = self._records.get(old_id)
-        record = await self.write(new, force=True)
-        assert record is not None
+        if old is not None:
+            old.superseded_by_id = None  # set once the replacement exists
+            old.valid_to = utcnow()
+
+        record = await self.write(new, force=True, detect_conflicts=False)
+        if record is None:  # pragma: no cover - force=True always writes
+            raise RuntimeError("supersede failed to write the replacement record")
+
         if old is not None:
             old.superseded_by_id = record.id
-            old.valid_to = utcnow()
             record.supersedes_id = old.id
             await self._emit("memory.superseded", record, replaced=str(old.id))
         return record
