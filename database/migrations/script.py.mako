@@ -12,7 +12,7 @@ from collections.abc import Sequence
 import sqlalchemy as sa
 from alembic import op
 
-import thursday.db.base
+import thursday_shared.db.base
 
 revision: str = ${repr(up_revision)}
 down_revision: str | None = ${repr(down_revision)}

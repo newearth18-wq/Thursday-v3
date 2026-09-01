@@ -127,6 +127,9 @@ class Task(Base, IdMixin, TimestampMixin):
     )
     budget: Mapped[dict[str, Any]] = mapped_column(JSONColumn, default=dict)
     spent: Mapped[dict[str, Any]] = mapped_column(JSONColumn, default=dict)
+    #: PART 97 — the autonomy in force when this ran, so an audit can answer "why was this
+    #: not asked about?" without guessing at the setting's history.
+    autonomy_level: Mapped[int] = mapped_column(Integer, default=2)
     deadline: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -155,6 +158,50 @@ class TaskStep(Base, IdMixin, TimestampMixin):
     output: Mapped[dict[str, Any]] = mapped_column(JSONColumn, default=dict)
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class Agent(Base, IdMixin, TimestampMixin):
+    """PART 4/92. What an agent declares about itself, so the Router can choose.
+
+    The row is the registry's persistent half: the code defines behaviour, this defines
+    what the owner has enabled and what ceiling they set.
+    """
+
+    __tablename__ = "agents"
+
+    user_id: Mapped[uuid.UUID] = mapped_column(GUID(), ForeignKey("users.id"), index=True)
+    name: Mapped[str] = mapped_column(String(64), index=True)
+    agent_type: Mapped[str] = mapped_column(String(32), default="specialist")
+    description: Mapped[str] = mapped_column(Text, default="")
+    capabilities: Mapped[dict[str, Any]] = mapped_column(JSONColumn, default=dict)
+    allowed_tools: Mapped[dict[str, Any]] = mapped_column(JSONColumn, default=dict)
+    #: Never exceeded, whatever a task or a dynamic agent asks for.
+    permission_ceiling: Mapped[int] = mapped_column(Integer, default=0)
+    configuration: Mapped[dict[str, Any]] = mapped_column(JSONColumn, default=dict)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
+
+    __table_args__ = (UniqueConstraint("user_id", "name", name="uq_agent_name_per_user"),)
+
+
+class Tool(Base, IdMixin, TimestampMixin):
+    """PART 4/92/16. A tool's declared risk profile, so the permission panel can show the
+    owner what exists before any of it has run."""
+
+    __tablename__ = "tools"
+
+    user_id: Mapped[uuid.UUID] = mapped_column(GUID(), ForeignKey("users.id"), index=True)
+    name: Mapped[str] = mapped_column(String(64), index=True)
+    description: Mapped[str] = mapped_column(Text, default="")
+    capabilities: Mapped[dict[str, Any]] = mapped_column(JSONColumn, default=dict)
+    permission_level: Mapped[int] = mapped_column(Integer, default=0)
+    risk_level: Mapped[str] = mapped_column(String(16), default="LOW")
+    #: AUTO | ASK_ONCE | ASK_ALWAYS | BLOCK — the owner may loosen this, within limits.
+    approval_policy: Mapped[str] = mapped_column(String(16), default="ASK_ONCE")
+    supports_dry_run: Mapped[bool] = mapped_column(Boolean, default=False)
+    supports_undo: Mapped[bool] = mapped_column(Boolean, default=False)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
+
+    __table_args__ = (UniqueConstraint("user_id", "name", name="uq_tool_name_per_user"),)
 
 
 class AgentRun(Base, IdMixin, TimestampMixin):
@@ -228,6 +275,8 @@ class Approval(Base, IdMixin, TimestampMixin):
     dry_run: Mapped[dict[str, Any]] = mapped_column(JSONColumn, default=dict)
     state: Mapped[str] = mapped_column(String(16), default="pending", index=True)
     scope: Mapped[str] = mapped_column(String(16), default="once")
+    #: ASK_ONCE or ASK_ALWAYS. An ASK_ALWAYS approval can never have produced a grant.
+    policy: Mapped[str] = mapped_column(String(16), default="ASK_ONCE")
     decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     note: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -300,6 +349,34 @@ class MemoryConflictRow(Base, IdMixin, TimestampMixin):
     new_observed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     resolution: Mapped[str] = mapped_column(String(24), default="pending", index=True)
     resolved_by: Mapped[str | None] = mapped_column(String(24), nullable=True)
+
+
+class MemoryRelationRow(Base, IdMixin):
+    """PART 41. How two memories relate — kept instead of overwriting one with the other."""
+
+    __tablename__ = "memory_relations"
+
+    from_id: Mapped[uuid.UUID] = mapped_column(GUID(), ForeignKey("memories.id"), index=True)
+    to_id: Mapped[uuid.UUID] = mapped_column(GUID(), ForeignKey("memories.id"), index=True)
+    relation: Mapped[str] = mapped_column(String(24), index=True)
+    note: Mapped[str] = mapped_column(Text, default="")
+    detected_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+
+
+class DeviceCredential(Base, IdMixin, TimestampMixin):
+    """Device pairing material (PART 26). The private half never leaves the device; this is
+    the public half plus the rotation state."""
+
+    __tablename__ = "device_credentials"
+
+    device_id: Mapped[uuid.UUID] = mapped_column(GUID(), ForeignKey("devices.id"), index=True)
+    public_key: Mapped[str] = mapped_column(Text)
+    algorithm: Mapped[str] = mapped_column(String(32), default="ed25519")
+    paired_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    #: Set when the owner revokes the device; a revoked credential is refused at HELLO.
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    rotates_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class Entity(Base, IdMixin, TimestampMixin):

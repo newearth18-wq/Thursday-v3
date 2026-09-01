@@ -14,7 +14,7 @@ from __future__ import annotations
 import json
 import re
 from collections.abc import AsyncIterator
-from typing import ClassVar
+from typing import Any, ClassVar
 
 from thursday_core.logging import get_logger
 from thursday_shared.enums import ModelTier
@@ -102,6 +102,87 @@ class RuleBasedLLM:
             "I'm running offline, so I can't reason about that one. "
             "Device control, memory search and file work still function normally."
         )
+
+
+class MockLLM:
+    """PART 89. A deterministic LLM for tests.
+
+    Scripted responses keyed by a substring of the prompt, a default for everything else,
+    and a call log. No paid API is ever reached from the main suite — a test that costs
+    money is a test that stops being run.
+
+    Distinct from ``RuleBasedLLM``: that one is a *product* feature (the offline tier a
+    real owner uses), this one is test scaffolding whose answers a test controls.
+    """
+
+    name = "mock"
+    tier = ModelTier.LOCAL
+    local = True
+
+    def __init__(
+        self,
+        responses: dict[str, str] | None = None,
+        *,
+        default: str = "mock response",
+        structured: dict[str, dict] | None = None,
+    ) -> None:
+        #: prompt substring → reply.
+        self.responses = responses or {}
+        #: prompt substring → structured payload, for schema-shaped requests.
+        self.structured = structured or {}
+        self.default = default
+        self.calls: list[LLMRequest] = []
+
+    def _match(self, table: dict[str, Any], text: str) -> Any:
+        for needle, value in table.items():
+            if needle.lower() in text.lower():
+                return value
+        return None
+
+    async def complete(self, request: LLMRequest) -> LLMResponse:
+        self.calls.append(request)
+        text = " ".join(m.content for m in request.messages)
+
+        if request.json_schema:
+            payload = self._match(self.structured, text)
+            if payload is None:
+                title = str(request.json_schema.get("title", ""))
+                # Never fabricate a verdict: an unscripted verification escalates, exactly
+                # as the offline tier does.
+                payload = (
+                    {
+                        "verdict": "ESCALATE",
+                        "critique": "no scripted verification",
+                        "confidence": 0.2,
+                    }
+                    if title == "Verification"
+                    else {"kind": "UNKNOWN", "objective": text[:120], "confidence": 0.3}
+                )
+            return LLMResponse(
+                text=json.dumps(payload, ensure_ascii=False),
+                model=self.name,
+                structured=payload,
+                tokens_in=len(text) // 4,
+                tokens_out=24,
+            )
+
+        return LLMResponse(
+            text=self._match(self.responses, text) or self.default,
+            model=self.name,
+            tokens_in=len(text) // 4,
+            tokens_out=16,
+        )
+
+    async def stream(self, request: LLMRequest) -> AsyncIterator[str]:
+        response = await self.complete(request)
+        for word in response.text.split(" "):
+            yield word + " "
+
+    async def health(self) -> HealthStatus:
+        return HealthStatus(name=self.name, ok=True, detail=f"{len(self.calls)} calls recorded")
+
+    def reset(self) -> None:
+        self.calls.clear()
 
 
 class OllamaLLM:

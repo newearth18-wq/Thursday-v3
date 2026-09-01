@@ -23,7 +23,8 @@ dependencies = [
 
 [project.optional-dependencies]
 postgres = ["asyncpg>=0.29", "pgvector>=0.3"]
-redis = ["redis>=5.0"]
+redis = ["redis>=5.0", "dramatiq[redis]>=1.17"]
+browser = ["playwright>=1.47"]
 voice = ["faster-whisper>=1.0", "sounddevice>=0.4", "openwakeword>=0.6"]
 vision = ["opencv-python>=4.10", "mediapipe>=0.10", "onnxruntime>=1.19"]
 dev = [

@@ -12,6 +12,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+from thursday_agents.browser import BrowserAgent, register_browser_tools
 from thursday_agents.computer import ComputerAgent
 from thursday_agents.factory import AgentFactory
 from thursday_agents.registry import AgentRegistry
@@ -51,6 +52,7 @@ from thursday_core.orchestrator import AgentOrchestrator
 from thursday_core.planner import Planner
 from thursday_core.projects import ProjectManager
 from thursday_core.reasoning import ReasoningEngine
+from thursday_core.state import build_state_store
 from thursday_core.supervisor import Supervisor
 from thursday_core.tasks import TaskManager, TaskQueue
 from thursday_core.undo import UndoRegistry
@@ -108,6 +110,7 @@ class Container:
     tasks: Any = None
     projects: Any = None
     queue: Any = None
+    state: Any = None
     supervisor: Any = None
     orchestrator: Any = None
     agent_factory: Any = None
@@ -154,16 +157,8 @@ class Container:
                 "detail": _mask(self.settings.resolved_database_url),
             }
         )
-        checks.append(
-            {
-                "component": "redis",
-                "ok": True,
-                "detail": (
-                    self.settings.redis_url
-                    or "not configured — in-process bus and queue (ADR 0006)"
-                ),
-            }
-        )
+        state_ok, state_detail = await self.state.health()
+        checks.append({"component": "redis", "ok": state_ok, "detail": state_detail})
         checks.append(
             {
                 "component": "memory",
@@ -293,8 +288,16 @@ def build_container(settings: Settings | None = None, *, configure_logs: bool = 
     # -- execution ------------------------------------------------------------
     c.tools = ToolRegistry()
     register_builtin_tools(c.tools, hub=c.hub, memory=c.memory, vault=c.obsidian)
+    # Browser tools need Playwright and a browser binary. Absent them, the agent stays
+    # registered but unroutable — the registry's tool-gap term drops its score to zero,
+    # so Thursday says "I can't do that" rather than failing halfway through a form.
+    if _playwright_available():
+        register_browser_tools(c.tools)
+    else:
+        log.info("browser_tools_unavailable", reason="playwright is not installed")
     c.tool_router = ToolRouter(c.tools)
     c.tasks = TaskManager(c.bus)
+    c.state = build_state_store(settings.redis_url)
     c.queue = TaskQueue()
     c.executor = ToolExecutor(
         registry=c.tools,
@@ -310,6 +313,7 @@ def build_container(settings: Settings | None = None, *, configure_logs: bool = 
     c.agents = AgentRegistry()
     c.agents.register(ComputerAgent())
     c.agents.register(ResearchAgent())
+    c.agents.register(BrowserAgent())
     c.agent_factory = AgentFactory(c.agents)
     c.supervisor = Supervisor(c.models, use_llm_critique=not settings.offline)
 
@@ -385,6 +389,12 @@ def _build_vault(settings: Settings) -> Any:
         # the swap is a configuration change, not a code change.
         return ChainVault(EnvVault())
     return EnvVault()
+
+
+def _playwright_available() -> bool:
+    from importlib.util import find_spec
+
+    return find_spec("playwright") is not None
 
 
 def _build_voice(settings: Settings) -> tuple[Any, Any, Any]:

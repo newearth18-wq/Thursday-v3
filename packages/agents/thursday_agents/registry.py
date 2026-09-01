@@ -127,6 +127,11 @@ class AgentRegistry:
             tool_gap = 0.0
             if available_tools is not None and spec.tools:
                 missing = [t for t in spec.tools if t not in available_tools]
+                if len(missing) == len(spec.tools):
+                    # None of its tools exist. Delegating here means failing halfway through
+                    # rather than saying so up front, so it is excluded, not merely penalised.
+                    log.debug("agent_excluded_no_tools", agent=spec.name)
+                    continue
                 if missing:
                     tool_gap = len(missing) / len(spec.tools)
                     reasons.append(f"{len(missing)} of its tools are unavailable")

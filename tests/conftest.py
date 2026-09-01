@@ -3,131 +3,26 @@
 Everything runs with zero infrastructure: no Postgres, no Redis, no model credentials, no
 GUI. That is a design requirement, not a convenience — a system whose safety properties can
 only be tested against production is a system whose safety properties are not tested.
+
+``FakeAdapter`` is imported from ``thursday_devices.fake`` rather than defined here: it is
+a shipped artifact (PART 88), and a private copy in the test suite would drift from the one
+the CLI and the protocol's own users rely on.
 """
 
 from __future__ import annotations
 
 import asyncio
 from pathlib import Path
-from typing import Any
 
 import pytest
 from thursday_core.config import Settings
 from thursday_core.container import build_container
+from thursday_devices.fake import FakeAdapter
 from thursday_devices.hub import LoopbackDeviceSession
-from thursday_devices.node.adapters.base import OSAdapter
 from thursday_devices.node.executor import NodeExecutor
 from thursday_shared.ids import new_id
-from thursday_shared.models import DeviceCapabilities
 
-
-class FakeAdapter(OSAdapter):
-    """A deterministic stand-in for a real machine.
-
-    It models the one thing that matters for the vertical slice: an action changes observable
-    state, and verification reads that state back. ``fail_launch`` lets a test make the
-    launch *appear* to succeed while the process never shows up — which is exactly the case
-    §76 is about.
-    """
-
-    os_name = "FakeOS"
-
-    def __init__(self, *, fail_launch: bool = False) -> None:
-        self.running: dict[str, int] = {}
-        self.fail_launch = fail_launch
-        self.window: str | None = None
-        self.clipboard = ""
-        self.volume = 0.5
-        self.notifications: list[tuple[str, str]] = []
-        self.opened_urls: list[str] = []
-        self._next_pid = 1000
-
-    def capabilities(self) -> DeviceCapabilities:
-        return DeviceCapabilities.of(
-            "app.open",
-            "app.close",
-            "file.open",
-            "file.read",
-            "file.write",
-            "file.delete",
-            "file.search",
-            "system.info",
-            "system.process.list",
-            "system.process.start",
-            "system.process.stop",
-            "system.power",
-            "window.active",
-            "clipboard.read",
-            "clipboard.write",
-            "notify.show",
-            "audio.volume",
-            "audio.speaker",
-            "shell.run",
-            "browser.open",
-        )
-
-    def can_read_window(self) -> bool:
-        return True
-
-    def can_clipboard(self) -> bool:
-        return True
-
-    def can_notify(self) -> bool:
-        return True
-
-    def can_volume(self) -> bool:
-        return True
-
-    def resolve_executable(self, name: str) -> str | None:
-        return f"/usr/bin/{name}"
-
-    async def open_url(self, url: str) -> dict[str, Any]:
-        self.opened_urls.append(url)
-        self.window = f"{url} — browser"
-        return {"opened": True}
-
-    async def launch(self, name: str, args: list[str] | None = None) -> dict[str, Any]:
-        self._next_pid += 1
-        if self.fail_launch:
-            # The command "succeeded" but nothing actually started.
-            return {"pid": self._next_pid, "executable": name}
-        self.running[name] = self._next_pid
-        self.window = f"{name} — window"
-        return {"pid": self._next_pid, "executable": name}
-
-    async def find_processes(self, name: str) -> list[dict[str, Any]]:
-        pid = self.running.get(name)
-        return [{"pid": pid, "name": name}] if pid else []
-
-    async def terminate(self, name: str, *, force: bool = False) -> dict[str, Any]:
-        pid = self.running.pop(name, None)
-        return {"terminated": [pid] if pid else []}
-
-    async def active_window(self) -> str | None:
-        return self.window
-
-    async def open_path(self, path: str) -> dict[str, Any]:
-        self._next_pid += 1
-        self.window = f"{Path(path).name} — viewer"
-        return {"pid": self._next_pid, "path": path}
-
-    async def clipboard_get(self) -> str:
-        return self.clipboard
-
-    async def clipboard_set(self, text: str) -> None:
-        self.clipboard = text
-
-    async def notify(self, title: str, body: str) -> None:
-        self.notifications.append((title, body))
-
-    async def get_volume(self) -> float:
-        return self.volume
-
-    async def set_volume(self, level: float) -> None:
-        self.volume = level
-
-    async def run_shell(self, command: str, *, timeout: float = 30.0) -> dict[str, Any]:
-        return {"exit_code": 0, "stdout": f"ran: {command}", "stderr": ""}
+__all__ = ["FakeAdapter"]
 
 
 @pytest.fixture
