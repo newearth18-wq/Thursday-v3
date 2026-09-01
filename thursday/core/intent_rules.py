@@ -86,7 +86,7 @@ class RuleMatch:
 
 
 def _normalise_app(raw: str) -> str:
-    cleaned = raw.strip().strip("\"'.,!?ครับค่ะ ").lower()
+    cleaned = raw.strip().strip("\"'.,!? ").removesuffix("ครับ").removesuffix("ค่ะ").strip().lower()
     return APP_ALIASES.get(cleaned, cleaned)
 
 

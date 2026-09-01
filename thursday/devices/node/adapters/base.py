@@ -14,7 +14,10 @@ from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Any
 
+from thursday.core.logging import get_logger
 from thursday.shared.models import DeviceCapabilities, DeviceTelemetry
+
+log = get_logger(__name__)
 
 
 class OSAdapter(ABC):
@@ -59,8 +62,8 @@ class OSAdapter(ABC):
             if (battery := psutil.sensors_battery()) is not None:
                 telemetry.battery_percent = battery.percent
                 telemetry.charging = battery.power_plugged
-        except Exception:  # noqa: BLE001 — telemetry is best-effort by design
-            pass
+        except Exception as exc:
+            log.debug("telemetry_partial", error=str(exc))
         telemetry.active_window = await self.active_window()
         return telemetry
 
@@ -83,7 +86,8 @@ class OSAdapter(ABC):
                 handle = psutil.Process(process["pid"])
                 handle.kill() if force else handle.terminate()
                 killed.append(process["pid"])
-            except Exception:  # noqa: BLE001
+            except Exception as exc:
+                log.debug("terminate_skipped", pid=process.get("pid"), error=str(exc))
                 continue
         return {"terminated": killed}
 

@@ -167,9 +167,12 @@ class PermissionEngine:
                     level=level,
                     risk=risk,
                 )
-            if permissions.path_scopes and req.resource:
-                if not any(fnmatch(req.resource, s) for s in permissions.path_scopes):
-                    return PermissionVerdict(
+            if (
+                permissions.path_scopes
+                and req.resource
+                and not any(fnmatch(req.resource, s) for s in permissions.path_scopes)
+            ):
+                return PermissionVerdict(
                         decision=PolicyDecision.BLOCK,
                         reason=f"{req.resource!r} is outside this context's path scopes",
                         rule="path_scope",

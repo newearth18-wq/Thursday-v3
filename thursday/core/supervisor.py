@@ -28,6 +28,24 @@ log = get_logger(__name__)
 
 _NUMBER = re.compile(r"-?\d+(?:\.\d+)?")
 
+#: Failures a second identical attempt cannot fix. Retrying these burns budget and time
+#: to arrive at the same answer, so they escalate to the owner immediately (§60, §96).
+NON_RETRYABLE_ERRORS = (
+    "FileNotFoundError",
+    "PermissionError",
+    "NotADirectoryError",
+    "IsADirectoryError",
+    "permission_denied",
+    "does not support",
+    "outside this node's allowed roots",
+    "unknown action",
+    "missing required args",
+)
+
+
+def _is_retryable(error: str | None) -> bool:
+    return not (error and any(marker in error for marker in NON_RETRYABLE_ERRORS))
+
 
 class Supervisor:
     def __init__(self, models: object | None = None, *, use_llm_critique: bool = True) -> None:
@@ -49,12 +67,11 @@ class Supervisor:
         failures = [c for c in checks if not c["ok"]]
         blocking = [c for c in failures if c.get("blocking", True)]
 
-        if not blocking:
-            if self._needs_judgement(contract, result, checks):
-                critique_check = await self._llm_critique(contract, result)
-                checks.append(critique_check)
-                if not critique_check["ok"]:
-                    blocking = [critique_check]
+        if not blocking and self._needs_judgement(contract, result, checks):
+            critique_check = await self._llm_critique(contract, result)
+            checks.append(critique_check)
+            if not critique_check["ok"]:
+                blocking = [critique_check]
 
         if not blocking:
             return VerificationReport(
@@ -80,7 +97,7 @@ class Supervisor:
             "name": "completed",
             "ok": result.ok,
             "detail": result.error or "agent reported success",
-            "recoverable": True,
+            "recoverable": _is_retryable(result.error),
         }
 
     def _check_schema(self, contract: JobContract, result: AgentResult) -> dict[str, Any]:
@@ -90,7 +107,8 @@ class Supervisor:
             "name": "output_schema",
             "ok": not missing,
             "detail": f"missing fields: {', '.join(missing)}" if missing else "all required fields present",
-            "recoverable": True,
+            # Missing fields after a hard failure are a symptom of it, not a separate fault.
+            "recoverable": _is_retryable(result.error),
         }
 
     def _check_verification_flags(self, result: AgentResult) -> dict[str, Any]:
@@ -165,7 +183,7 @@ class Supervisor:
                     "name": f"criterion:{criterion}",
                     "ok": actual == expected,
                     "detail": f"output.{field} = {actual}",
-                    "recoverable": True,
+                    "recoverable": _is_retryable(result.error),
                 })
             elif match := re.match(r"output\.(\w+)\s+is\s+not\s+empty", lowered):
                 field = match.group(1)
@@ -174,7 +192,7 @@ class Supervisor:
                     "name": f"criterion:{criterion}",
                     "ok": bool(value),
                     "detail": f"output.{field} is {'set' if value else 'empty'}",
-                    "recoverable": True,
+                    "recoverable": _is_retryable(result.error),
                 })
         return checks
 

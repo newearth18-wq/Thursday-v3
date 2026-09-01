@@ -85,7 +85,7 @@ class ComputerAgent(BaseAgent):
                     ToolCall(tool="list_dir", args={"path": _parent_of(str(args["path"]))})
                 )
                 return {"entries": len(probe.data.get("entries", []))}
-        except Exception:  # noqa: BLE001 — an unavailable probe weakens verification, not the run
+        except Exception:
             return {"observed": False}
         return {}
 

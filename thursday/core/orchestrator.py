@@ -25,7 +25,6 @@ from thursday.shared.errors import (
 )
 from thursday.shared.models import (
     AgentResult,
-    Budget,
     ContextPackage,
     Event,
     JobContract,
@@ -230,12 +229,20 @@ class AgentOrchestrator:
             log.info("step_retry", step=step.name, attempt=attempt, critique=critique[:160])
 
         # Retries exhausted: try a different agent with the same capability before giving up.
-        if last is not None and last.verification and last.verification.verdict is AgentVerdict.RETRY:
-            if (alt := self._alternative_agent(agent, step, context)) is not None:
-                log.info("trying_alternative_agent", failed=agent.spec.name, alternative=alt.spec.name)  # type: ignore[attr-defined]
-                step.max_attempts = 1
-                step.name = alt.spec.name  # type: ignore[attr-defined]
-                return await self._run_step(task, step, context, wait_for_approval)
+        if (
+            last is not None
+            and last.verification
+            and last.verification.verdict is AgentVerdict.RETRY
+            and (alt := self._alternative_agent(agent, step, context)) is not None
+        ):
+            log.info(
+                "trying_alternative_agent",
+                failed=agent.spec.name,  # type: ignore[attr-defined]
+                alternative=alt.spec.name,  # type: ignore[attr-defined]
+            )
+            step.max_attempts = 1
+            step.name = alt.spec.name  # type: ignore[attr-defined]
+            return await self._run_step(task, step, context, wait_for_approval)
 
         return last or StepOutcome(step=step, result=None, verification=None, error="the step produced no result")
 

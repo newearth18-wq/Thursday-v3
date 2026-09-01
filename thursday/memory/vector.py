@@ -45,7 +45,11 @@ class InMemoryVectorStore:
 
 
 class PgVectorStore:
-    """pgvector-backed store. Requires the ``vector`` extension and an HNSW index."""
+    """pgvector-backed store. Requires the ``vector`` extension and an HNSW index.
+
+    The table name is a constructor argument fixed by the container, never user input;
+    every value is bound as a parameter. Hence the targeted ``noqa: S608`` below.
+    """
 
     name = "pgvector"
 
@@ -60,7 +64,7 @@ class PgVectorStore:
         async with self._session_factory() as session:
             for item_id, vector, _meta in items:
                 await session.execute(
-                    text(f"UPDATE {self._table} SET embedding = :v WHERE id = :id"),
+                    text(f"UPDATE {self._table} SET embedding = :v WHERE id = :id"),  # noqa: S608
                     {"v": list(vector), "id": item_id},
                 )
             await session.commit()
@@ -72,8 +76,9 @@ class PgVectorStore:
 
         clauses = " AND ".join(f"{key} = :{key}" for key in (where or {}))
         predicate = f"WHERE {clauses}" if clauses else ""
+        # The table name is fixed by construction; every value is a bound parameter.
         query = text(
-            f"SELECT id, 1 - (embedding <=> :v) AS score FROM {self._table} "
+            f"SELECT id, 1 - (embedding <=> :v) AS score FROM {self._table} "  # noqa: S608
             f"{predicate} ORDER BY embedding <=> :v LIMIT :k"
         )
         async with self._session_factory() as session:
@@ -85,7 +90,7 @@ class PgVectorStore:
 
         async with self._session_factory() as session:
             await session.execute(
-                text(f"UPDATE {self._table} SET embedding = NULL WHERE id = ANY(:ids)"),
+                text(f"UPDATE {self._table} SET embedding = NULL WHERE id = ANY(:ids)"),  # noqa: S608
                 {"ids": list(ids)},
             )
             await session.commit()

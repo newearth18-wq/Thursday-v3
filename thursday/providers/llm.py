@@ -14,6 +14,7 @@ from __future__ import annotations
 import json
 import re
 from collections.abc import AsyncIterator
+from typing import ClassVar
 
 from thursday.core.logging import get_logger
 from thursday.shared.enums import ModelTier
@@ -133,7 +134,7 @@ class OllamaLLM:
                 response = await client.post(f"{self.url}/api/chat", json=payload)
                 response.raise_for_status()
                 body = response.json()
-        except Exception as exc:  # noqa: BLE001 — surfaced as a typed, retryable error
+        except Exception as exc:
             raise ProviderError(f"ollama request failed: {exc}", provider=self.name) from exc
 
         text = body.get("message", {}).get("content", "")
@@ -153,14 +154,16 @@ class OllamaLLM:
             "messages": [m.model_dump() for m in request.messages],
             "stream": True,
         }
-        async with httpx.AsyncClient(timeout=self._timeout) as client:
-            async with client.stream("POST", f"{self.url}/api/chat", json=payload) as response:
-                async for line in response.aiter_lines():
-                    if not line.strip():
-                        continue
-                    chunk = json.loads(line)
-                    if piece := chunk.get("message", {}).get("content"):
-                        yield piece
+        async with (
+            httpx.AsyncClient(timeout=self._timeout) as client,
+            client.stream("POST", f"{self.url}/api/chat", json=payload) as response,
+        ):
+            async for line in response.aiter_lines():
+                if not line.strip():
+                    continue
+                chunk = json.loads(line)
+                if piece := chunk.get("message", {}).get("content"):
+                    yield piece
 
     async def health(self) -> HealthStatus:
         import httpx
@@ -169,7 +172,7 @@ class OllamaLLM:
             async with httpx.AsyncClient(timeout=5.0) as client:
                 response = await client.get(f"{self.url}/api/tags")
                 return HealthStatus(name=self.name, ok=response.status_code == 200)
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             return HealthStatus(name=self.name, ok=False, detail=str(exc))
 
 
@@ -179,7 +182,7 @@ class AnthropicLLM:
     local = False
 
     #: USD per million tokens (input, output) — used by the cost side of the model router.
-    PRICES: dict[str, tuple[float, float]] = {
+    PRICES: ClassVar[dict[str, tuple[float, float]]] = {
         "claude-haiku-4-5-20251001": (1.0, 5.0),
         "claude-sonnet-5": (3.0, 15.0),
         "claude-opus-5": (15.0, 75.0),
@@ -227,7 +230,7 @@ class AnthropicLLM:
 
         try:
             body = await self._vault.use(self._key_handle, call)  # type: ignore[attr-defined]
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             raise ProviderError(f"anthropic request failed: {exc}", provider=self.name) from exc
 
         text = "".join(part.get("text", "") for part in body.get("content", []))

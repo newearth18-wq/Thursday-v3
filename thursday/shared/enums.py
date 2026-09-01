@@ -180,7 +180,7 @@ class IntentKind(StrEnum):
 class AgentVerdict(StrEnum):
     """§18."""
 
-    PASS = "PASS"
+    PASS = "PASS"  # noqa: S105 - a verification verdict, not a credential
     RETRY = "RETRY"
     ESCALATE = "ESCALATE"
 

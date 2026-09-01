@@ -1,0 +1,88 @@
+[project]
+name = "thursday"
+version = "0.1.0"
+description = "Thursday — a personal AI operating system. One assistant, many capabilities."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.30",
+    "pydantic>=2.9",
+    "pydantic-settings>=2.5",
+    "sqlalchemy[asyncio]>=2.0",
+    "alembic>=1.13",
+    "aiosqlite>=0.20",
+    "httpx>=0.27",
+    "websockets>=13",
+    "structlog>=24.1",
+    "psutil>=6.0",
+    "python-multipart>=0.0.9",
+]
+
+[project.optional-dependencies]
+postgres = ["asyncpg>=0.29", "pgvector>=0.3"]
+redis = ["redis>=5.0"]
+voice = ["faster-whisper>=1.0", "sounddevice>=0.4", "openwakeword>=0.6"]
+vision = ["opencv-python>=4.10", "mediapipe>=0.10", "onnxruntime>=1.19"]
+dev = [
+    "pytest>=8.3",
+    "pytest-asyncio>=0.24",
+    "pytest-cov>=5.0",
+    "ruff>=0.6",
+    "mypy>=1.11",
+]
+
+[project.scripts]
+thursday = "apps.cli.__main__:main"
+thursday-server = "apps.server.__main__:main"
+thursday-node = "apps.node.__main__:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["thursday", "apps"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "UP", "B", "C4", "SIM", "RUF", "ASYNC", "S"]
+ignore = [
+    "N818",
+    "ASYNC109",
+    "E501",    # long lines are caught by the formatter, not the linter
+    "S101",    # asserts are how tests assert
+    "RUF001",  # Thai text legitimately contains characters that look ambiguous
+    "RUF002",
+    "RUF003",
+    "B008",    # FastAPI's Depends() in defaults is the framework's idiom
+]
+
+# N818: Thursday's exceptions are named for what happened (PermissionDenied,
+#       ApprovalRequired), which reads better at the call site than an -Error suffix.
+# ASYNC109: timeouts travel *through* the node protocol as part of the action contract,
+#       so the parameter belongs on the signature rather than at every call site.
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S", "N806"]
+"migrations/**" = ["N999", "E", "F", "I", "UP"]
+# Shelling out is the adapters' entire job; path *resolution* is in-memory and the real
+# file I/O is already dispatched to worker threads.
+"thursday/devices/node/adapters/*.py" = ["S602", "S603", "S607", "ASYNC240"]
+"thursday/devices/node/executor.py" = ["S324"]
+
+[tool.mypy]
+python_version = "3.11"
+warn_unused_configs = true
+disallow_untyped_defs = false
+ignore_missing_imports = true
+plugins = ["pydantic.mypy"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]

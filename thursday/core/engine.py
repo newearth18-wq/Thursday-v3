@@ -27,7 +27,6 @@ from thursday.shared.errors import (
     DeviceUnavailable,
     PermissionDenied,
     PrivacyViolation,
-    ThursdayError,
 )
 from thursday.shared.ids import bind_trace_id
 from thursday.shared.models import (

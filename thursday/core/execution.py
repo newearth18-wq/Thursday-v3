@@ -9,7 +9,6 @@ what makes §96's "agents never hold standing admin" enforceable rather than asp
 from __future__ import annotations
 
 import time
-from typing import Any
 from uuid import UUID
 
 from thursday.core.logging import get_logger
@@ -139,7 +138,7 @@ class ToolExecutor:
         started = time.perf_counter()
         try:
             result = await tool.run(call, self)
-        except Exception as exc:  # noqa: BLE001 — failures are recorded, then re-raised
+        except Exception as exc:
             self._audit.record(  # type: ignore[attr-defined]
                 AuditEntry(
                     actor="agent" if agent else "thursday", agent=agent, tool=call.tool,

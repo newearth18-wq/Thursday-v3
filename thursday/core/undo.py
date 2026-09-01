@@ -46,7 +46,7 @@ UndoExecutor = Callable[[UndoRecord], Awaitable[bool]]
 
 
 def is_reversible(action: str) -> bool:
-    return INVERSE_ACTIONS.get(action, None) is not None
+    return INVERSE_ACTIONS.get(action) is not None
 
 
 class UndoRegistry:

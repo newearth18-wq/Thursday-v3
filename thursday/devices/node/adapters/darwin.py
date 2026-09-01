@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import shlex
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -74,22 +75,26 @@ class DarwinAdapter(OSAdapter):
                 'tell application "System Events" to get name of first application process '
                 "whose frontmost is true"
             )
-        except Exception:  # noqa: BLE001
+        except Exception:
             return None
 
     async def open_path(self, path: str) -> dict[str, Any]:
         target = Path(path).expanduser()
-        if not target.exists():
+        if not await asyncio.to_thread(target.exists):
             raise FileNotFoundError(path)
         await self.run_shell(f"open {shlex.quote(str(target))}", timeout=15)
         return {"path": str(target)}
 
     async def screenshot(self, **kwargs: Any) -> bytes:
-        target = Path("/tmp/thursday-shot.png")
+        target = Path(tempfile.gettempdir()) / "thursday-shot.png"
         await self.run_shell(f"screencapture -x {target}", timeout=20)
-        data = target.read_bytes()
-        target.unlink(missing_ok=True)
-        return data
+
+        def read() -> bytes:
+            data = target.read_bytes()
+            target.unlink(missing_ok=True)
+            return data
+
+        return await asyncio.to_thread(read)
 
     async def clipboard_get(self) -> str:
         return (await self.run_shell("pbpaste", timeout=5))["stdout"]

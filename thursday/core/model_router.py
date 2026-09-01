@@ -125,7 +125,7 @@ class ModelRouter:
             response = await provider.complete(request)  # type: ignore[attr-defined]
             self._breaker[name] = 0
             return response, decision
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             self._breaker[name] = self._breaker.get(name, 0) + 1
             log.warning("model_failed", provider=name, error=str(exc), failures=self._breaker[name])
             local = self.providers.get(ModelTier.LOCAL)

@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import math
 import re
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta
 from uuid import UUID
 
 from thursday.core.logging import get_logger
@@ -84,7 +84,7 @@ class MemoryManager:
             return False, "memory is disabled by an active privacy zone"
         if write.sensitivity >= DataSensitivity.SECRET:
             return False, "payload is classified SECRET"
-        if not self._redactor.scan(write.content) == ():
+        if self._redactor.scan(write.content):
             return False, "content matches a credential pattern"
         text = write.content.strip()
         if not text:
@@ -221,9 +221,7 @@ class MemoryManager:
             return False
         if record.confidence < query.min_confidence:
             return False
-        if record.expires_at and record.expires_at <= utcnow():
-            return False
-        return True
+        return not (record.expires_at and record.expires_at <= utcnow())
 
     # ------------------------------------------------------------------ conflicts (§11)
 
@@ -244,9 +242,7 @@ class MemoryManager:
         """Same subject, different assertion — a keyed pair, or a very close paraphrase."""
         if existing.content.strip() == write.content.strip():
             return False
-        if write.key and existing.key == write.key:
-            return True
-        return similarity >= 0.90
+        return bool(write.key and existing.key == write.key) or similarity >= 0.90
 
     async def _handle_conflict(
         self, existing: MemoryRecord, write: MemoryWrite, embedding: list[float], reason: str

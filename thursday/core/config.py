@@ -10,7 +10,6 @@ from __future__ import annotations
 from functools import lru_cache
 from pathlib import Path
 
-from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from thursday.shared.enums import ProactivityLevel
@@ -78,7 +77,8 @@ class Settings(BaseSettings):
 
     # security ------------------------------------------------------------------
     vault_backend: str = "env"  # env | memory | keychain
-    device_shared_secret_handle: str = "device_enrollment_secret"
+    #: A vault *handle*, not a secret. The value never appears in configuration.
+    device_shared_secret_handle: str = "device_enrollment_secret"  # noqa: S105
     require_device_signature: bool = True
 
     @property

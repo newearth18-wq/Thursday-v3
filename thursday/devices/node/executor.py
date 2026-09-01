@@ -8,6 +8,7 @@ node that cannot check says so, which lets Thursday phrase the answer honestly (
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import hashlib
 import shutil
 import time
@@ -57,7 +58,7 @@ class NodeExecutor:
             )
         except TimeoutError:
             return self._failure(action, f"timed out after {action.timeout_s:g}s", started)
-        except Exception as exc:  # noqa: BLE001 — every failure is reported, never swallowed
+        except Exception as exc:
             log.warning("device_action_failed", action=action.action, error=str(exc))
             return self._failure(action, f"{type(exc).__name__}: {exc}", started)
 
@@ -139,25 +140,34 @@ class NodeExecutor:
 
     async def _do_read_file(self, args: dict[str, Any]) -> tuple[dict, dict, bool, UndoRecord | None]:
         path = self._resolve(args["path"])
-        text = path.read_text(encoding="utf-8", errors="replace")[: int(args.get("max_bytes", 200_000))]
-        return (
-            {"path": str(path), "content": text},
-            {"size": path.stat().st_size, "sha256": _hash(path)},
-            True,
-            None,
-        )
+        limit = int(args.get("max_bytes", 200_000))
+
+        def read() -> tuple[str, int, str]:
+            return (
+                path.read_text(encoding="utf-8", errors="replace")[:limit],
+                path.stat().st_size,
+                _hash(path),
+            )
+
+        # Actions run concurrently on the node, so blocking I/O goes to a worker thread —
+        # a slow read must not stall the socket or the other actions in flight.
+        text, size, digest = await asyncio.to_thread(read)
+        return {"path": str(path), "content": text}, {"size": size, "sha256": digest}, True, None
 
     async def _do_write_file(self, args: dict[str, Any]) -> tuple[dict, dict, bool, UndoRecord | None]:
         path = self._resolve(args["path"])
         content = str(args["content"])
-        previous = path.read_text(encoding="utf-8") if path.exists() else None
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(content, encoding="utf-8")
-        # VERIFY: read it back and compare, rather than trusting the write call.
-        written = path.read_text(encoding="utf-8")
+        def write() -> tuple[str | None, str, str, int]:
+            before = path.read_text(encoding="utf-8") if path.exists() else None
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(content, encoding="utf-8")
+            # VERIFY: read it back and compare, rather than trusting the write call.
+            return before, path.read_text(encoding="utf-8"), _hash(path), path.stat().st_size
+
+        previous, written, digest, size = await asyncio.to_thread(write)
         return (
             {"path": str(path), "bytes": len(content.encode())},
-            {"sha256": _hash(path), "size": path.stat().st_size},
+            {"sha256": digest, "size": size},
             written == content,
             UndoRecord(
                 action_id=__import__("uuid").uuid4(),
@@ -246,22 +256,30 @@ class NodeExecutor:
     async def _do_list_dir(self, args: dict[str, Any]) -> tuple[dict, dict, bool, UndoRecord | None]:
         path = self._resolve(args["path"])
         limit = int(args.get("limit", 200))
-        entries = [
-            {"name": child.name, "is_dir": child.is_dir(),
-             "size": child.stat().st_size if child.is_file() else None}
-            for child in sorted(path.iterdir())[:limit]
-        ]
+
+        def listing() -> list[dict[str, Any]]:
+            return [
+                {"name": child.name, "is_dir": child.is_dir(),
+                 "size": child.stat().st_size if child.is_file() else None}
+                for child in sorted(path.iterdir())[:limit]
+            ]
+
+        entries = await asyncio.to_thread(listing)
         return {"path": str(path), "entries": entries}, {"count": len(entries)}, True, None
 
     async def _do_search_files(self, args: dict[str, Any]) -> tuple[dict, dict, bool, UndoRecord | None]:
         root = self._resolve(args["root"])
         pattern = str(args["pattern"])
         limit = int(args.get("limit", 50))
-        matches = []
-        for path in root.rglob(pattern):
-            matches.append({"path": str(path), "mtime": path.stat().st_mtime})
-            if len(matches) >= limit:
-                break
+        def scan() -> list[dict[str, Any]]:
+            found: list[dict[str, Any]] = []
+            for path in root.rglob(pattern):
+                found.append({"path": str(path), "mtime": path.stat().st_mtime})
+                if len(found) >= limit:
+                    break
+            return found
+
+        matches = await asyncio.to_thread(scan)
         matches.sort(key=lambda m: m["mtime"], reverse=True)
         return {"matches": matches}, {"count": len(matches)}, True, None
 
@@ -312,10 +330,9 @@ class NodeExecutor:
 
     async def _do_clipboard_set(self, args: dict[str, Any]) -> tuple[dict, dict, bool, UndoRecord | None]:
         previous = ""
-        try:
+        # An unreadable clipboard costs the undo record, not the action.
+        with contextlib.suppress(Exception):
             previous = await self.adapter.clipboard_get()
-        except Exception:  # noqa: BLE001 — an unreadable clipboard just means no undo
-            pass
         text = str(args["text"])
         await self.adapter.clipboard_set(text)
         readback = await self.adapter.clipboard_get()
@@ -341,16 +358,14 @@ class NodeExecutor:
 
     async def _do_set_volume(self, args: dict[str, Any]) -> tuple[dict, dict, bool, UndoRecord | None]:
         previous = None
-        try:
+        with contextlib.suppress(Exception):
             previous = await self.adapter.get_volume()
-        except Exception:  # noqa: BLE001
-            pass
         level = float(args["level"])
         await self.adapter.set_volume(level)
         try:
             readback = await self.adapter.get_volume()
             verified = abs(readback - level) < 0.06
-        except Exception:  # noqa: BLE001
+        except Exception:
             readback, verified = None, False
         undo = (
             UndoRecord(

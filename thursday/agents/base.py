@@ -25,7 +25,7 @@ class BaseAgent(ABC):
         await ctx.emit(Event(kind="agent.started", payload={"agent": self.spec.name}))
         try:
             result = await self.execute(contract, ctx)
-        except Exception as exc:  # noqa: BLE001 — reported as a result, not a crash
+        except Exception as exc:
             log.warning("agent_failed", agent=self.spec.name, error=str(exc))
             await ctx.emit(
                 Event(kind="agent.failed", payload={"agent": self.spec.name, "error": str(exc)})

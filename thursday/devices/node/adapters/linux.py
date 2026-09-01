@@ -7,6 +7,7 @@ from __future__ import annotations
 import asyncio
 import os
 import shutil
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -92,12 +93,12 @@ class LinuxAdapter(OSAdapter):
         try:
             result = await self.run_shell("xdotool getactivewindow getwindowname", timeout=3)
             return result["stdout"].strip() or None
-        except Exception:  # noqa: BLE001
+        except Exception:
             return None
 
     async def open_path(self, path: str) -> dict[str, Any]:
         target = Path(path).expanduser()
-        if not target.exists():
+        if not await asyncio.to_thread(target.exists):
             raise FileNotFoundError(path)
         opener = shutil.which("xdg-open")
         if opener is None:
@@ -109,6 +110,8 @@ class LinuxAdapter(OSAdapter):
         return {"pid": process.pid, "path": str(target)}
 
     async def screenshot(self, **kwargs: Any) -> bytes:
+        import asyncio as _asyncio
+
         for tool, command in (
             ("gnome-screenshot", "gnome-screenshot -f {path}"),
             ("scrot", "scrot {path}"),
@@ -116,11 +119,9 @@ class LinuxAdapter(OSAdapter):
             ("grim", "grim {path}"),
         ):
             if shutil.which(tool):
-                target = Path("/tmp") / f"thursday-shot-{os.getpid()}.png"
+                target = Path(tempfile.gettempdir()) / f"thursday-shot-{os.getpid()}.png"
                 await self.run_shell(command.format(path=target), timeout=15)
-                data = target.read_bytes()
-                target.unlink(missing_ok=True)
-                return data
+                return await _asyncio.to_thread(_read_and_remove, target)
         raise RuntimeError("no screenshot tool is installed on this machine")
 
     async def clipboard_get(self) -> str:
@@ -162,3 +163,9 @@ class LinuxAdapter(OSAdapter):
             await self.run_shell(f"pactl set-sink-volume @DEFAULT_SINK@ {percent}%", timeout=5)
             return
         raise RuntimeError("no volume control available")
+
+
+def _read_and_remove(path: Path) -> bytes:
+    data = path.read_bytes()
+    path.unlink(missing_ok=True)
+    return data

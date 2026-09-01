@@ -11,7 +11,6 @@ Requires ``pywin32`` for window queries; degrades to PowerShell where it is abse
 from __future__ import annotations
 
 import asyncio
-import shlex
 from pathlib import Path
 from typing import Any
 
@@ -128,7 +127,7 @@ class WindowsAdapter(OSAdapter):
 
     async def open_path(self, path: str) -> dict[str, Any]:
         target = Path(path)
-        if not target.exists():
+        if not await asyncio.to_thread(target.exists):
             raise FileNotFoundError(path)
         result = await self._powershell(f"Start-Process -FilePath '{target}' -PassThru | % Id")
         pid = next((int(t) for t in result["stdout"].split() if t.strip().isdigit()), None)
@@ -145,9 +144,12 @@ class WindowsAdapter(OSAdapter):
             f"$bmp.Save('{target}');",
             timeout=30,
         )
-        data = target.read_bytes()
-        target.unlink(missing_ok=True)
-        return data
+        def read() -> bytes:
+            data = target.read_bytes()
+            target.unlink(missing_ok=True)
+            return data
+
+        return await asyncio.to_thread(read)
 
     async def clipboard_get(self) -> str:
         return (await self._powershell("Get-Clipboard -Raw"))["stdout"]

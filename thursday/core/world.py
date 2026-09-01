@@ -39,7 +39,7 @@ class WorldState:
             "device_id": str(device_id) if device_id else None,
             "at": datetime.now(UTC).isoformat(),
         }
-        self._snapshot.recent_actions = ([entry] + self._snapshot.recent_actions)[:20]
+        self._snapshot.recent_actions = [entry, *self._snapshot.recent_actions][:20]
         if resource and ("/" in resource or "\\" in resource or "." in resource):
             self._snapshot.last_referenced_file = resource
         self._snapshot.updated_at = datetime.now(UTC)
