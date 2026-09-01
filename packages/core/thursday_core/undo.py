@@ -11,6 +11,7 @@ from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
+from thursday_shared.actions import canonical
 from thursday_shared.errors import ThursdayError
 from thursday_shared.models import UndoRecord
 
@@ -20,27 +21,28 @@ log = get_logger(__name__)
 
 #: action → the action that reverses it. ``None`` means "no automatic reversal exists".
 INVERSE_ACTIONS: dict[str, str | None] = {
-    "open_app": "close_app",
-    "close_app": "open_app",
-    "create_folder": "delete_folder",
-    "write_file": "restore_file",
-    "save_file": "restore_file",
-    "move": "move",
-    "rename": "rename",
-    "copy": "delete",
-    "delete": "restore_from_trash",
-    "clipboard_set": "clipboard_set",
-    "set_volume": "set_volume",
-    "obsidian_write": "obsidian_restore",
-    "memory_write": "memory_forget",
+    "app.open": "app.close",
+    "app.close": "app.open",
+    "file.folder.create": "file.folder.delete",
+    "file.write": "file.restore",
+    "file.create": "file.delete",
+    "file.move": "file.move",
+    "file.rename": "file.rename",
+    "file.copy": "file.delete",
+    "file.delete": "file.restore_from_trash",
+    "clipboard.write": "clipboard.write",
+    "audio.volume.set": "audio.volume.set",
+    "obsidian.write": "obsidian.restore",
+    "memory.write": "memory.forget",
     # No inverse exists for these; policy treats them as irreversible.
-    "send_email": None,
-    "send_message": None,
-    "publish": None,
-    "purchase": None,
-    "run_shell": None,
-    "install_software": None,
-    "power": None,
+    "email.send": None,
+    "message.send": None,
+    "social.post": None,
+    "purchase.make": None,
+    "shell.run": None,
+    "powershell.run": None,
+    "app.install": None,
+    "system.power": None,
 }
 
 UndoExecutor = Callable[[UndoRecord], Awaitable[bool]]
@@ -50,33 +52,38 @@ UndoExecutor = Callable[[UndoRecord], Awaitable[bool]]
 #: as irreversible would wrongly mark every read-only step as dangerous.
 NON_MUTATING_ACTIONS: frozenset[str] = frozenset(
     {
-        "read_file",
-        "list_dir",
-        "search_files",
-        "read_active_window",
-        "screenshot",
-        "process_status",
-        "system_info",
-        "get_volume",
-        "clipboard_get",
-        "memory_search",
-        "obsidian_search",
-        "web_search",
-        "clock",
-        "vision_analyze",
-        "camera_capture",
+        "file.read",
+        "file.list",
+        "file.search",
+        "file.open",
+        "window.active",
+        "screen.capture",
+        "system.info",
+        "system.process.list",
+        "audio.volume.get",
+        "clipboard.read",
+        "memory.search",
+        "obsidian.search",
+        "web.search",
+        "clock.now",
+        "browser.open",
+        "browser.read",
+        "vision.analyze",
+        "camera.capture",
     }
 )
 
 
 def is_reversible(action: str) -> bool:
     """True when the action can be undone — or has nothing to undo."""
-    return action in NON_MUTATING_ACTIONS or INVERSE_ACTIONS.get(action) is not None
+    name = canonical(action)
+    return name in NON_MUTATING_ACTIONS or INVERSE_ACTIONS.get(name) is not None
 
 
 def is_destructive(action: str) -> bool:
     """True when the action changes something and no reversal exists."""
-    return action not in NON_MUTATING_ACTIONS and INVERSE_ACTIONS.get(action) is None
+    name = canonical(action)
+    return name not in NON_MUTATING_ACTIONS and INVERSE_ACTIONS.get(name) is None
 
 
 class UndoRegistry:

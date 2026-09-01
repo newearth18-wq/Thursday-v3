@@ -110,7 +110,7 @@ class ThursdayEngine:
         if intent.kind is IntentKind.CLARIFY or intent.confidence < 0.35:
             # A conversational answer is harmless even when the classifier was unsure;
             # only a low-confidence *action* has to become a question.
-            if intent.direct_answer and intent.kind in (IntentKind.CHAT, IntentKind.ANSWER):
+            if intent.direct_answer and intent.kind in (IntentKind.ANSWER, IntentKind.UNKNOWN):
                 return self._finish(
                     session_id,
                     self.c.composer.answer(

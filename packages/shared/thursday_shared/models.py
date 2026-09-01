@@ -131,34 +131,36 @@ class Spend(Base):
 
 
 class DeviceCapabilities(Base):
-    """§57. Flat map; the Device Router refuses actions a node never advertised."""
+    """PART 27. What a node can actually do, advertised at HELLO.
 
-    model_config = ConfigDict(extra="allow", validate_assignment=True)
+    Capabilities are namespaced like the commands they authorise, so a node can advertise
+    ``file`` without enumerating seven verbs, and the hub can still refuse ``file.delete``
+    on a node that granted only ``file.read``. Lookup walks the prefixes: ``file.folder.create``
+    is satisfied by ``file.folder.create``, ``file.folder`` or ``file``.
+    """
 
-    open_app: bool = False
-    close_app: bool = False
-    open_file: bool = False
-    write_file: bool = False
-    delete_file: bool = False
-    list_dir: bool = False
-    search_files: bool = False
-    run_shell: bool = False
-    screenshot: bool = False
-    read_active_window: bool = False
-    clipboard: bool = False
-    notify: bool = False
-    volume: bool = False
-    process_status: bool = False
-    system_info: bool = False
-    power: bool = False
-    camera: bool = False
-    microphone: bool = False
-    speaker: bool = False
-    gpu: bool = False
-    browser: bool = False
+    model_config = ConfigDict(extra="forbid", validate_assignment=True)
+
+    #: The set a node advertises. Everything else is derived from it.
+    granted: set[str] = Field(default_factory=set)
+
+    @classmethod
+    def of(cls, *capabilities: str) -> DeviceCapabilities:
+        return cls(granted=set(capabilities))
 
     def supports(self, capability: str) -> bool:
-        return bool(getattr(self, capability, False) or self.model_extra.get(capability, False))
+        parts = capability.split(".")
+        return any(".".join(parts[: i + 1]) in self.granted for i in range(len(parts)))
+
+    def grant(self, *capabilities: str) -> DeviceCapabilities:
+        return DeviceCapabilities(granted=self.granted | set(capabilities))
+
+    def revoke(self, *capabilities: str) -> DeviceCapabilities:
+        return DeviceCapabilities(granted=self.granted - set(capabilities))
+
+    def as_flags(self) -> dict[str, bool]:
+        """A flat view for UIs that want checkboxes rather than a tree."""
+        return dict.fromkeys(sorted(self.granted), True)
 
 
 class DeviceTelemetry(Base):
@@ -457,7 +459,8 @@ class Task(Base):
 
 
 class ToolSpec(Base):
-    """§32. Every field here is used by the Tool Router, not decoration."""
+    """PART 16's ``ToolDefinition``. Every field is used by the Tool Router or the
+    Permission Engine — none of it is decoration."""
 
     name: str
     description: str
@@ -473,6 +476,10 @@ class ToolSpec(Base):
     reversible: bool = True
     max_sensitivity: DataSensitivity = DataSensitivity.SECRET
     local_only: bool = False
+    #: PART 61 — a high-impact tool must be able to report what it *would* do first.
+    supports_dry_run: bool = False
+    #: PART 60 — a reversible tool registers how to reverse itself.
+    supports_undo: bool = False
 
 
 class ToolCall(Base):
@@ -608,10 +615,23 @@ class PermissionVerdict(Base):
     level: PermissionLevel
     risk: RiskLevel
     grant_id: UUID | None = None
+    #: PART 21 — modifying an existing document is automatic *with a version backup*.
+    requires_backup: bool = False
+
+    @property
+    def allowed(self) -> bool:
+        return self.decision is PolicyDecision.AUTO
+
+    @property
+    def needs_approval(self) -> bool:
+        return self.decision.requires_approval
 
 
 class PermissionGrant(Base):
-    """A scoped, expiring 'always allow' (§38). There is no global grant."""
+    """A scoped, expiring 'always allow' (PART 20).
+
+    There is no global grant, and an ASK_ALWAYS action can never produce one.
+    """
 
     id: UUID = Field(default_factory=new_id)
     action: str
@@ -656,10 +676,19 @@ class ApprovalRequest(Base):
     step_id: UUID | None = None
     state: ApprovalState = ApprovalState.PENDING
     scope: ApprovalScope = ApprovalScope.ONCE
+    #: The policy that produced this request. ASK_ALWAYS never offers "always allow".
+    policy: PolicyDecision = PolicyDecision.ASK_ONCE
     created_at: datetime = Field(default_factory=utcnow)
     expires_at: datetime | None = None
     decided_at: datetime | None = None
     note: str | None = None
+
+    @property
+    def scopes_offered(self) -> list[ApprovalScope]:
+        """Which answers the UI may present. Never invent ALWAYS for an ASK_ALWAYS action."""
+        if self.policy.grantable:
+            return [ApprovalScope.ONCE, ApprovalScope.SESSION, ApprovalScope.ALWAYS]
+        return [ApprovalScope.ONCE]
 
 
 class DryRunReport(Base):

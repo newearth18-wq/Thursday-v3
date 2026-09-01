@@ -68,7 +68,7 @@ class RuleBasedLLM:
         title = str(request.json_schema.get("title", "")) if request.json_schema else ""
         if title == "Intent":
             return {
-                "kind": "CHAT",
+                "kind": "UNKNOWN",
                 "objective": user_text[:200],
                 "entities": {},
                 "target_device": None,

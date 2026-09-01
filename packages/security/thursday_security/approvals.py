@@ -94,6 +94,12 @@ class ApprovalService:
             await self._announce(approval, "approval.expired")
             return approval
 
+        # An ASK_ALWAYS action is asked every time. Silently downgrading the scope here —
+        # rather than erroring — means an API client passing scope=always still gets a
+        # one-time approval, and no standing grant is ever created (ADR 0008).
+        if scope not in approval.scopes_offered:
+            scope = ApprovalScope.ONCE
+
         approval.state = ApprovalState.APPROVED if approve else ApprovalState.REJECTED
         approval.scope = scope
         approval.note = note

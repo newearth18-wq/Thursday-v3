@@ -18,6 +18,11 @@ log = get_logger(__name__)
 #: Below this, Thursday asks instead of delegating.
 MIN_SELECTION_CONFIDENCE = 0.45
 
+#: Tool namespaces that only work with a device node attached.
+_DEVICE_NAMESPACES = frozenset(
+    {"app", "file", "system", "screen", "window", "clipboard", "audio", "shell", "powershell"}
+)
+
 
 @dataclass
 class AgentCandidate:
@@ -79,7 +84,7 @@ class AgentRegistry:
             capability_match = overlap / len(capabilities)
 
             affinity = 1.0
-            needs_device = any(t in ("open_app", "run_shell", "screenshot") for t in spec.tools)
+            needs_device = any(t.split(".")[0] in _DEVICE_NAMESPACES for t in spec.tools)
             if needs_device and not device_online:
                 affinity = 0.0
                 reasons.append("requires a device but none is online")

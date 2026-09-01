@@ -12,7 +12,7 @@ from thursday_devices.node.executor import NodeExecutor
 from thursday_shared.enums import ControlTier
 from thursday_shared.errors import DeviceActionFailed, DeviceUnavailable
 from thursday_shared.ids import new_id
-from thursday_shared.models import DeviceAction, WorldStateSnapshot
+from thursday_shared.models import DeviceAction, DeviceCapabilities, WorldStateSnapshot
 from thursday_shared.protocol import Hello, dump_frame, parse_frame
 
 from tests.conftest import FakeAdapter
@@ -24,16 +24,16 @@ def executor(tmp_path: Path) -> NodeExecutor:
 
 
 async def test_a_launch_is_verified_by_observing_the_process(executor):
-    result = await executor.execute(DeviceAction(action="open_app", args={"name": "chrome"}))
+    result = await executor.execute(DeviceAction(action="app.open", args={"app": "chrome"}))
     assert result.ok and result.verified
     assert result.evidence["process_count"] == 1
     assert result.evidence["active_window"] == "chrome — window"
-    assert result.undo is not None and result.undo.operation == "close_app"
+    assert result.undo is not None and result.undo.operation == "app.close"
 
 
 async def test_a_launch_that_leaves_no_process_is_reported_unverified(tmp_path):
     executor = NodeExecutor(FakeAdapter(fail_launch=True), allowed_roots=[tmp_path])
-    result = await executor.execute(DeviceAction(action="open_app", args={"name": "chrome"}))
+    result = await executor.execute(DeviceAction(action="app.open", args={"app": "chrome"}))
     assert result.ok is True  # the command itself did not error
     assert result.verified is False  # ...but nothing confirms it worked
     assert result.succeeded is False  # so it is not a success
@@ -43,7 +43,7 @@ async def test_a_launch_that_leaves_no_process_is_reported_unverified(tmp_path):
 async def test_a_write_is_verified_by_reading_it_back(executor, tmp_path):
     target = tmp_path / "notes" / "a.txt"
     result = await executor.execute(
-        DeviceAction(action="write_file", args={"path": str(target), "content": "สวัสดี"})
+        DeviceAction(action="file.write", args={"path": str(target), "content": "สวัสดี"})
     )
     assert result.ok and result.verified
     assert target.read_text(encoding="utf-8") == "สวัสดี"
@@ -54,23 +54,25 @@ async def test_a_write_over_an_existing_file_keeps_the_old_contents_for_undo(exe
     target = tmp_path / "a.txt"
     target.write_text("before", encoding="utf-8")
     result = await executor.execute(
-        DeviceAction(action="write_file", args={"path": str(target), "content": "after"})
+        DeviceAction(action="file.write", args={"path": str(target), "content": "after"})
     )
-    assert result.undo.previous_state == {"content": "before"}
+    assert result.undo.previous_state["content"] == "before"
+    # PART 21 — the previous version is on disk, not merely in the undo record.
+    assert Path(result.undo.previous_state["backup"]).read_text(encoding="utf-8") == "before"
 
 
 async def test_delete_quarantines_rather_than_destroying(executor, tmp_path):
     target = tmp_path / "gone.txt"
     target.write_text("x", encoding="utf-8")
-    result = await executor.execute(DeviceAction(action="delete", args={"path": str(target)}))
+    result = await executor.execute(DeviceAction(action="file.delete", args={"path": str(target)}))
     assert result.verified and not target.exists()
     assert Path(result.data["moved_to"]).exists()
-    assert result.undo.operation == "restore_from_trash"
+    assert result.undo.operation == "file.restore_from_trash"
 
 
 async def test_the_node_refuses_paths_outside_its_allowed_roots(executor):
     result = await executor.execute(
-        DeviceAction(action="write_file", args={"path": "/etc/thursday-test", "content": "x"})
+        DeviceAction(action="file.write", args={"path": "/etc/thursday-test", "content": "x"})
     )
     assert not result.ok
     assert "outside this node's allowed roots" in result.error
@@ -79,37 +81,45 @@ async def test_the_node_refuses_paths_outside_its_allowed_roots(executor):
 async def test_traversal_out_of_a_root_is_refused(executor, tmp_path):
     result = await executor.execute(
         DeviceAction(
-            action="read_file", args={"path": str(tmp_path / ".." / ".." / "etc" / "passwd")}
+            action="file.read", args={"path": str(tmp_path / ".." / ".." / "etc" / "passwd")}
         )
     )
     assert not result.ok
 
 
 async def test_missing_arguments_are_refused_before_anything_runs(executor):
-    result = await executor.execute(DeviceAction(action="open_app", args={}))
+    result = await executor.execute(DeviceAction(action="app.open", args={}))
     assert not result.ok and "missing required args" in result.error
 
 
 async def test_an_unknown_action_is_refused(executor):
-    result = await executor.execute(DeviceAction(action="hack_the_mainframe"))
+    result = await executor.execute(DeviceAction(action="hack.the_mainframe"))
     assert not result.ok and "unknown action" in result.error
 
 
 async def test_an_unsupported_capability_is_refused_by_the_node(tmp_path):
     adapter = FakeAdapter()
-    adapter.capabilities = lambda: __import__(
-        "thursday_shared.models", fromlist=["DeviceCapabilities"]
-    ).DeviceCapabilities(open_app=True)
+    adapter.capabilities = lambda: DeviceCapabilities.of("app.open")
     executor = NodeExecutor(adapter, allowed_roots=[tmp_path])
-    result = await executor.execute(DeviceAction(action="run_shell", args={"command": "ls"}))
+    result = await executor.execute(DeviceAction(action="shell.run", args={"command": "ls"}))
     assert not result.ok and "does not support" in result.error
+
+
+async def test_a_capability_namespace_covers_its_verbs(tmp_path):
+    """Granting `file` authorises every file verb; granting `file.read` does not."""
+    broad = FakeAdapter()
+    broad.capabilities = lambda: DeviceCapabilities.of("file")
+    assert broad.capabilities().supports("file.write")
+
+    narrow = FakeAdapter()
+    narrow.capabilities = lambda: DeviceCapabilities.of("file.read")
+    assert narrow.capabilities().supports("file.read")
+    assert not narrow.capabilities().supports("file.write")
 
 
 async def test_the_hub_refuses_an_unadvertised_action_before_dispatch(tmp_path):
     adapter = FakeAdapter()
-    from thursday_shared.models import DeviceCapabilities
-
-    adapter.capabilities = lambda: DeviceCapabilities(open_app=True)
+    adapter.capabilities = lambda: DeviceCapabilities.of("app.open")
     hub = DeviceHub()
     session = LoopbackDeviceSession(
         device_id=new_id(),
@@ -118,7 +128,7 @@ async def test_the_hub_refuses_an_unadvertised_action_before_dispatch(tmp_path):
     )
     await hub.register(session)
     with pytest.raises(DeviceActionFailed, match="does not support"):
-        await hub.invoke(session.device_id, DeviceAction(action="screenshot"))
+        await hub.invoke(session.device_id, DeviceAction(action="screen.capture"))
 
 
 async def test_invoking_a_disconnected_device_says_so(tmp_path):
@@ -131,7 +141,7 @@ async def test_invoking_a_disconnected_device_says_so(tmp_path):
     await hub.register(session)
     await hub.unregister(session.device_id)
     with pytest.raises(DeviceUnavailable):
-        await hub.invoke(session.device_id, DeviceAction(action="system_info"))
+        await hub.invoke(session.device_id, DeviceAction(action="system.info"))
 
 
 def test_gui_control_is_the_last_tier_in_the_catalogue():
@@ -140,9 +150,11 @@ def test_gui_control_is_the_last_tier_in_the_catalogue():
 
 
 def test_every_mutating_action_declares_its_reversibility():
-    for name in ("delete", "run_shell", "power"):
+    # `file.delete` quarantines rather than unlinking, so it is genuinely reversible —
+    # which is why it is gated by ASK_ALWAYS rather than by irreversibility.
+    for name in ("shell.run", "system.power"):
         assert catalogue.get(name).reversible is False
-    for name in ("move", "copy", "create_folder"):
+    for name in ("file.move", "file.copy", "file.delete", "file.folder.create"):
         assert catalogue.get(name).reversible is True
 
 
@@ -153,15 +165,15 @@ def test_protocol_frames_round_trip():
         device_id=new_id(),
         name="Office-PC",
         os="Windows",
-        capabilities=DeviceCapabilities(open_app=True),
+        capabilities=DeviceCapabilities.of("app.open"),
         telemetry=DeviceTelemetry(),
         nonce="abc",
     )
     decoded = parse_frame(dump_frame(hello))
     assert isinstance(decoded, Hello)
     assert decoded.name == "Office-PC"
-    assert decoded.capabilities.supports("open_app")
-    assert not decoded.capabilities.supports("camera")
+    assert decoded.capabilities.supports("app.open")
+    assert not decoded.capabilities.supports("camera.capture")
 
 
 def test_an_unknown_or_mismatched_frame_is_rejected():

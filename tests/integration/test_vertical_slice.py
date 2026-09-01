@@ -32,11 +32,11 @@ async def test_open_app_is_verified_before_success_is_reported(
 
     # An audit row exists for the action, and the chain is intact.
     tools_used = [e.tool for e in container.audit.entries()]
-    assert "open_app" in tools_used
+    assert "app.open" in tools_used
     assert container.audit.verify_chain()
 
     # The action left an undo path behind (§40).
-    assert any(u.operation == "close_app" for u in container.undo.pending())
+    assert any(u.operation == "app.close" for u in container.undo.pending())
 
 
 async def test_dispatch_without_observable_effect_is_not_success(container, tmp_path, session_id):
@@ -60,8 +60,8 @@ async def test_risky_request_is_never_executed_silently(container, office_pc, ad
 
     Either way the invariant is the same: nothing ran.
     """
-    verdict = container.permissions.decide(ActionRequest(action="run_shell", resource="rm -rf /"))
-    assert verdict.decision is PolicyDecision.ASK
+    verdict = container.permissions.decide(ActionRequest(action="shell.run", resource="rm -rf /"))
+    assert verdict.decision is PolicyDecision.ASK_ALWAYS
 
     await container.engine.handle_turn(
         session_id=session_id,
@@ -82,7 +82,7 @@ async def test_approval_gates_a_risky_tool_call(container, office_pc, tmp_path, 
     target = tmp_path / "scratch.txt"
     target.write_text("delete me", encoding="utf-8")
     call = ToolCall(
-        tool="delete",
+        tool="file.delete",
         args={"path": str(target)},
         device_id=office_pc.device_id,
         reason="tidy up the scratch file",
@@ -95,11 +95,13 @@ async def test_approval_gates_a_risky_tool_call(container, office_pc, tmp_path, 
     assert len(pending) == 1
     approval = pending[0]
     # The request carries everything the owner needs in order to decide (§38).
-    assert approval.action == "delete"
+    assert approval.action == "file.delete"
     assert approval.resource == str(target)
     assert approval.expected_outcome
     assert approval.consequence_of_refusal
 
+    # `file.delete` is ASK_ALWAYS, so the request offers only a one-time answer (ADR 0008).
+    assert approval.scopes_offered == [ApprovalScope.ONCE]
     await container.approvals.decide(approval.id, approve=True, scope=ApprovalScope.ONCE)
     result = await running
     assert result.ok and result.verified
@@ -111,7 +113,7 @@ async def test_approval_gates_a_risky_tool_call(container, office_pc, tmp_path, 
     other.write_text("keep me", encoding="utf-8")
     second = asyncio.create_task(
         container.executor.execute(
-            ToolCall(tool="delete", args={"path": str(other)}, device_id=office_pc.device_id),
+            ToolCall(tool="file.delete", args={"path": str(other)}, device_id=office_pc.device_id),
             agent="computer",
         )
     )

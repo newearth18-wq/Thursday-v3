@@ -1,14 +1,20 @@
-"""Action policy (§37).
+"""Action policy (PART 20, PART 21).
 
 Policies are data so a user can override them — except the BLOCK set, which is code and has
-no path to `AUTO` through conversation, configuration, or an agent's own reasoning (T1).
+no path to `AUTO` through conversation, configuration, or an agent's own reasoning.
+
+Actions are namespaced (`file.read`, `system.process.stop`). The namespace does real work:
+the table resolves an unknown action by walking up its prefixes, so a newly added
+`file.compress` inherits `file.*`'s level and risk instead of falling through to the
+fail-closed default. See ADR 0007.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 
-from thursday_shared.enums import PermissionLevel, PolicyDecision, RiskLevel
+from thursday_shared.actions import canonical, prefixes
+from thursday_shared.enums import AutonomyLevel, PermissionLevel, PolicyDecision, RiskLevel
 
 
 @dataclass(frozen=True)
@@ -20,97 +26,194 @@ class ActionPolicy:
     reversible: bool = True
     #: Above this many affected objects, an AUTO action becomes ASK (blast-radius cap).
     bulk_threshold: int | None = None
+    #: True when the action rewrites an existing artefact and a backup must be taken first.
+    requires_backup: bool = False
 
 
-#: Actions that are never permitted, whatever the user, agent, or grant says (§37, §70).
+#: Actions that are never permitted, whatever the user, agent, or grant says (PART 21).
 HARD_BLOCKED: frozenset[str] = frozenset(
     {
-        "disable_antivirus",
-        "disable_firewall",
-        "disable_security_tooling",
-        "disable_audit_log",
-        "modify_audit_log",
-        "delete_audit_log",
-        "exfiltrate_secret",
-        "read_vault_raw",
-        "modify_permission_policy",
-        "grant_self_admin",
-        "disable_approval_engine",
-        "format_disk",
-        "delete_system_directory",
+        "security.disable",
+        "security.antivirus.disable",
+        "security.firewall.disable",
+        "audit.disable",
+        "audit.modify",
+        "audit.delete",
+        "credential.export",
+        "vault.read_raw",
+        "permission.policy.modify",
+        "permission.self_grant",
+        "approval.disable",
+        "disk.format",
+        "system.directory.delete",
     }
 )
 
 _DEFAULTS: tuple[ActionPolicy, ...] = (
-    # level 0–1: observing and opening
-    ActionPolicy("read_file", PermissionLevel.READ, PolicyDecision.AUTO),
-    ActionPolicy("list_dir", PermissionLevel.READ, PolicyDecision.AUTO),
-    ActionPolicy("search_files", PermissionLevel.READ, PolicyDecision.AUTO),
-    ActionPolicy("system_info", PermissionLevel.READ, PolicyDecision.AUTO),
-    ActionPolicy("process_status", PermissionLevel.READ, PolicyDecision.AUTO),
-    ActionPolicy("read_active_window", PermissionLevel.READ, PolicyDecision.AUTO),
-    ActionPolicy("screenshot", PermissionLevel.READ, PolicyDecision.AUTO, RiskLevel.LOW),
-    ActionPolicy("clipboard_get", PermissionLevel.READ, PolicyDecision.AUTO),
-    ActionPolicy("memory_search", PermissionLevel.READ, PolicyDecision.AUTO),
-    ActionPolicy("web_search", PermissionLevel.READ, PolicyDecision.AUTO),
-    ActionPolicy("get_volume", PermissionLevel.READ, PolicyDecision.AUTO),
-    ActionPolicy("open_app", PermissionLevel.OPEN, PolicyDecision.AUTO),
-    ActionPolicy("open_file", PermissionLevel.OPEN, PolicyDecision.AUTO),
-    ActionPolicy("open_url", PermissionLevel.OPEN, PolicyDecision.AUTO),
-    ActionPolicy("notify", PermissionLevel.OPEN, PolicyDecision.AUTO),
-    # level 2: modifying the user's own workspace
-    ActionPolicy("create_folder", PermissionLevel.MODIFY, PolicyDecision.AUTO),
-    ActionPolicy("write_file", PermissionLevel.MODIFY, PolicyDecision.AUTO, RiskLevel.LOW),
-    ActionPolicy("save_file", PermissionLevel.MODIFY, PolicyDecision.AUTO),
-    ActionPolicy("clipboard_set", PermissionLevel.MODIFY, PolicyDecision.AUTO),
-    ActionPolicy("set_volume", PermissionLevel.MODIFY, PolicyDecision.AUTO),
-    ActionPolicy("close_app", PermissionLevel.MODIFY, PolicyDecision.AUTO, RiskLevel.LOW),
-    ActionPolicy("obsidian_write", PermissionLevel.MODIFY, PolicyDecision.AUTO),
-    ActionPolicy("memory_write", PermissionLevel.MODIFY, PolicyDecision.AUTO),
+    # ---------------------------------------------------------------- level 0: observe
+    ActionPolicy("file.read", PermissionLevel.READ, PolicyDecision.AUTO),
+    ActionPolicy("file.search", PermissionLevel.READ, PolicyDecision.AUTO),
+    ActionPolicy("file.list", PermissionLevel.READ, PolicyDecision.AUTO),
+    ActionPolicy("system.info", PermissionLevel.READ, PolicyDecision.AUTO),
+    ActionPolicy("system.process.list", PermissionLevel.READ, PolicyDecision.AUTO),
+    ActionPolicy("window.active", PermissionLevel.READ, PolicyDecision.AUTO),
+    ActionPolicy("clipboard.read", PermissionLevel.READ, PolicyDecision.AUTO),
+    ActionPolicy("audio.volume.get", PermissionLevel.READ, PolicyDecision.AUTO),
+    ActionPolicy("memory.search", PermissionLevel.READ, PolicyDecision.AUTO),
+    ActionPolicy("obsidian.search", PermissionLevel.READ, PolicyDecision.AUTO),
+    ActionPolicy("web.search", PermissionLevel.READ, PolicyDecision.AUTO),
+    ActionPolicy("clock.now", PermissionLevel.READ, PolicyDecision.AUTO),
+    ActionPolicy("browser.read", PermissionLevel.READ, PolicyDecision.AUTO),
+    # ---------------------------------------------------------------- level 1: open
+    ActionPolicy("app.open", PermissionLevel.OPEN, PolicyDecision.AUTO),
+    ActionPolicy("file.open", PermissionLevel.OPEN, PolicyDecision.AUTO),
+    ActionPolicy("browser.open", PermissionLevel.OPEN, PolicyDecision.AUTO),
+    ActionPolicy("browser.navigate", PermissionLevel.OPEN, PolicyDecision.AUTO),
+    ActionPolicy("screen.capture", PermissionLevel.OPEN, PolicyDecision.AUTO),
+    ActionPolicy("notify.show", PermissionLevel.OPEN, PolicyDecision.AUTO),
+    # ---------------------------------------------------------------- level 2: modify
+    ActionPolicy("file.create", PermissionLevel.MODIFY, PolicyDecision.AUTO),
+    ActionPolicy("file.folder.create", PermissionLevel.MODIFY, PolicyDecision.AUTO),
+    ActionPolicy("clipboard.write", PermissionLevel.MODIFY, PolicyDecision.AUTO),
+    ActionPolicy("audio.volume.set", PermissionLevel.MODIFY, PolicyDecision.AUTO),
+    ActionPolicy("memory.write", PermissionLevel.MODIFY, PolicyDecision.AUTO),
+    ActionPolicy("obsidian.write", PermissionLevel.MODIFY, PolicyDecision.AUTO),
+    ActionPolicy("browser.type", PermissionLevel.MODIFY, PolicyDecision.AUTO, RiskLevel.LOW),
+    ActionPolicy("browser.click", PermissionLevel.MODIFY, PolicyDecision.AUTO, RiskLevel.LOW),
+    # PART 21: modifying an existing document is automatic *with a version backup*.
     ActionPolicy(
-        "rename", PermissionLevel.MODIFY, PolicyDecision.AUTO, RiskLevel.MEDIUM, bulk_threshold=10
+        "file.write",
+        PermissionLevel.MODIFY,
+        PolicyDecision.AUTO,
+        RiskLevel.MEDIUM,
+        requires_backup=True,
     ),
     ActionPolicy(
-        "move", PermissionLevel.MODIFY, PolicyDecision.AUTO, RiskLevel.MEDIUM, bulk_threshold=10
+        "file.copy", PermissionLevel.MODIFY, PolicyDecision.AUTO, RiskLevel.LOW, bulk_threshold=50
     ),
     ActionPolicy(
-        "copy", PermissionLevel.MODIFY, PolicyDecision.AUTO, RiskLevel.LOW, bulk_threshold=50
-    ),
-    # level 2–3: risky or outward-facing
-    ActionPolicy("delete", PermissionLevel.MODIFY, PolicyDecision.ASK, RiskLevel.HIGH, False),
-    ActionPolicy("run_shell", PermissionLevel.MODIFY, PolicyDecision.ASK, RiskLevel.HIGH, False),
-    ActionPolicy("run_script", PermissionLevel.MODIFY, PolicyDecision.ASK, RiskLevel.HIGH, False),
-    ActionPolicy("send_email", PermissionLevel.EXTERNAL, PolicyDecision.ASK, RiskLevel.HIGH, False),
-    ActionPolicy(
-        "send_message", PermissionLevel.EXTERNAL, PolicyDecision.ASK, RiskLevel.HIGH, False
+        "file.move",
+        PermissionLevel.MODIFY,
+        PolicyDecision.AUTO,
+        RiskLevel.MEDIUM,
+        bulk_threshold=10,
     ),
     ActionPolicy(
-        "http_post", PermissionLevel.EXTERNAL, PolicyDecision.ASK, RiskLevel.MEDIUM, False
+        "file.rename",
+        PermissionLevel.MODIFY,
+        PolicyDecision.AUTO,
+        RiskLevel.MEDIUM,
+        bulk_threshold=10,
     ),
-    ActionPolicy("calendar_write", PermissionLevel.EXTERNAL, PolicyDecision.ASK, RiskLevel.MEDIUM),
+    ActionPolicy("app.close", PermissionLevel.MODIFY, PolicyDecision.AUTO, RiskLevel.LOW),
     ActionPolicy(
-        "purchase", PermissionLevel.EXTERNAL, PolicyDecision.ASK, RiskLevel.CRITICAL, False
+        "system.process.stop", PermissionLevel.MODIFY, PolicyDecision.ASK_ONCE, RiskLevel.MEDIUM
     ),
-    ActionPolicy("publish", PermissionLevel.EXTERNAL, PolicyDecision.ASK, RiskLevel.HIGH, False),
-    # level 4–5: the machine itself
+    # ---------------------------------------------------------------- asked every time
     ActionPolicy(
-        "install_software", PermissionLevel.SYSTEM, PolicyDecision.ASK, RiskLevel.HIGH, False
-    ),
-    ActionPolicy(
-        "uninstall_software", PermissionLevel.SYSTEM, PolicyDecision.ASK, RiskLevel.HIGH, False
-    ),
-    ActionPolicy(
-        "service_control", PermissionLevel.SYSTEM, PolicyDecision.ASK, RiskLevel.HIGH, False
+        "file.delete", PermissionLevel.MODIFY, PolicyDecision.ASK_ALWAYS, RiskLevel.HIGH, False
     ),
     ActionPolicy(
-        "registry_write", PermissionLevel.SYSTEM, PolicyDecision.ASK, RiskLevel.HIGH, False
+        "powershell.run", PermissionLevel.MODIFY, PolicyDecision.ASK_ALWAYS, RiskLevel.HIGH, False
     ),
-    ActionPolicy("power", PermissionLevel.SYSTEM, PolicyDecision.ASK, RiskLevel.HIGH, False),
-    ActionPolicy("lock", PermissionLevel.SYSTEM, PolicyDecision.ASK, RiskLevel.LOW),
-    ActionPolicy("elevate", PermissionLevel.ADMIN, PolicyDecision.ASK, RiskLevel.CRITICAL, False),
     ActionPolicy(
-        "credential_change", PermissionLevel.ADMIN, PolicyDecision.ASK, RiskLevel.CRITICAL, False
+        "shell.run", PermissionLevel.MODIFY, PolicyDecision.ASK_ALWAYS, RiskLevel.HIGH, False
     ),
+    ActionPolicy(
+        "script.run", PermissionLevel.MODIFY, PolicyDecision.ASK_ALWAYS, RiskLevel.HIGH, False
+    ),
+    # ---------------------------------------------------------------- level 3: external
+    ActionPolicy(
+        "email.send", PermissionLevel.EXTERNAL, PolicyDecision.ASK_ALWAYS, RiskLevel.HIGH, False
+    ),
+    ActionPolicy(
+        "message.send", PermissionLevel.EXTERNAL, PolicyDecision.ASK_ALWAYS, RiskLevel.HIGH, False
+    ),
+    ActionPolicy(
+        "social.post", PermissionLevel.EXTERNAL, PolicyDecision.ASK_ALWAYS, RiskLevel.HIGH, False
+    ),
+    ActionPolicy(
+        "purchase.make",
+        PermissionLevel.EXTERNAL,
+        PolicyDecision.ASK_ALWAYS,
+        RiskLevel.CRITICAL,
+        False,
+    ),
+    ActionPolicy(
+        "http.post", PermissionLevel.EXTERNAL, PolicyDecision.ASK_ONCE, RiskLevel.MEDIUM, False
+    ),
+    ActionPolicy(
+        "calendar.write", PermissionLevel.EXTERNAL, PolicyDecision.ASK_ONCE, RiskLevel.MEDIUM
+    ),
+    ActionPolicy(
+        "browser.submit", PermissionLevel.EXTERNAL, PolicyDecision.ASK_ONCE, RiskLevel.MEDIUM, False
+    ),
+    ActionPolicy("cloud.inference", PermissionLevel.EXTERNAL, PolicyDecision.AUTO, RiskLevel.LOW),
+    # ---------------------------------------------------------------- level 4–5: the machine
+    ActionPolicy(
+        "app.install", PermissionLevel.SYSTEM, PolicyDecision.ASK_ALWAYS, RiskLevel.HIGH, False
+    ),
+    ActionPolicy(
+        "app.uninstall", PermissionLevel.SYSTEM, PolicyDecision.ASK_ALWAYS, RiskLevel.HIGH, False
+    ),
+    ActionPolicy(
+        "service.control", PermissionLevel.SYSTEM, PolicyDecision.ASK_ALWAYS, RiskLevel.HIGH, False
+    ),
+    ActionPolicy(
+        "system.setting.write",
+        PermissionLevel.SYSTEM,
+        PolicyDecision.ASK_ALWAYS,
+        RiskLevel.HIGH,
+        False,
+    ),
+    ActionPolicy(
+        "registry.write", PermissionLevel.SYSTEM, PolicyDecision.ASK_ALWAYS, RiskLevel.HIGH, False
+    ),
+    ActionPolicy(
+        "system.power", PermissionLevel.SYSTEM, PolicyDecision.ASK_ALWAYS, RiskLevel.HIGH, False
+    ),
+    ActionPolicy("system.lock", PermissionLevel.SYSTEM, PolicyDecision.ASK_ONCE, RiskLevel.LOW),
+    ActionPolicy(
+        "shell.admin", PermissionLevel.ADMIN, PolicyDecision.ASK_ALWAYS, RiskLevel.CRITICAL, False
+    ),
+    ActionPolicy(
+        "credential.change",
+        PermissionLevel.ADMIN,
+        PolicyDecision.ASK_ALWAYS,
+        RiskLevel.CRITICAL,
+        False,
+    ),
+)
+
+#: Namespace defaults, consulted when an exact action is unknown. Walking the prefixes means
+#: a new verb inherits a sane level instead of always landing on the fail-closed default.
+_NAMESPACE_DEFAULTS: tuple[tuple[str, PermissionLevel, PolicyDecision, RiskLevel], ...] = (
+    ("audit", PermissionLevel.ADMIN, PolicyDecision.BLOCK, RiskLevel.CRITICAL),
+    ("security", PermissionLevel.ADMIN, PolicyDecision.BLOCK, RiskLevel.CRITICAL),
+    ("credential", PermissionLevel.ADMIN, PolicyDecision.ASK_ALWAYS, RiskLevel.CRITICAL),
+    ("registry", PermissionLevel.SYSTEM, PolicyDecision.ASK_ALWAYS, RiskLevel.HIGH),
+    ("service", PermissionLevel.SYSTEM, PolicyDecision.ASK_ALWAYS, RiskLevel.HIGH),
+    ("powershell", PermissionLevel.MODIFY, PolicyDecision.ASK_ALWAYS, RiskLevel.HIGH),
+    ("shell", PermissionLevel.MODIFY, PolicyDecision.ASK_ALWAYS, RiskLevel.HIGH),
+    ("purchase", PermissionLevel.EXTERNAL, PolicyDecision.ASK_ALWAYS, RiskLevel.CRITICAL),
+    ("email", PermissionLevel.EXTERNAL, PolicyDecision.ASK_ALWAYS, RiskLevel.HIGH),
+    ("message", PermissionLevel.EXTERNAL, PolicyDecision.ASK_ALWAYS, RiskLevel.HIGH),
+    ("social", PermissionLevel.EXTERNAL, PolicyDecision.ASK_ALWAYS, RiskLevel.HIGH),
+    ("calendar", PermissionLevel.EXTERNAL, PolicyDecision.ASK_ONCE, RiskLevel.MEDIUM),
+    ("http", PermissionLevel.EXTERNAL, PolicyDecision.ASK_ONCE, RiskLevel.MEDIUM),
+    ("system", PermissionLevel.SYSTEM, PolicyDecision.ASK_ALWAYS, RiskLevel.HIGH),
+    ("file", PermissionLevel.MODIFY, PolicyDecision.ASK_ONCE, RiskLevel.MEDIUM),
+    ("browser", PermissionLevel.MODIFY, PolicyDecision.ASK_ONCE, RiskLevel.MEDIUM),
+    ("app", PermissionLevel.MODIFY, PolicyDecision.ASK_ONCE, RiskLevel.MEDIUM),
+    ("memory", PermissionLevel.MODIFY, PolicyDecision.ASK_ONCE, RiskLevel.LOW),
+    ("obsidian", PermissionLevel.MODIFY, PolicyDecision.ASK_ONCE, RiskLevel.LOW),
+    ("clipboard", PermissionLevel.MODIFY, PolicyDecision.ASK_ONCE, RiskLevel.LOW),
+    ("audio", PermissionLevel.MODIFY, PolicyDecision.ASK_ONCE, RiskLevel.LOW),
+    ("screen", PermissionLevel.READ, PolicyDecision.ASK_ONCE, RiskLevel.LOW),
+    ("window", PermissionLevel.READ, PolicyDecision.AUTO, RiskLevel.LOW),
+    ("notify", PermissionLevel.OPEN, PolicyDecision.AUTO, RiskLevel.LOW),
+    ("clock", PermissionLevel.READ, PolicyDecision.AUTO, RiskLevel.NONE),
+    ("web", PermissionLevel.READ, PolicyDecision.AUTO, RiskLevel.LOW),
 )
 
 
@@ -119,37 +222,85 @@ class PolicyTable:
 
     def __init__(self, overrides: dict[str, PolicyDecision] | None = None) -> None:
         self._policies = {p.action: p for p in _DEFAULTS}
-        self._overrides = dict(overrides or {})
+        self._overrides = {canonical(k): v for k, v in (overrides or {}).items()}
 
-    def get(self, action: str) -> ActionPolicy:
-        """Unknown actions are ASK, not AUTO — fail closed."""
-        policy = self._policies.get(action)
-        if policy is None:
-            return ActionPolicy(
-                action, PermissionLevel.MODIFY, PolicyDecision.ASK, RiskLevel.MEDIUM
+    def get(self, action: str, *, autonomy: AutonomyLevel = AutonomyLevel.MODERATE) -> ActionPolicy:
+        """Resolve a policy: exact match, then namespace, then fail closed."""
+        name = canonical(action)
+        policy = self._policies.get(name) or self._from_namespace(name)
+
+        override = self._overrides.get(name)
+        if override is not None and self._may_override(policy, override, name):
+            policy = ActionPolicy(
+                policy.action,
+                policy.level,
+                override,
+                policy.risk,
+                policy.reversible,
+                policy.bulk_threshold,
+                policy.requires_backup,
             )
-        override = self._overrides.get(action)
-        if override is None or action in HARD_BLOCKED:
-            return policy
-        if override is PolicyDecision.AUTO and policy.level >= PermissionLevel.SYSTEM:
-            # A user may loosen level 0–3, but never silently auto-approve system/admin work.
-            return policy
-        return ActionPolicy(
-            policy.action,
-            policy.level,
-            override,
-            policy.risk,
-            policy.reversible,
-            policy.bulk_threshold,
+
+        return self._apply_autonomy(policy, autonomy)
+
+    def _may_override(self, policy: ActionPolicy, override: PolicyDecision, name: str) -> bool:
+        """A user may loosen level 0–3, but never silently auto-approve system or admin
+        work, and never downgrade an action the table says to ask about every time."""
+        if self.is_blocked(name):
+            return False
+        if override is not PolicyDecision.AUTO:
+            return True
+        return not (
+            policy.level >= PermissionLevel.SYSTEM or policy.default is PolicyDecision.ASK_ALWAYS
         )
 
+    def _from_namespace(self, name: str) -> ActionPolicy:
+        for prefix in prefixes(name):
+            if prefix in HARD_BLOCKED:
+                return ActionPolicy(
+                    name, PermissionLevel.ADMIN, PolicyDecision.BLOCK, RiskLevel.CRITICAL, False
+                )
+            for namespace, level, decision, risk in _NAMESPACE_DEFAULTS:
+                if prefix == namespace:
+                    return ActionPolicy(name, level, decision, risk, reversible=False)
+        # Nothing recognised the action at all: fail closed, at a level that forces a human.
+        return ActionPolicy(
+            name, PermissionLevel.MODIFY, PolicyDecision.ASK_ALWAYS, RiskLevel.MEDIUM, False
+        )
+
+    def _apply_autonomy(self, policy: ActionPolicy, autonomy: AutonomyLevel) -> ActionPolicy:
+        """PART 97. Autonomy can only *tighten* the table, never loosen it."""
+        if policy.default is not PolicyDecision.AUTO:
+            return policy
+        if autonomy is AutonomyLevel.SUGGEST_ONLY and policy.level > PermissionLevel.READ:
+            return _with(policy, PolicyDecision.ASK_ONCE)
+        if autonomy is AutonomyLevel.SAFE_ACTIONS and policy.level > PermissionLevel.OPEN:
+            return _with(policy, PolicyDecision.ASK_ONCE)
+        if autonomy is AutonomyLevel.MODERATE and policy.level >= PermissionLevel.EXTERNAL:
+            return _with(policy, PolicyDecision.ASK_ONCE)
+        return policy
+
     def override(self, action: str, decision: PolicyDecision) -> None:
-        if action in HARD_BLOCKED:
-            raise PermissionError(f"{action!r} is hard-blocked and cannot be overridden")
-        self._overrides[action] = decision
+        name = canonical(action)
+        if self.is_blocked(name):
+            raise PermissionError(f"{name!r} is hard-blocked and cannot be overridden")
+        self._overrides[name] = decision
 
     def is_blocked(self, action: str) -> bool:
-        return action in HARD_BLOCKED
+        name = canonical(action)
+        return any(prefix in HARD_BLOCKED for prefix in prefixes(name))
 
     def known_actions(self) -> list[str]:
         return sorted(self._policies)
+
+
+def _with(policy: ActionPolicy, decision: PolicyDecision) -> ActionPolicy:
+    return ActionPolicy(
+        policy.action,
+        policy.level,
+        decision,
+        policy.risk,
+        policy.reversible,
+        policy.bulk_threshold,
+        policy.requires_backup,
+    )

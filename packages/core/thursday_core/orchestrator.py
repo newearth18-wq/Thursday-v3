@@ -317,16 +317,34 @@ class AgentOrchestrator:
         )
 
 
+#: Command namespace → the agent capability that covers it. Namespacing means one entry
+#: serves every verb in the namespace, present and future (ADR 0007).
+_NAMESPACE_CAPABILITIES: dict[str, list[str]] = {
+    "app": ["app_control"],
+    "file": ["file"],
+    "screen": ["screen"],
+    "window": ["screen"],
+    "browser": ["browser", "web"],
+    "shell": ["shell"],
+    "powershell": ["shell"],
+    "clipboard": ["os"],
+    "audio": ["os"],
+    "memory": ["recall"],
+    "obsidian": ["note"],
+    "web": ["research", "search"],
+}
+
+
 def _capabilities_for(step: PlanStep) -> list[str]:
     action = str(step.args.get("action", ""))
-    if action in ("open_app", "close_app", "process_status"):
-        return ["app_control"]
-    if action in ("open_file", "read_file", "write_file", "list_dir", "search_files", "delete"):
-        return ["file"]
-    if action in ("screenshot", "read_active_window"):
-        return ["screen"]
-    if action == "system_info":
-        return ["diagnostics"]
+    if action:
+        namespace = action.split(".")[0]
+        if action.startswith("system.process"):
+            return ["app_control"]
+        if action == "system.info":
+            return ["diagnostics"]
+        if namespace in _NAMESPACE_CAPABILITIES:
+            return _NAMESPACE_CAPABILITIES[namespace]
     if "question" in step.args:
         return ["research", "search"]
     return ["os"]

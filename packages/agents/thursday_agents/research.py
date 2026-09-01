@@ -28,7 +28,7 @@ class ResearchAgent(BaseAgent):
         name="research",
         description="Finds and cross-checks information from memory, the vault and the web.",
         capabilities=["research", "search", "recall", "fact_check", "summarize"],
-        tools=["memory_search", "obsidian_search", "web_search"],
+        tools=["memory.search", "obsidian.search", "web.search"],
         permission_ceiling=PermissionLevel.READ,
         default_budget=Budget(seconds=90, tool_calls=6, usd=0.05),
         model_tier=ModelTier.STANDARD,
@@ -44,7 +44,7 @@ class ResearchAgent(BaseAgent):
         findings: list[dict[str, Any]] = []
 
         memory_hit = await ctx.call_tool(
-            ToolCall(tool="memory_search", args={"query": question, "k": 5})
+            ToolCall(tool="memory.search", args={"query": question, "k": 5})
         )
         for record in memory_hit.data.get("memories", []):
             findings.append(
@@ -56,7 +56,7 @@ class ResearchAgent(BaseAgent):
             )
 
         vault_hit = await ctx.call_tool(
-            ToolCall(tool="obsidian_search", args={"query": question, "limit": 5})
+            ToolCall(tool="obsidian.search", args={"query": question, "limit": 5})
         )
         for hit in vault_hit.data.get("hits", []):
             findings.append(
@@ -66,7 +66,7 @@ class ResearchAgent(BaseAgent):
         used_web = False
         if len(findings) < 2 and contract.permissions.network:
             web_hit = await ctx.call_tool(
-                ToolCall(tool="web_search", args={"query": question, "k": 5})
+                ToolCall(tool="web.search", args={"query": question, "k": 5})
             )
             used_web = web_hit.ok
             for row in web_hit.data.get("results", []):

@@ -9,6 +9,7 @@ from typing import Any
 from uuid import UUID
 
 from thursday_core.logging import get_logger
+from thursday_shared.actions import canonical
 from thursday_shared.errors import PermissionDenied, ThursdayError
 from thursday_shared.models import ToolCall
 
@@ -92,7 +93,7 @@ class SkillRegistry:
         failures: list[str] = []
         if self._tools is not None:
             for tool in target.tools:
-                if not self._tools.has(tool):  # type: ignore[attr-defined]
+                if not self._tools.has(canonical(tool)):  # type: ignore[attr-defined]
                     failures.append(f"tool {tool!r} is not registered")
         if not target.steps:
             failures.append("the skill has no steps")
@@ -183,7 +184,7 @@ class SkillRegistry:
         for step in version.steps:
             args = {**step.args, **case.inputs}
             await self._executor.execute(  # type: ignore[attr-defined]
-                ToolCall(tool=step.tool, args=args, reason=f"sandbox: {case.name}"),
+                ToolCall(tool=canonical(step.tool), args=args, reason=f"sandbox: {case.name}"),
                 permissions=version.permissions,
                 wait_for_approval=False,
             )

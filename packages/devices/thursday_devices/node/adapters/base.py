@@ -28,25 +28,42 @@ class OSAdapter(ABC):
     # -------------------------------------------------------------- capabilities
 
     def capabilities(self) -> DeviceCapabilities:
-        return DeviceCapabilities(
-            open_app=True,
-            close_app=True,
-            open_file=True,
-            write_file=True,
-            delete_file=True,
-            list_dir=True,
-            search_files=True,
-            run_shell=True,
-            screenshot=self.can_screenshot(),
-            read_active_window=self.can_read_window(),
-            clipboard=self.can_clipboard(),
-            notify=self.can_notify(),
-            volume=self.can_volume(),
-            process_status=True,
-            system_info=True,
-            power=True,
-            speaker=True,
-        )
+        """PART 23's command set, expressed as the namespaced capabilities that authorise it."""
+        granted = {
+            "app.open",
+            "app.close",
+            "file.open",
+            "file.read",
+            "file.write",
+            "file.delete",
+            "file.search",
+            "system.info",
+            "system.process.list",
+            "system.process.start",
+            "system.process.stop",
+            "system.power",
+            "browser.open",
+            "audio.speaker",
+        }
+        if self.can_screenshot():
+            granted.add("screen.capture")
+        if self.can_read_window():
+            granted.add("window.active")
+        if self.can_clipboard():
+            granted |= {"clipboard.read", "clipboard.write"}
+        if self.can_notify():
+            granted.add("notify.show")
+        if self.can_volume():
+            granted.add("audio.volume")
+        if self.can_shell():
+            granted.add(self.shell_capability)
+        return DeviceCapabilities(granted=granted)
+
+    #: Which shell this OS exposes. Windows advertises `powershell.run`, others `shell.run`.
+    shell_capability = "shell.run"
+
+    def can_shell(self) -> bool:
+        return True
 
     def can_screenshot(self) -> bool:
         return False
@@ -133,6 +150,13 @@ class OSAdapter(ABC):
 
     async def open_path(self, path: str) -> dict[str, Any]:
         raise NotImplementedError
+
+    async def open_url(self, url: str) -> dict[str, Any]:
+        """Open a URL in the default browser. Overridden per OS; the default uses webbrowser."""
+        import webbrowser
+
+        opened = await asyncio.to_thread(webbrowser.open, url)
+        return {"opened": bool(opened)}
 
     async def screenshot(self, **kwargs: Any) -> bytes:
         raise NotImplementedError

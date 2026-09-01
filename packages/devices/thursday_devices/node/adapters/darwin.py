@@ -90,6 +90,10 @@ class DarwinAdapter(OSAdapter):
         await self.run_shell(f"open {shlex.quote(str(target))}", timeout=15)
         return {"path": str(target)}
 
+    async def open_url(self, url: str) -> dict[str, Any]:
+        await self.run_shell(f"open {shlex.quote(url)}", timeout=15)
+        return {"opened": True}
+
     async def screenshot(self, **kwargs: Any) -> bytes:
         target = Path(tempfile.gettempdir()) / "thursday-shot.png"
         await self.run_shell(f"screencapture -x {target}", timeout=20)

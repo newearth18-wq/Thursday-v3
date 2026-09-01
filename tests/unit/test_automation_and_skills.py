@@ -134,7 +134,7 @@ async def test_a_repeated_morning_sequence_becomes_a_proposal_not_an_automation(
     learner = RoutineLearner()
     base = datetime(2026, 3, 2, 8, 15, tzinfo=UTC)
     for day in range(4):
-        for tool in ("open_app", "open_url", "list_dir"):
+        for tool in ("app.open", "browser.open", "file.list"):
             await learner.on_tool(
                 Event(
                     kind="tool.executed",
@@ -156,7 +156,7 @@ async def test_a_repeated_morning_sequence_becomes_a_proposal_not_an_automation(
 
 async def test_an_occasional_sequence_is_not_proposed():
     learner = RoutineLearner()
-    await learner.on_tool(Event(kind="tool.executed", payload={"tool": "open_app"}))
+    await learner.on_tool(Event(kind="tool.executed", payload={"tool": "app.open"}))
     assert learner.candidates() == []
 
 
@@ -172,7 +172,7 @@ def test_a_captured_skill_starts_as_a_draft(skills):
     skill = skills.capture(
         name="ตรวจข้อสอบ",
         description="อ่านไฟล์คะแนนแล้วสรุป",
-        steps=[SkillStep(seq=0, tool="read_file", args={"path": "grades.xlsx"})],
+        steps=[SkillStep(seq=0, tool="file.read", args={"path": "grades.xlsx"})],
     )
     assert skill.status is SkillStatus.DRAFT
     assert skill.current_version == 1
@@ -180,7 +180,7 @@ def test_a_captured_skill_starts_as_a_draft(skills):
 
 
 async def test_a_draft_cannot_be_activated_before_its_tests_pass(skills):
-    skill = skills.capture(name="s", description="d", steps=[SkillStep(seq=0, tool="clock")])
+    skill = skills.capture(name="s", description="d", steps=[SkillStep(seq=0, tool="clock.now")])
     with pytest.raises(ThursdayError, match="sandbox"):
         skills.activate(skill.id)
 
@@ -194,7 +194,7 @@ async def test_a_destructive_skill_needs_a_human_approval(skills):
     skill = skills.capture(
         name="tidy downloads",
         description="clear the downloads folder",
-        steps=[SkillStep(seq=0, tool="delete", args={"path": "~/Downloads/*"})],
+        steps=[SkillStep(seq=0, tool="file.delete", args={"path": "~/Downloads/*"})],
         permissions=PermissionSet(max_level=PermissionLevel.MODIFY),
     )
     await skills.test(skill.id)
@@ -210,7 +210,7 @@ async def test_a_destructive_step_may_not_continue_on_error(skills):
     skill = skills.capture(
         name="risky",
         description="d",
-        steps=[SkillStep(seq=0, tool="delete", args={"path": "/x"}, on_error="continue")],
+        steps=[SkillStep(seq=0, tool="file.delete", args={"path": "/x"}, on_error="continue")],
     )
     result = await skills.test(skill.id)
     assert not result.ok
@@ -225,10 +225,12 @@ async def test_sandbox_testing_checks_that_the_tools_exist(skills):
     register_builtin_tools(tools, hub=object(), memory=None, vault=None)
     registry = SkillRegistry(tools=tools)
 
-    good = registry.capture(name="ok", description="d", steps=[SkillStep(seq=0, tool="clock")])
+    good = registry.capture(name="ok", description="d", steps=[SkillStep(seq=0, tool="clock.now")])
     assert (await registry.test(good.id)).ok
 
-    bad = registry.capture(name="bad", description="d", steps=[SkillStep(seq=0, tool="nope")])
+    bad = registry.capture(
+        name="bad", description="d", steps=[SkillStep(seq=0, tool="nope.nothing")]
+    )
     result = await registry.test(bad.id)
     assert not result.ok and "not registered" in result.failures[0]
 
@@ -237,7 +239,7 @@ async def test_a_failing_sandbox_case_is_reported_not_swallowed(skills):
     skill = skills.capture(
         name="s",
         description="d",
-        steps=[SkillStep(seq=0, tool="clock")],
+        steps=[SkillStep(seq=0, tool="clock.now")],
         tests=[SkillTest(name="case-1")],
     )
     result = await skills.test(skill.id)
@@ -249,12 +251,12 @@ async def test_a_failing_sandbox_case_is_reported_not_swallowed(skills):
 async def test_versions_are_kept_so_a_regression_can_be_rolled_back(skills):
     from thursday_automation.skills.models import SkillVersion
 
-    skill = skills.capture(name="s", description="d", steps=[SkillStep(seq=0, tool="clock")])
+    skill = skills.capture(name="s", description="d", steps=[SkillStep(seq=0, tool="clock.now")])
     await skills.test(skill.id)
     skills.activate(skill.id)
 
     skills.add_version(
-        skill.id, SkillVersion(steps=[SkillStep(seq=0, tool="clock")], changelog="v2")
+        skill.id, SkillVersion(steps=[SkillStep(seq=0, tool="clock.now")], changelog="v2")
     )
     assert skill.status is SkillStatus.DRAFT  # a new version is not live until tested
 

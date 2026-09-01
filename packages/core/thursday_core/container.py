@@ -383,16 +383,17 @@ def _register_undo_executors(c: Container) -> None:
         else:
             device_id = record.device_id
         action_map = {
-            "close_app": ("close_app", record.args),
-            "open_app": ("open_app", record.args),
-            "delete_folder": ("delete", {"path": record.args.get("path")}),
-            "move": ("move", record.args),
-            "restore_from_trash": (
-                "move",
+            "app.close": ("app.close", record.args),
+            "app.open": ("app.open", record.args),
+            "file.folder.delete": ("file.delete", {"path": record.args.get("path")}),
+            "file.move": ("file.move", record.args),
+            "file.delete": ("file.delete", record.args),
+            "file.restore_from_trash": (
+                "file.move",
                 {"src": record.args.get("src"), "dst": record.args.get("dst")},
             ),
-            "clipboard_set": ("clipboard_set", record.args),
-            "set_volume": ("set_volume", record.args),
+            "clipboard.write": ("clipboard.write", record.args),
+            "audio.volume.set": ("audio.volume.set", record.args),
         }
         mapped = action_map.get(record.operation)
         if mapped is None:
@@ -407,7 +408,9 @@ def _register_undo_executors(c: Container) -> None:
         previous = record.previous_state or {}
         if previous.get("absent"):
             return await device_undo(
-                UndoRecord(action_id=record.action_id, operation="delete_folder", args=record.args)
+                UndoRecord(
+                    action_id=record.action_id, operation="file.folder.delete", args=record.args
+                )
             )
         online = c.hub.online()
         if not online:
@@ -415,7 +418,7 @@ def _register_undo_executors(c: Container) -> None:
         result = await c.hub.invoke(
             record.device_id or online[0].id,
             DeviceAction(
-                action="write_file",
+                action="file.write",
                 args={"path": record.args.get("path"), "content": previous.get("content", "")},
                 reason="undo",
             ),
@@ -432,14 +435,15 @@ def _register_undo_executors(c: Container) -> None:
         return True
 
     for operation in (
-        "close_app",
-        "open_app",
-        "delete_folder",
-        "move",
-        "restore_from_trash",
-        "clipboard_set",
-        "set_volume",
+        "app.close",
+        "app.open",
+        "file.folder.delete",
+        "file.move",
+        "file.delete",
+        "file.restore_from_trash",
+        "clipboard.write",
+        "audio.volume.set",
     ):
         c.undo.register_executor(operation, device_undo)
-    c.undo.register_executor("restore_file", restore_file)
-    c.undo.register_executor("memory_forget", memory_forget)
+    c.undo.register_executor("file.restore", restore_file)
+    c.undo.register_executor("memory.forget", memory_forget)

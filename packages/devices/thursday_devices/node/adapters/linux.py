@@ -117,6 +117,18 @@ class LinuxAdapter(OSAdapter):
         )
         return {"pid": process.pid, "path": str(target)}
 
+    async def open_url(self, url: str) -> dict[str, Any]:
+        opener = shutil.which("xdg-open")
+        if opener is None:
+            return await super().open_url(url)
+        process = await asyncio.create_subprocess_exec(
+            opener,
+            url,
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+        return {"pid": process.pid, "opened": True}
+
     async def screenshot(self, **kwargs: Any) -> bytes:
         import asyncio as _asyncio
 

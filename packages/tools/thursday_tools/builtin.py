@@ -66,7 +66,7 @@ class DeviceActionTool:
 
 class MemorySearchTool:
     spec = ToolSpec(
-        name="memory_search",
+        name="memory.search",
         description="Search Thursday's layered memory for what is already known.",
         capabilities=["recall", "search"],
         permission=PermissionLevel.READ,
@@ -111,7 +111,7 @@ class MemorySearchTool:
 
 class MemoryWriteTool:
     spec = ToolSpec(
-        name="memory_write",
+        name="memory.write",
         description="Record something durable. The write policy may still decline it.",
         capabilities=["remember"],
         permission=PermissionLevel.MODIFY,
@@ -148,7 +148,7 @@ class MemoryWriteTool:
 
 class ObsidianWriteTool:
     spec = ToolSpec(
-        name="obsidian_write",
+        name="obsidian.write",
         description="Write a Markdown note into the human-readable vault.",
         capabilities=["note", "document"],
         permission=PermissionLevel.MODIFY,
@@ -183,7 +183,7 @@ class ObsidianWriteTool:
 
 class ObsidianSearchTool:
     spec = ToolSpec(
-        name="obsidian_search",
+        name="obsidian.search",
         description="Search the Obsidian vault for notes containing a phrase.",
         capabilities=["search", "note"],
         permission=PermissionLevel.READ,
@@ -214,7 +214,7 @@ class ObsidianSearchTool:
 
 class ClockTool:
     spec = ToolSpec(
-        name="clock",
+        name="clock.now",
         description="Current date and time, for deadline and scheduling reasoning.",
         capabilities=["time"],
         permission=PermissionLevel.READ,
@@ -243,7 +243,7 @@ class WebSearchTool:
     """
 
     spec = ToolSpec(
-        name="web_search",
+        name="web.search",
         description="Search the public web. Requires network access and a configured provider.",
         capabilities=["search", "research"],
         permission=PermissionLevel.READ,
@@ -279,35 +279,38 @@ class WebSearchTool:
         )
 
 
-#: Device actions promoted to tools, with the spec the router reasons over.
+#: Device actions promoted to tools, with the spec the router reasons over (PART 16).
+#: Names match the node catalogue exactly, so a tool call is a device command.
 DEVICE_TOOL_SPECS: dict[str, ToolSpec] = {
-    "open_app": ToolSpec(
-        name="open_app",
+    "app.open": ToolSpec(
+        name="app.open",
         description="Launch an application on a device and verify it started.",
-        capabilities=["app_control", "open"],
+        capabilities=["app_control", "open", "os"],
         permission=PermissionLevel.OPEN,
         control_tier=ControlTier.OS_API,
         risk=RiskLevel.LOW,
         latency_ms=1500,
         requires_device=True,
         local_only=True,
-        input_schema={"name": "string"},
+        supports_undo=True,
+        input_schema={"app": "string"},
         output_schema={"app": "string", "pid": "int?"},
     ),
-    "close_app": ToolSpec(
-        name="close_app",
+    "app.close": ToolSpec(
+        name="app.close",
         description="Close an application on a device.",
-        capabilities=["app_control"],
+        capabilities=["app_control", "os"],
         permission=PermissionLevel.MODIFY,
         control_tier=ControlTier.OS_API,
         risk=RiskLevel.LOW,
         latency_ms=900,
         requires_device=True,
         local_only=True,
-        input_schema={"name": "string"},
+        supports_undo=True,
+        input_schema={"app": "string"},
     ),
-    "open_file": ToolSpec(
-        name="open_file",
+    "file.open": ToolSpec(
+        name="file.open",
         description="Open a file with its registered handler.",
         capabilities=["file", "open"],
         permission=PermissionLevel.OPEN,
@@ -317,8 +320,8 @@ DEVICE_TOOL_SPECS: dict[str, ToolSpec] = {
         local_only=True,
         input_schema={"path": "string"},
     ),
-    "read_file": ToolSpec(
-        name="read_file",
+    "file.read": ToolSpec(
+        name="file.read",
         description="Read a text file from a device.",
         capabilities=["file", "read"],
         permission=PermissionLevel.READ,
@@ -328,9 +331,9 @@ DEVICE_TOOL_SPECS: dict[str, ToolSpec] = {
         local_only=True,
         input_schema={"path": "string"},
     ),
-    "write_file": ToolSpec(
-        name="write_file",
-        description="Write text to a file and verify the contents.",
+    "file.write": ToolSpec(
+        name="file.write",
+        description="Write text to a file, versioning any existing copy, and verify it.",
         capabilities=["file", "write"],
         permission=PermissionLevel.MODIFY,
         control_tier=ControlTier.OS_API,
@@ -338,10 +341,12 @@ DEVICE_TOOL_SPECS: dict[str, ToolSpec] = {
         latency_ms=120,
         requires_device=True,
         local_only=True,
+        supports_undo=True,
+        supports_dry_run=True,
         input_schema={"path": "string", "content": "string"},
     ),
-    "list_dir": ToolSpec(
-        name="list_dir",
+    "file.list": ToolSpec(
+        name="file.list",
         description="List the contents of a directory.",
         capabilities=["file", "read"],
         permission=PermissionLevel.READ,
@@ -351,8 +356,8 @@ DEVICE_TOOL_SPECS: dict[str, ToolSpec] = {
         local_only=True,
         input_schema={"path": "string"},
     ),
-    "search_files": ToolSpec(
-        name="search_files",
+    "file.search": ToolSpec(
+        name="file.search",
         description="Find files by glob pattern, newest first.",
         capabilities=["file", "search"],
         permission=PermissionLevel.READ,
@@ -362,9 +367,23 @@ DEVICE_TOOL_SPECS: dict[str, ToolSpec] = {
         local_only=True,
         input_schema={"root": "string", "pattern": "string"},
     ),
-    "delete": ToolSpec(
-        name="delete",
-        description="Delete a path (moved to quarantine so it stays undoable).",
+    "file.move": ToolSpec(
+        name="file.move",
+        description="Move or rename a path.",
+        capabilities=["file", "write"],
+        permission=PermissionLevel.MODIFY,
+        control_tier=ControlTier.OS_API,
+        risk=RiskLevel.MEDIUM,
+        latency_ms=100,
+        requires_device=True,
+        local_only=True,
+        supports_undo=True,
+        supports_dry_run=True,
+        input_schema={"src": "string", "dst": "string"},
+    ),
+    "file.delete": ToolSpec(
+        name="file.delete",
+        description="Delete a path (quarantined, so it stays recoverable).",
         capabilities=["file", "delete"],
         permission=PermissionLevel.MODIFY,
         control_tier=ControlTier.OS_API,
@@ -373,20 +392,22 @@ DEVICE_TOOL_SPECS: dict[str, ToolSpec] = {
         requires_device=True,
         local_only=True,
         reversible=True,
+        supports_undo=True,
+        supports_dry_run=True,
         input_schema={"path": "string"},
     ),
-    "screenshot": ToolSpec(
-        name="screenshot",
+    "screen.capture": ToolSpec(
+        name="screen.capture",
         description="Capture the screen of a device.",
         capabilities=["screen", "vision"],
-        permission=PermissionLevel.READ,
+        permission=PermissionLevel.OPEN,
         control_tier=ControlTier.OS_API,
         latency_ms=600,
         requires_device=True,
         local_only=True,
     ),
-    "read_active_window": ToolSpec(
-        name="read_active_window",
+    "window.active": ToolSpec(
+        name="window.active",
         description="Report the focused window title.",
         capabilities=["screen"],
         permission=PermissionLevel.READ,
@@ -395,10 +416,10 @@ DEVICE_TOOL_SPECS: dict[str, ToolSpec] = {
         requires_device=True,
         local_only=True,
     ),
-    "process_status": ToolSpec(
-        name="process_status",
+    "system.process.list": ToolSpec(
+        name="system.process.list",
         description="Check whether a process is running on a device.",
-        capabilities=["app_control", "read"],
+        capabilities=["app_control", "read", "diagnostics"],
         permission=PermissionLevel.READ,
         control_tier=ControlTier.OS_API,
         latency_ms=250,
@@ -406,20 +427,20 @@ DEVICE_TOOL_SPECS: dict[str, ToolSpec] = {
         local_only=True,
         input_schema={"name": "string"},
     ),
-    "system_info": ToolSpec(
-        name="system_info",
+    "system.info": ToolSpec(
+        name="system.info",
         description="Report a device's OS, CPU, memory and disk.",
-        capabilities=["read", "diagnostics"],
+        capabilities=["read", "diagnostics", "os"],
         permission=PermissionLevel.READ,
         control_tier=ControlTier.OS_API,
         latency_ms=300,
         requires_device=True,
         local_only=True,
     ),
-    "run_shell": ToolSpec(
-        name="run_shell",
-        description="Run a shell command. High risk; approval required.",
-        capabilities=["shell"],
+    "shell.run": ToolSpec(
+        name="shell.run",
+        description="Run a shell command. High risk; approval required every time.",
+        capabilities=["shell", "os"],
         permission=PermissionLevel.MODIFY,
         control_tier=ControlTier.OS_API,
         risk=RiskLevel.HIGH,
@@ -427,10 +448,22 @@ DEVICE_TOOL_SPECS: dict[str, ToolSpec] = {
         requires_device=True,
         local_only=True,
         reversible=False,
+        supports_dry_run=True,
         input_schema={"command": "string"},
     ),
-    "notify": ToolSpec(
-        name="notify",
+    "browser.open": ToolSpec(
+        name="browser.open",
+        description="Open a URL in the device's default browser.",
+        capabilities=["browser", "web", "open"],
+        permission=PermissionLevel.OPEN,
+        control_tier=ControlTier.BROWSER,
+        latency_ms=1500,
+        requires_device=True,
+        local_only=True,
+        input_schema={"url": "string"},
+    ),
+    "notify.show": ToolSpec(
+        name="notify.show",
         description="Show a notification on a device.",
         capabilities=["notify"],
         permission=PermissionLevel.OPEN,

@@ -77,10 +77,12 @@ async def test_budgets_are_enforced_and_a_subtask_cannot_exceed_its_parent(tasks
 
 
 def test_actions_without_an_inverse_are_treated_as_irreversible():
-    assert is_reversible("move") and is_reversible("open_app")
-    assert not is_reversible("send_email")
-    assert not is_reversible("run_shell")
-    assert not is_reversible("purchase")
+    assert is_reversible("file.move") and is_reversible("app.open")
+    # Nothing to undo is not the same as irreversible.
+    assert is_reversible("file.read")
+    assert not is_reversible("email.send")
+    assert not is_reversible("shell.run")
+    assert not is_reversible("purchase.make")
 
 
 async def test_undo_runs_the_registered_executor():
@@ -91,12 +93,12 @@ async def test_undo_runs_the_registered_executor():
         performed.append(record.operation)
         return True
 
-    registry.register_executor("close_app", executor)
+    registry.register_executor("app.close", executor)
     record = registry.record(
-        UndoRecord(action_id=new_id(), operation="close_app", args={"name": "chrome"})
+        UndoRecord(action_id=new_id(), operation="app.close", args={"app": "chrome"})
     )
     assert await registry.undo(record.action_id) is True
-    assert performed == ["close_app"]
+    assert performed == ["app.close"]
     # Once undone it is gone, so a double-undo cannot re-run the reversal.
     with pytest.raises(ThursdayError):
         await registry.undo(record.action_id)
@@ -104,7 +106,7 @@ async def test_undo_runs_the_registered_executor():
 
 async def test_undo_without_an_executor_reports_rather_than_pretending():
     registry = UndoRegistry()
-    record = registry.record(UndoRecord(action_id=new_id(), operation="unmapped_operation"))
+    record = registry.record(UndoRecord(action_id=new_id(), operation="unmapped.operation"))
     with pytest.raises(ThursdayError, match="no executor"):
         await registry.undo(record.action_id)
 
@@ -131,14 +133,14 @@ def test_the_router_will_not_send_secret_data_to_a_cloud_tool(tools):
 
 def test_the_router_respects_a_risk_ceiling(tools):
     router = ToolRouter(tools)
-    assert router.select("shell", max_risk=RiskLevel.HIGH).name == "run_shell"
+    assert router.select("shell", max_risk=RiskLevel.HIGH).name == "shell.run"
     assert router.select("shell", max_risk=RiskLevel.LOW) is None
 
 
 def test_the_router_honours_an_allowlist(tools):
     router = ToolRouter(tools)
-    assert router.select("file", allowed=["read_file"]).name == "read_file"
-    assert router.select("file", allowed=["nothing_here"]) is None
+    assert router.select("file", allowed=["file.read"]).name == "file.read"
+    assert router.select("file", allowed=["nothing.here"]) is None
 
 
 def test_an_unknown_tool_names_what_is_available(tools):
@@ -146,4 +148,4 @@ def test_an_unknown_tool_names_what_is_available(tools):
 
     with pytest.raises(ToolNotFound) as exc:
         tools.get("no_such_tool")
-    assert "clock" in exc.value.details["available"]
+    assert "clock.now" in exc.value.details["available"]

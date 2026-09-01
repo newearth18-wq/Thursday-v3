@@ -69,7 +69,7 @@ async def test_direct_device_control_still_passes_the_permission_engine(
         json={"action": "run_shell", "args": {"command": "rm -rf /"}},
     )
     assert refused.status_code == 403
-    assert refused.json()["detail"]["decision"] == PolicyDecision.ASK.value
+    assert refused.json()["detail"]["decision"] == PolicyDecision.ASK_ALWAYS.value
 
 
 async def test_an_unknown_device_is_a_404(client):
@@ -112,7 +112,7 @@ async def test_the_audit_endpoint_exposes_the_chain_state(client):
     await client.post("/api/v1/conversation", json={"text": "Thursday เปิด chrome"})
     body = (await client.get("/api/v1/audit")).json()
     assert body["chain_intact"] is True
-    assert any(entry["tool"] == "open_app" for entry in body["entries"])
+    assert any(entry["tool"] == "app.open" for entry in body["entries"])
 
 
 async def test_emergency_stop_locks_down_and_can_be_released(client, office_pc):
@@ -123,7 +123,7 @@ async def test_emergency_stop_locks_down_and_can_be_released(client, office_pc):
     # While locked down, even an ordinary action is refused.
     refused = await client.post(
         f"/api/v1/devices/{office_pc.device_id}/action",
-        json={"action": "open_app", "args": {"name": "chrome"}},
+        json={"action": "app.open", "args": {"name": "chrome"}},
     )
     assert refused.status_code == 403
 
@@ -146,7 +146,7 @@ async def test_the_world_endpoint_reflects_the_connected_device(client, office_p
 
 async def test_tools_and_agents_are_introspectable(client):
     tools = (await client.get("/api/v1/tools")).json()["tools"]
-    assert {"open_app", "memory_search", "obsidian_write"} <= {t["name"] for t in tools}
+    assert {"app.open", "memory.search", "obsidian.write"} <= {t["name"] for t in tools}
 
     agents = (await client.get("/api/v1/agents")).json()["agents"]
     assert {"computer", "research"} <= {a["name"] for a in agents}
@@ -217,7 +217,7 @@ async def test_routine_suggestions_are_accepted_but_stay_disabled(client, contai
 
     base = datetime.now(UTC).replace(hour=8, minute=15)
     for day in range(4):
-        for tool in ("open_app", "open_url", "list_dir"):
+        for tool in ("app.open", "browser.open", "file.list"):
             await container.routines.on_tool(
                 Event(
                     kind="tool.executed",

@@ -39,25 +39,31 @@ class FakeAdapter(OSAdapter):
         self.clipboard = ""
         self.volume = 0.5
         self.notifications: list[tuple[str, str]] = []
+        self.opened_urls: list[str] = []
         self._next_pid = 1000
 
     def capabilities(self) -> DeviceCapabilities:
-        return DeviceCapabilities(
-            open_app=True,
-            close_app=True,
-            open_file=True,
-            write_file=True,
-            delete_file=True,
-            list_dir=True,
-            search_files=True,
-            run_shell=True,
-            process_status=True,
-            system_info=True,
-            read_active_window=True,
-            clipboard=True,
-            notify=True,
-            volume=True,
-            speaker=True,
+        return DeviceCapabilities.of(
+            "app.open",
+            "app.close",
+            "file.open",
+            "file.read",
+            "file.write",
+            "file.delete",
+            "file.search",
+            "system.info",
+            "system.process.list",
+            "system.process.start",
+            "system.process.stop",
+            "system.power",
+            "window.active",
+            "clipboard.read",
+            "clipboard.write",
+            "notify.show",
+            "audio.volume",
+            "audio.speaker",
+            "shell.run",
+            "browser.open",
         )
 
     def can_read_window(self) -> bool:
@@ -74,6 +80,11 @@ class FakeAdapter(OSAdapter):
 
     def resolve_executable(self, name: str) -> str | None:
         return f"/usr/bin/{name}"
+
+    async def open_url(self, url: str) -> dict[str, Any]:
+        self.opened_urls.append(url)
+        self.window = f"{url} — browser"
+        return {"opened": True}
 
     async def launch(self, name: str, args: list[str] | None = None) -> dict[str, Any]:
         self._next_pid += 1

@@ -21,6 +21,7 @@ from uuid import UUID
 
 from thursday_core.undo import is_destructive
 from thursday_security.policy import PolicyTable
+from thursday_shared.actions import canonical
 from thursday_shared.enums import PermissionLevel, RiskLevel
 from thursday_shared.ids import new_id
 from thursday_shared.models import PermissionSet
@@ -59,7 +60,7 @@ class SkillStep:
         quarantine folder and still not something a captured workflow should start doing
         on its own. So risk and permission level count too.
         """
-        policy = _POLICY.get(self.tool)
+        policy = _POLICY.get(canonical(self.tool))
         return (
             self.destructive
             or policy.risk in (RiskLevel.HIGH, RiskLevel.CRITICAL)

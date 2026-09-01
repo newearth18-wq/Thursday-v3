@@ -61,7 +61,7 @@ async def test_a_rejected_approval_does_not_leave_a_standing_grant(container, of
     target = tmp_path / "keep.txt"
     target.write_text("keep", encoding="utf-8")
 
-    call = ToolCall(tool="delete", args={"path": str(target)}, device_id=office_pc.device_id)
+    call = ToolCall(tool="file.delete", args={"path": str(target)}, device_id=office_pc.device_id)
     running = asyncio.create_task(container.executor.execute(call, agent="computer"))
     await asyncio.sleep(0.05)
     await container.approvals.decide(container.approvals.pending()[0].id, approve=False)
@@ -72,35 +72,69 @@ async def test_a_rejected_approval_does_not_leave_a_standing_grant(container, of
     assert container.permissions.list_grants() == []
 
 
-async def test_always_allow_is_scoped_to_the_directory_not_the_filesystem(
-    container, office_pc, tmp_path
-):
-    """'Always allow' must not become 'allow everywhere' (§8.4, T5)."""
+async def test_always_allow_is_refused_for_the_dangerous_set(container, office_pc, tmp_path):
+    """ADR 0008 — `file.delete` is ASK_ALWAYS, so approving it grants nothing."""
     inside = tmp_path / "scratch" / "a.txt"
     inside.parent.mkdir(parents=True)
     inside.write_text("x", encoding="utf-8")
 
-    call = ToolCall(tool="delete", args={"path": str(inside)}, device_id=office_pc.device_id)
+    call = ToolCall(tool="file.delete", args={"path": str(inside)}, device_id=office_pc.device_id)
     running = asyncio.create_task(container.executor.execute(call, agent="computer"))
     await asyncio.sleep(0.05)
-    await container.approvals.decide(
-        container.approvals.pending()[0].id, approve=True, scope=ApprovalScope.ALWAYS
-    )
-    assert (await running).ok
 
+    pending = container.approvals.pending()[0]
+    assert pending.scopes_offered == [ApprovalScope.ONCE]
+
+    # Even asking for ALWAYS explicitly — as a rogue API client would — yields no grant.
+    decided = await container.approvals.decide(pending.id, approve=True, scope=ApprovalScope.ALWAYS)
+    assert (await running).ok
+    assert decided.scope is ApprovalScope.ONCE
+    assert container.permissions.list_grants() == []
+
+    # The next delete is asked about again.
+    other = tmp_path / "scratch" / "b.txt"
+    other.write_text("y", encoding="utf-8")
+    second = asyncio.create_task(
+        container.executor.execute(
+            ToolCall(tool="file.delete", args={"path": str(other)}, device_id=office_pc.device_id),
+            agent="computer",
+        )
+    )
+    await asyncio.sleep(0.05)
+    assert len(container.approvals.pending()) == 1
+    await container.approvals.decide(container.approvals.pending()[0].id, approve=False)
+    with pytest.raises(PermissionDenied):
+        await second
+
+
+async def test_always_allow_is_scoped_to_the_directory_not_the_filesystem(container, office_pc):
+    """For an ASK_ONCE action, 'always allow' is real but stays narrow (T5)."""
+    from thursday_shared.enums import PolicyDecision
+    from thursday_shared.models import ActionRequest, PermissionGrant
+
+    container.permissions.add_grant(
+        PermissionGrant(
+            action="system.process.stop",
+            resource_glob="/home/u/work/*",
+            scope=ApprovalScope.ALWAYS,
+        )
+    )
     grants = container.permissions.list_grants()
     assert len(grants) == 1
-    assert grants[0].resource_glob.endswith("scratch/*")
     assert grants[0].expires_at is not None
 
-    # A file in a different directory is still gated.
-    from thursday_shared.enums import PolicyDecision
-    from thursday_shared.models import ActionRequest
-
-    verdict = container.permissions.decide(
-        ActionRequest(action="delete", resource=str(tmp_path / "elsewhere" / "b.txt"))
+    assert (
+        container.permissions.decide(
+            ActionRequest(action="system.process.stop", resource="/home/u/work/thing")
+        ).decision
+        is PolicyDecision.AUTO
     )
-    assert verdict.decision is PolicyDecision.ASK
+    assert (
+        container.permissions.decide(
+            ActionRequest(action="system.process.stop", resource="/home/u/elsewhere/thing")
+        ).decision
+        is PolicyDecision.ASK_ONCE
+    )
 
 
 async def test_an_expired_approval_fails_closed(container, office_pc, tmp_path):
@@ -108,7 +142,7 @@ async def test_an_expired_approval_fails_closed(container, office_pc, tmp_path):
     target = tmp_path / "timeout.txt"
     target.write_text("x", encoding="utf-8")
 
-    call = ToolCall(tool="delete", args={"path": str(target)}, device_id=office_pc.device_id)
+    call = ToolCall(tool="file.delete", args={"path": str(target)}, device_id=office_pc.device_id)
     with pytest.raises(PermissionDenied, match="expired"):
         # The container fixture sets a 2-second approval TTL; nobody answers.
         await container.executor.execute(call, agent="computer")

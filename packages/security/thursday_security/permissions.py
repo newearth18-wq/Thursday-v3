@@ -1,8 +1,14 @@
-"""The Permission Engine (§36–38).
+"""The Permission Engine (PART 18–21).
 
-Every action — from every agent, tool, automation, and device route — passes through
-``decide()``. Rules are evaluated in a fixed order and the first match wins, so a verdict is
-always explainable by naming one rule.
+Every action — from every agent, tool, automation, API client and device route — passes
+through ``decide()``. Rules are evaluated in a fixed order and the first match wins, so a
+verdict is always explainable by naming one rule.
+
+Two invariants hold at every autonomy level, including the highest:
+
+* an ``ASK_ALWAYS`` action is asked every time and can never become a standing grant
+* a ``BLOCK`` action has no path to permitted — not by config, grant, autonomy, or an
+  agent's own reasoning
 """
 
 from __future__ import annotations
@@ -13,6 +19,7 @@ from uuid import UUID
 
 from thursday_shared.enums import (
     ApprovalScope,
+    AutonomyLevel,
     DataSensitivity,
     PermissionLevel,
     PolicyDecision,
@@ -25,19 +32,24 @@ from thursday_shared.models import (
     PermissionVerdict,
 )
 
-from thursday_security.policy import PolicyTable
+from thursday_security.policy import PolicyTable, canonical
 from thursday_security.privacy import PrivacyZoneRegistry
 
-#: Which privacy surface each action touches, for zone checks (§68).
+#: Which privacy surface each action namespace touches, for zone checks (PART 51, §68).
 _ACTION_SURFACE: dict[str, str] = {
-    "screenshot": "screen",
-    "read_active_window": "screen",
-    "camera_capture": "camera",
-    "vision_analyze": "camera",
-    "listen": "microphone",
-    "memory_write": "memory",
-    "cloud_inference": "cloud",
+    "screen.capture": "screen",
+    "window.active": "screen",
+    "camera.capture": "camera",
+    "vision.analyze": "camera",
+    "audio.listen": "microphone",
+    "memory.write": "memory",
+    "cloud.inference": "cloud",
 }
+
+#: Actions that carry a payload off the machine. A SECRET payload may not use any of them.
+_EGRESS_ACTIONS: frozenset[str] = frozenset(
+    {"cloud.inference", "http.post", "email.send", "message.send", "social.post", "web.search"}
+)
 
 
 class PermissionEngine:
@@ -46,11 +58,17 @@ class PermissionEngine:
         *,
         policy: PolicyTable | None = None,
         zones: PrivacyZoneRegistry | None = None,
+        autonomy: AutonomyLevel = AutonomyLevel.MODERATE,
     ) -> None:
         self.policy = policy or PolicyTable()
         self.zones = zones or PrivacyZoneRegistry()
+        self.autonomy = autonomy
         self._grants: list[PermissionGrant] = []
         self._lockdown = False
+
+    def set_autonomy(self, level: AutonomyLevel) -> None:
+        """PART 97. Raising this relaxes ASK_ONCE actions only."""
+        self.autonomy = level
 
     # ------------------------------------------------------------------ lockdown (§69)
 
@@ -64,9 +82,18 @@ class PermissionEngine:
     # ------------------------------------------------------------------ grants
 
     def add_grant(self, grant: PermissionGrant) -> PermissionGrant:
-        """Scoped and expiring by construction — 'always allow' is never global (§8.4)."""
+        """Scoped and expiring by construction — 'always allow' is never global.
+
+        An ``ASK_ALWAYS`` action is refused here rather than in the UI, so no API client can
+        route around the rule by passing ``scope=always`` (ADR 0008).
+        """
+        grant.action = canonical(grant.action)
         if self.policy.is_blocked(grant.action):
             raise PermissionError(f"cannot grant a hard-blocked action: {grant.action}")
+        if not self.policy.get(grant.action, autonomy=self.autonomy).default.grantable:
+            raise PermissionError(
+                f"{grant.action!r} is ASK_ALWAYS and may never become a standing grant"
+            )
         if grant.expires_at is None and grant.scope is ApprovalScope.ALWAYS:
             grant.expires_at = datetime.now(UTC) + timedelta(days=30)
         self._grants.append(grant)
@@ -94,7 +121,8 @@ class PermissionEngine:
         location: str | None = None,
         mode: str | None = None,
     ) -> PermissionVerdict:
-        policy = self.policy.get(req.action)
+        req.action = canonical(req.action)
+        policy = self.policy.get(req.action, autonomy=self.autonomy)
         level = max(req.level, policy.level)
         risk = _max_risk(req.risk, policy.risk)
         reversible = req.reversible and policy.reversible
@@ -119,6 +147,18 @@ class PermissionEngine:
                 risk=RiskLevel.CRITICAL,
             )
 
+        # 2b. A namespace-level BLOCK. `_from_namespace` can resolve an unlisted verb such
+        #     as `audit.truncate` to BLOCK; without this the verdict would fall through to
+        #     the fail-closed ASK, which is weaker than the policy actually says.
+        if policy.default is PolicyDecision.BLOCK:
+            return PermissionVerdict(
+                decision=PolicyDecision.BLOCK,
+                reason=f"the {req.action.split('.')[0]!r} namespace is permanently blocked",
+                rule="blocked_namespace",
+                level=level,
+                risk=RiskLevel.CRITICAL,
+            )
+
         # 3. Privacy zone forbids the surface this action touches.
         surface = _ACTION_SURFACE.get(req.action)
         if surface:
@@ -139,13 +179,7 @@ class PermissionEngine:
                 )
 
         # 3b. A SECRET payload may not leave the machine (§34, T8).
-        if req.sensitivity >= DataSensitivity.SECRET and req.action in (
-            "cloud_inference",
-            "http_post",
-            "send_email",
-            "send_message",
-            "publish",
-        ):
+        if req.sensitivity >= DataSensitivity.SECRET and req.action in _EGRESS_ACTIONS:
             return PermissionVerdict(
                 decision=PolicyDecision.BLOCK,
                 reason="payload is classified SECRET and may not leave this machine",
@@ -201,11 +235,16 @@ class PermissionEngine:
                 grant_id=grant.id,
             )
 
-        # 6. Explicit ASK from policy.
-        if policy.default is PolicyDecision.ASK:
+        # 6. Explicit ASK from policy. ASK_ALWAYS is reported as such so the approval UI
+        #    knows not to offer "always allow".
+        if policy.default.requires_approval:
             return PermissionVerdict(
-                decision=PolicyDecision.ASK,
-                reason=f"policy for {req.action!r} requires approval",
+                decision=policy.default,
+                reason=(
+                    f"policy for {req.action!r} requires approval every time"
+                    if policy.default is PolicyDecision.ASK_ALWAYS
+                    else f"policy for {req.action!r} requires approval"
+                ),
                 rule="policy_default_ask",
                 level=level,
                 risk=risk,
@@ -214,7 +253,7 @@ class PermissionEngine:
         # 7. Level, risk, reversibility and blast radius can each upgrade AUTO to ASK.
         if level >= PermissionLevel.EXTERNAL:
             return PermissionVerdict(
-                decision=PolicyDecision.ASK,
+                decision=PolicyDecision.ASK_ONCE,
                 reason=f"level {level.name} actions affect the world outside this machine",
                 rule="external_level",
                 level=level,
@@ -222,7 +261,7 @@ class PermissionEngine:
             )
         if risk in (RiskLevel.HIGH, RiskLevel.CRITICAL):
             return PermissionVerdict(
-                decision=PolicyDecision.ASK,
+                decision=PolicyDecision.ASK_ALWAYS,
                 reason=f"risk is {risk.value}",
                 rule="high_risk",
                 level=level,
@@ -230,7 +269,7 @@ class PermissionEngine:
             )
         if not reversible:
             return PermissionVerdict(
-                decision=PolicyDecision.ASK,
+                decision=PolicyDecision.ASK_ALWAYS,
                 reason="the action has no undo path",
                 rule="irreversible",
                 level=level,
@@ -238,7 +277,7 @@ class PermissionEngine:
             )
         if policy.bulk_threshold is not None and req.object_count > policy.bulk_threshold:
             return PermissionVerdict(
-                decision=PolicyDecision.ASK,
+                decision=PolicyDecision.ASK_ONCE,
                 reason=(
                     f"{req.object_count} objects exceeds the {policy.bulk_threshold}-object "
                     "threshold for unattended changes"
@@ -252,14 +291,18 @@ class PermissionEngine:
         if policy.default is PolicyDecision.AUTO and level <= PermissionLevel.MODIFY:
             return PermissionVerdict(
                 decision=PolicyDecision.AUTO,
-                reason=f"{req.action!r} is a reversible level-{int(level)} action in scope",
+                reason=(
+                    f"{req.action!r} is a reversible level-{int(level)} action in scope"
+                    + (" (a version backup is taken first)" if policy.requires_backup else "")
+                ),
                 rule="policy_default_auto",
                 level=level,
                 risk=risk,
+                requires_backup=policy.requires_backup,
             )
 
         return PermissionVerdict(
-            decision=PolicyDecision.ASK,
+            decision=PolicyDecision.ASK_ALWAYS,
             reason="no rule authorises this automatically",
             rule="fail_closed",
             level=level,

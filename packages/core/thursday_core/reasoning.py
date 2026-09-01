@@ -77,7 +77,7 @@ class ReasoningEngine:
             )
         try:
             intent = Intent(
-                kind=IntentKind(str(payload.get("kind", "CHAT")).upper()),
+                kind=IntentKind(str(payload.get("kind", "UNKNOWN")).upper()),
                 objective=str(payload.get("objective") or context.turn.text),
                 entities=dict(payload.get("entities") or {}),
                 target_device=payload.get("target_device"),

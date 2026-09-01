@@ -60,7 +60,13 @@ async def act(
     verdict = c.permissions.decide(
         ActionRequest(
             action=request.action,
-            resource=str(request.args.get("path") or request.args.get("name") or ""),
+            resource=str(
+                request.args.get("path")
+                or request.args.get("app")
+                or request.args.get("name")
+                or request.args.get("url")
+                or ""
+            ),
             device_id=device_id,
             level=spec.level,
             risk=spec.risk,

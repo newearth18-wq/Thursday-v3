@@ -157,9 +157,9 @@ def parse(text: str, *, wake_word: str = "thursday") -> RuleMatch | None:
     if _SCREENSHOT.search(body):
         return RuleMatch(
             Intent(
-                kind=IntentKind.DEVICE_ACTION,
+                kind=IntentKind.COMPUTER_ACTION,
                 objective="capture the screen",
-                entities={"action": "screenshot"},
+                entities={"action": "screen.capture"},
                 target_device=_device_hint(body),
                 confidence=0.88,
                 rationale="screenshot request",
@@ -168,9 +168,9 @@ def parse(text: str, *, wake_word: str = "thursday") -> RuleMatch | None:
     if _SYSINFO.search(body):
         return RuleMatch(
             Intent(
-                kind=IntentKind.DEVICE_ACTION,
+                kind=IntentKind.COMPUTER_ACTION,
                 objective="read system information",
-                entities={"action": "system_info"},
+                entities={"action": "system.info"},
                 target_device=_device_hint(body),
                 confidence=0.85,
                 rationale="system info request",
@@ -179,9 +179,9 @@ def parse(text: str, *, wake_word: str = "thursday") -> RuleMatch | None:
     if match := _LIST_DIR.search(body):
         return RuleMatch(
             Intent(
-                kind=IntentKind.FILE_OP,
+                kind=IntentKind.FILE_ACTION,
                 objective=f"list {match.group('target')}",
-                entities={"action": "list_dir", "path": match.group("target")},
+                entities={"action": "file.list", "path": match.group("target")},
                 target_device=_device_hint(body),
                 confidence=0.82,
                 rationale="directory listing",
@@ -190,9 +190,9 @@ def parse(text: str, *, wake_word: str = "thursday") -> RuleMatch | None:
     if match := _OPEN_FILE.search(body):
         return RuleMatch(
             Intent(
-                kind=IntentKind.FILE_OP,
+                kind=IntentKind.FILE_ACTION,
                 objective=f"open {match.group('target')}",
-                entities={"action": "open_file", "path": match.group("target")},
+                entities={"action": "file.open", "path": match.group("target")},
                 target_device=_device_hint(body),
                 confidence=0.84,
                 rationale="file open request",
@@ -203,9 +203,9 @@ def parse(text: str, *, wake_word: str = "thursday") -> RuleMatch | None:
         if app and not _looks_like_sentence(app):
             return RuleMatch(
                 Intent(
-                    kind=IntentKind.DEVICE_ACTION,
+                    kind=IntentKind.COMPUTER_ACTION,
                     objective=f"close {app}",
-                    entities={"action": "close_app", "app": app},
+                    entities={"action": "app.close", "app": app},
                     target_device=match.group("device") or _device_hint(body),
                     confidence=0.86,
                     rationale="application close request",
@@ -216,9 +216,9 @@ def parse(text: str, *, wake_word: str = "thursday") -> RuleMatch | None:
         if app and not _looks_like_sentence(app):
             return RuleMatch(
                 Intent(
-                    kind=IntentKind.DEVICE_ACTION,
+                    kind=IntentKind.COMPUTER_ACTION,
                     objective=f"open {app}",
-                    entities={"action": "open_app", "app": app},
+                    entities={"action": "app.open", "app": app},
                     target_device=match.group("device") or _device_hint(body),
                     confidence=0.9,
                     rationale="application open request",
@@ -228,7 +228,7 @@ def parse(text: str, *, wake_word: str = "thursday") -> RuleMatch | None:
     if _RECALL.search(body):
         return RuleMatch(
             Intent(
-                kind=IntentKind.RECALL,
+                kind=IntentKind.MEMORY_RECALL,
                 objective=body,
                 confidence=0.78,
                 rationale="memory recall question",
@@ -237,7 +237,7 @@ def parse(text: str, *, wake_word: str = "thursday") -> RuleMatch | None:
     if _ANALYZE.search(body):
         return RuleMatch(
             Intent(
-                kind=IntentKind.ANALYZE,
+                kind=IntentKind.DATA_ANALYSIS,
                 objective=body,
                 needs_plan=True,
                 confidence=0.78,

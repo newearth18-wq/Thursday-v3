@@ -21,12 +21,15 @@ class Planner:
 
     def plan(self, intent: Intent, context: ContextPackage) -> Plan:
         builder = {
-            IntentKind.DEVICE_ACTION: self._device_plan,
-            IntentKind.FILE_OP: self._device_plan,
+            IntentKind.COMPUTER_ACTION: self._device_plan,
+            IntentKind.DEVICE_CONTROL: self._device_plan,
+            IntentKind.FILE_ACTION: self._device_plan,
+            IntentKind.BROWSER_ACTION: self._device_plan,
             IntentKind.STATUS: self._status_plan,
-            IntentKind.RECALL: self._recall_plan,
+            IntentKind.MEMORY_RECALL: self._recall_plan,
             IntentKind.SEARCH: self._research_plan,
-            IntentKind.ANALYZE: self._analysis_plan,
+            IntentKind.DATA_ANALYSIS: self._analysis_plan,
+            IntentKind.MULTI_STEP_TASK: self._analysis_plan,
         }.get(intent.kind, self._empty_plan)
 
         plan = builder(intent, context)
@@ -48,10 +51,9 @@ class Planner:
         action = str(intent.entities.get("action", ""))
         args = self._args_for(action, intent)
         criteria = ["output.verified is true"]
-        if action in ("open_app", "close_app"):
-            criteria.append(
-                f"the {action.split('_')[0]} of {args.get('name')} is observable on the device"
-            )
+        if action in ("app.open", "app.close"):
+            verb = "launch" if action == "app.open" else "termination"
+            criteria.append(f"the {verb} of {args.get('app')} is observable on the device")
         return Plan(
             objective=intent.objective,
             rationale=f"single device action ({action}) delegated to the computer agent",
@@ -121,7 +123,7 @@ class Planner:
             name="computer",
             objective=f"locate and read the data for: {intent.objective}",
             args={
-                "action": "search_files" if not target else "read_file",
+                "action": "file.read" if target else "file.search",
                 "args": {"path": target} if target else {"root": "~", "pattern": "*.xlsx"},
             },
             device_hint=intent.target_device,
@@ -152,15 +154,18 @@ class Planner:
         )
 
     def _args_for(self, action: str, intent: Intent) -> dict:
+        """Map the intent's entities onto the node command's argument names."""
         entities = intent.entities
-        if action in ("open_app", "close_app"):
-            return {"name": entities.get("app", "")}
-        if action in ("open_file", "read_file", "list_dir", "delete"):
+        if action in ("app.open", "app.close"):
+            return {"app": entities.get("app", "")}
+        if action in ("file.open", "file.read", "file.list", "file.delete"):
             return {"path": entities.get("path", "")}
-        if action == "write_file":
+        if action == "file.write":
             return {"path": entities.get("path", ""), "content": entities.get("content", "")}
-        if action == "search_files":
+        if action == "file.search":
             return {"root": entities.get("root", "~"), "pattern": entities.get("pattern", "*")}
-        if action == "run_shell":
+        if action in ("shell.run", "powershell.run"):
             return {"command": entities.get("command", "")}
-        return {k: v for k, v in entities.items() if k not in ("action",)}
+        if action == "browser.open":
+            return {"url": entities.get("url", "")}
+        return {k: v for k, v in entities.items() if k != "action"}

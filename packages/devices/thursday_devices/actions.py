@@ -1,15 +1,20 @@
-"""Device action catalogue (§9.3).
+"""Device action catalogue (PART 23).
 
 Each entry declares the capability a node must advertise, the permission level, the risk,
 and — crucially — how the effect is *verified*. An action with ``verify=False`` is one whose
 success genuinely cannot be observed; there are very few, and they report ``verified=False``
-rather than pretending (§20).
+rather than pretending (PART 28).
+
+Names are namespaced (`file.read`, `system.process.stop`). Capabilities are namespaced too,
+so a node can advertise `file.*` without enumerating every verb, and the hub can refuse
+`file.delete` on a node that advertised only `file.read`. See ADR 0007.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 
+from thursday_shared.actions import canonical
 from thursday_shared.enums import ControlTier, PermissionLevel, RiskLevel
 
 
@@ -29,107 +34,214 @@ class ActionSpec:
 CATALOGUE: dict[str, ActionSpec] = {
     spec.name: spec
     for spec in (
+        # ---------------------------------------------------------------- applications
         ActionSpec(
-            "open_app",
-            "open_app",
+            "app.open",
+            "app.open",
             PermissionLevel.OPEN,
-            required_args=("name",),
+            required_args=("app",),
             description="launch an application and confirm its process and window",
         ),
         ActionSpec(
-            "close_app",
-            "close_app",
+            "app.close",
+            "app.close",
             PermissionLevel.MODIFY,
             RiskLevel.LOW,
-            required_args=("name",),
+            required_args=("app",),
             description="terminate an application",
         ),
+        # ---------------------------------------------------------------- files
         ActionSpec(
-            "open_file",
-            "open_file",
+            "file.open",
+            "file.open",
             PermissionLevel.OPEN,
             required_args=("path",),
             description="open a file with its registered handler",
         ),
         ActionSpec(
-            "write_file",
-            "write_file",
-            PermissionLevel.MODIFY,
-            RiskLevel.MEDIUM,
-            required_args=("path", "content"),
-            description="write text to a file",
-        ),
-        ActionSpec(
-            "read_file",
-            "list_dir",
+            "file.read",
+            "file.read",
             PermissionLevel.READ,
             required_args=("path",),
             description="read a text file",
         ),
         ActionSpec(
-            "create_folder",
-            "write_file",
+            "file.write",
+            "file.write",
+            PermissionLevel.MODIFY,
+            RiskLevel.MEDIUM,
+            required_args=("path", "content"),
+            description="write text to a file, backing up any existing version first",
+        ),
+        ActionSpec(
+            "file.create",
+            "file.write",
+            PermissionLevel.MODIFY,
+            required_args=("path",),
+            description="create an empty file",
+        ),
+        ActionSpec(
+            "file.folder.create",
+            "file.write",
             PermissionLevel.MODIFY,
             required_args=("path",),
             description="create a directory",
         ),
         ActionSpec(
-            "move",
-            "write_file",
+            "file.move",
+            "file.write",
             PermissionLevel.MODIFY,
             RiskLevel.MEDIUM,
             required_args=("src", "dst"),
-            description="move or rename a path",
+            description="move a path",
         ),
         ActionSpec(
-            "copy",
-            "write_file",
+            "file.rename",
+            "file.write",
+            PermissionLevel.MODIFY,
+            RiskLevel.MEDIUM,
+            required_args=("src", "dst"),
+            description="rename a path",
+        ),
+        ActionSpec(
+            "file.copy",
+            "file.write",
             PermissionLevel.MODIFY,
             required_args=("src", "dst"),
             description="copy a path",
         ),
         ActionSpec(
-            "delete",
-            "delete_file",
+            "file.delete",
+            "file.delete",
             PermissionLevel.MODIFY,
             RiskLevel.HIGH,
-            reversible=False,
+            reversible=True,
             required_args=("path",),
-            description="delete a path (to the recycle bin where available)",
+            description="delete a path (quarantined, so it stays recoverable)",
         ),
         ActionSpec(
-            "list_dir",
-            "list_dir",
+            "file.list",
+            "file.read",
             PermissionLevel.READ,
             required_args=("path",),
             verify=False,
             description="list a directory",
         ),
         ActionSpec(
-            "search_files",
-            "search_files",
+            "file.search",
+            "file.search",
             PermissionLevel.READ,
             verify=False,
             required_args=("root", "pattern"),
-            description="find files by pattern",
+            description="find files by pattern, newest first",
         ),
+        # ---------------------------------------------------------------- screen & window
         ActionSpec(
-            "read_active_window",
-            "read_active_window",
+            "window.active",
+            "window.active",
             PermissionLevel.READ,
             verify=False,
             description="report the focused window",
         ),
         ActionSpec(
-            "screenshot",
-            "screenshot",
-            PermissionLevel.READ,
+            "screen.capture",
+            "screen.capture",
+            PermissionLevel.OPEN,
             RiskLevel.LOW,
             description="capture the screen",
         ),
+        # ---------------------------------------------------------------- system
         ActionSpec(
-            "run_shell",
-            "run_shell",
+            "system.info",
+            "system.info",
+            PermissionLevel.READ,
+            verify=False,
+            description="report OS, CPU, memory and disk",
+        ),
+        ActionSpec(
+            "system.process.list",
+            "system.process.list",
+            PermissionLevel.READ,
+            verify=False,
+            required_args=("name",),
+            description="check whether a process is running",
+        ),
+        ActionSpec(
+            "system.process.start",
+            "app.open",
+            PermissionLevel.OPEN,
+            required_args=("name",),
+            description="start a process by name",
+        ),
+        ActionSpec(
+            "system.process.stop",
+            "app.close",
+            PermissionLevel.MODIFY,
+            RiskLevel.MEDIUM,
+            required_args=("name",),
+            description="stop a process by name",
+        ),
+        ActionSpec(
+            "system.lock",
+            "system.power",
+            PermissionLevel.SYSTEM,
+            RiskLevel.LOW,
+            verify=False,
+            description="lock the session",
+        ),
+        ActionSpec(
+            "system.power",
+            "system.power",
+            PermissionLevel.SYSTEM,
+            RiskLevel.HIGH,
+            verify=False,
+            reversible=False,
+            required_args=("mode",),
+            description="sleep, restart, or shut down",
+        ),
+        # ---------------------------------------------------------------- clipboard & audio
+        ActionSpec(
+            "clipboard.read",
+            "clipboard.read",
+            PermissionLevel.READ,
+            verify=False,
+            description="read the clipboard",
+        ),
+        ActionSpec(
+            "clipboard.write",
+            "clipboard.write",
+            PermissionLevel.MODIFY,
+            required_args=("text",),
+            description="write to the clipboard",
+        ),
+        ActionSpec(
+            "audio.volume.get",
+            "audio.volume",
+            PermissionLevel.READ,
+            verify=False,
+            description="read the output volume",
+        ),
+        ActionSpec(
+            "audio.volume.set",
+            "audio.volume",
+            PermissionLevel.MODIFY,
+            required_args=("level",),
+            description="set the output volume",
+        ),
+        # ---------------------------------------------------------------- shell & misc
+        ActionSpec(
+            "powershell.run",
+            "powershell.run",
+            PermissionLevel.MODIFY,
+            RiskLevel.HIGH,
+            ControlTier.OS_API,
+            reversible=False,
+            required_args=("command",),
+            description="run a PowerShell command",
+        ),
+        ActionSpec(
+            "shell.run",
+            "shell.run",
             PermissionLevel.MODIFY,
             RiskLevel.HIGH,
             ControlTier.OS_API,
@@ -138,84 +250,31 @@ CATALOGUE: dict[str, ActionSpec] = {
             description="run a shell command",
         ),
         ActionSpec(
-            "process_status",
-            "process_status",
-            PermissionLevel.READ,
-            verify=False,
-            required_args=("name",),
-            description="check whether a process is running",
+            "browser.open",
+            "browser.open",
+            PermissionLevel.OPEN,
+            required_args=("url",),
+            control_tier=ControlTier.BROWSER,
+            description="open a URL in the default browser",
         ),
         ActionSpec(
-            "system_info",
-            "system_info",
-            PermissionLevel.READ,
-            verify=False,
-            description="report OS, CPU, memory and disk",
-        ),
-        ActionSpec(
-            "get_volume",
-            "volume",
-            PermissionLevel.READ,
-            verify=False,
-            description="read the output volume",
-        ),
-        ActionSpec(
-            "set_volume",
-            "volume",
-            PermissionLevel.MODIFY,
-            required_args=("level",),
-            description="set the output volume",
-        ),
-        ActionSpec(
-            "clipboard_get",
-            "clipboard",
-            PermissionLevel.READ,
-            verify=False,
-            description="read the clipboard",
-        ),
-        ActionSpec(
-            "clipboard_set",
-            "clipboard",
-            PermissionLevel.MODIFY,
-            required_args=("text",),
-            description="write to the clipboard",
-        ),
-        ActionSpec(
-            "notify",
-            "notify",
+            "notify.show",
+            "notify.show",
             PermissionLevel.OPEN,
             verify=False,
             required_args=("title", "body"),
             description="show a desktop notification",
-        ),
-        ActionSpec(
-            "lock",
-            "power",
-            PermissionLevel.SYSTEM,
-            RiskLevel.LOW,
-            verify=False,
-            description="lock the session",
-        ),
-        ActionSpec(
-            "power",
-            "power",
-            PermissionLevel.SYSTEM,
-            RiskLevel.HIGH,
-            verify=False,
-            reversible=False,
-            required_args=("mode",),
-            description="sleep, restart, or shut down",
         ),
     )
 }
 
 
 def get(action: str) -> ActionSpec | None:
-    return CATALOGUE.get(action)
+    return CATALOGUE.get(canonical(action))
 
 
 def missing_args(action: str, args: dict) -> list[str]:
-    spec = CATALOGUE.get(action)
+    spec = get(action)
     if spec is None:
         return []
     return [name for name in spec.required_args if name not in args or args[name] in (None, "")]

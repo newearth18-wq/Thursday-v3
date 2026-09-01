@@ -114,7 +114,7 @@ class ToolExecutor:
             raise PermissionDenied(verdict.reason, tool=call.tool, rule=verdict.rule)
 
         approval_id: UUID | None = None
-        if verdict.decision is PolicyDecision.ASK:
+        if verdict.decision.requires_approval:
             approval = await self._approvals.request(  # type: ignore[attr-defined]
                 ApprovalRequest(
                     action=call.tool,
@@ -128,6 +128,8 @@ class ToolExecutor:
                     expected_outcome=call.reason or spec.description,
                     task_id=call.task_id,
                     step_id=call.step_id,
+                    # ASK_ALWAYS approvals do not offer "always allow" (ADR 0008).
+                    policy=verdict.decision,
                 )
             )
             approval_id = approval.id
@@ -308,7 +310,7 @@ class AgentContext:
 
 def _resource_of(call: ToolCall) -> str:
     """The thing being acted on, for policy scoping and the audit trail."""
-    for key in ("path", "src", "name", "root", "url", "to", "title", "command", "query"):
+    for key in ("path", "src", "app", "name", "root", "url", "to", "title", "command", "query"):
         if (value := call.args.get(key)) not in (None, ""):
             return str(value)
     return ""

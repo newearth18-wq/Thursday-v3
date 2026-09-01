@@ -37,6 +37,7 @@ _ALIASES: dict[str, str] = {
 
 class WindowsAdapter(OSAdapter):
     os_name = "Windows"
+    shell_capability = "powershell.run"
 
     def can_screenshot(self) -> bool:
         return True
@@ -141,6 +142,10 @@ class WindowsAdapter(OSAdapter):
         result = await self._powershell(f"Start-Process -FilePath '{target}' -PassThru | % Id")
         pid = next((int(t) for t in result["stdout"].split() if t.strip().isdigit()), None)
         return {"pid": pid, "path": str(target)}
+
+    async def open_url(self, url: str) -> dict[str, Any]:
+        result = await self._powershell(f"Start-Process '{url}'")
+        return {"opened": result["exit_code"] == 0}
 
     async def screenshot(self, **kwargs: Any) -> bytes:
         target = Path.home() / "AppData" / "Local" / "Temp" / "thursday-shot.png"

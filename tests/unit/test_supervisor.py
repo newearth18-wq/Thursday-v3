@@ -32,8 +32,8 @@ async def test_a_fully_verified_result_passes(supervisor):
         AgentResult(
             agent="computer",
             ok=True,
-            output={"action": "open_app", "verified": True},
-            tool_results=[ToolResult(call_id=new_id(), tool="open_app", ok=True, verified=True)],
+            output={"action": "app.open", "verified": True},
+            tool_results=[ToolResult(call_id=new_id(), tool="app.open", ok=True, verified=True)],
         ),
     )
     assert report.passed and report.verdict is AgentVerdict.PASS
@@ -46,8 +46,8 @@ async def test_a_dispatched_but_unobserved_action_never_passes(supervisor):
         AgentResult(
             agent="computer",
             ok=True,
-            output={"action": "open_app", "verified": False},
-            tool_results=[ToolResult(call_id=new_id(), tool="open_app", ok=True, verified=False)],
+            output={"action": "app.open", "verified": False},
+            tool_results=[ToolResult(call_id=new_id(), tool="app.open", ok=True, verified=False)],
         ),
     )
     assert not report.passed
