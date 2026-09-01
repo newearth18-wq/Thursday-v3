@@ -1,0 +1,96 @@
+# 7. Memory Architecture (Second Brain)
+
+## 7.1 Rule zero
+
+**A vector database is not a memory system** (§7). Embeddings are one retrieval index over
+one part of memory. Thursday's memory is layered, typed, sourced, and curated.
+
+Equally: **conversation context ≠ long-term memory** (§5). The chat window is working
+material that expires. Memory is a deliberate write.
+
+## 7.2 Layers
+
+| Layer | Holds | Lifetime | Written by |
+|---|---|---|---|
+| **Working** | facts scoped to the current task | task end / 24 h | automatic |
+| **Episodic** | what happened: actions, outcomes, decisions | 400 d, decays | automatic on task completion |
+| **Semantic** | facts and knowledge | indefinite | curated |
+| **Preference** | how the user likes things done | indefinite, supersedable | inferred + confirmed |
+| **Procedural** | step sequences that worked | indefinite | on verified success |
+| **Project** | scoped brain per project (§54) | project lifetime | mixed |
+| **Knowledge Base** | documents, notes, files | until deleted | indexing |
+
+## 7.3 Write policy — what gets remembered (§96 "don't store every message")
+
+`MemoryManager.should_write()` requires **at least one**:
+- the user asserted a durable fact or preference ("call me X", "always use Y")
+- a decision was made (→ also Decision Journal, §55)
+- a task completed with a reusable procedure
+- a correction to an existing memory
+- an entity/relationship new to the knowledge graph
+
+and **none** of:
+- `sensitivity >= SECRET`
+- the content matches a credential/token pattern
+- `memory_disabled` privacy zone is active (§68)
+- it is small talk, an ephemeral pointer, or already stored (dedupe by embedding ≥0.95 + key match)
+
+## 7.4 Quality control (§11)
+
+Every record carries `importance`, `confidence`, `source`, `source_ref`, `valid_from/to`.
+
+```
+retrieval_score = 0.35*semantic_sim + 0.20*recency_decay + 0.20*importance
+                + 0.15*confidence   + 0.10*usage_frequency
+recency_decay   = exp(-age_days / half_life[layer])
+```
+Half-lives: working 0.5 d, episodic 45 d, semantic ∞, preference ∞, procedural 180 d.
+
+**Conflict handling.** New information contradicting old is never blended. The manager
+writes a `memory_conflicts` row and Thursday answers with both:
+
+> "จากบันทึกเดิม (7 มี.ค. จากอีเมล) ค่านี้คือ 42 แต่ไฟล์ที่คุณเปิดวันนี้ระบุ 45
+>  ผมยังไม่ได้รวมสองค่านี้เข้าด้วยกัน — ให้ใช้ค่าใหม่เป็นหลักหรือไม่"
+
+Auto-supersede happens only when: same key, new source ranks higher
+(`user > file > email > web > agent-inference`), and new confidence ≥ old + 0.15.
+
+## 7.5 Retrieval pipeline
+
+```
+query → intent+entity extraction → parallel:
+        ├ vector search (per-layer k, filtered by project/time)
+        ├ structured lookup (keys, entities, tasks)
+        ├ knowledge-graph traversal (≤2 hops)
+        └ document/file index
+      → merge → dedupe → rescore → budget-trim (token-aware) → ContextPackage.memories
+```
+
+## 7.6 Obsidian as the human-readable brain (§8)
+
+Postgres is the machine's memory; the vault is the human's. They are synced, not merged.
+
+```
+THURSDAY VAULT/
+  00 Inbox/     01 Projects/  02 Areas/   03 Knowledge/  04 People/
+  05 Meetings/  06 Decisions/ 07 Skills/  08 Daily/      09 Archive/
+```
+Notes carry YAML frontmatter (`thursday_id`, `layer`, `source`, `confidence`, `updated`)
+so a note edited by hand can be re-ingested. **Never written to the vault:** passwords,
+API keys, raw tokens, session secrets — the `SecretRedactor` runs on every vault write and
+the writer refuses on a hit.
+
+## 7.7 Knowledge graph (§10) and timeline (§56)
+
+Entities and relationships are extracted on task completion and document indexing, with a
+confidence and a source. The timeline view is `events + tasks + decisions` ordered by time,
+which answers "what did we do last week", "what changed this month", "what have we already
+tried" without a separate store.
+
+## 7.8 Spatial memory (§26)
+
+Vision writes `observations` rows (label, confidence, location context, timestamp) — never
+frames by default. Answers are always framed as last-known-sighting, with time and
+confidence, never as a guarantee:
+
+> "ครั้งล่าสุดที่ระบบเห็นคือบนโต๊ะทำงาน เวลา 18:22 (ความมั่นใจ 0.92) — ยังไม่ยืนยันว่าตอนนี้ยังอยู่ตรงนั้น"
