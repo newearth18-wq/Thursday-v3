@@ -45,8 +45,37 @@ INVERSE_ACTIONS: dict[str, str | None] = {
 UndoExecutor = Callable[[UndoRecord], Awaitable[bool]]
 
 
+#: Actions that observe without changing anything. They need no inverse, so treating them
+#: as irreversible would wrongly mark every read-only step as dangerous.
+NON_MUTATING_ACTIONS: frozenset[str] = frozenset(
+    {
+        "read_file",
+        "list_dir",
+        "search_files",
+        "read_active_window",
+        "screenshot",
+        "process_status",
+        "system_info",
+        "get_volume",
+        "clipboard_get",
+        "memory_search",
+        "obsidian_search",
+        "web_search",
+        "clock",
+        "vision_analyze",
+        "camera_capture",
+    }
+)
+
+
 def is_reversible(action: str) -> bool:
-    return INVERSE_ACTIONS.get(action) is not None
+    """True when the action can be undone — or has nothing to undo."""
+    return action in NON_MUTATING_ACTIONS or INVERSE_ACTIONS.get(action) is not None
+
+
+def is_destructive(action: str) -> bool:
+    """True when the action changes something and no reversal exists."""
+    return action not in NON_MUTATING_ACTIONS and INVERSE_ACTIONS.get(action) is None
 
 
 class UndoRegistry:

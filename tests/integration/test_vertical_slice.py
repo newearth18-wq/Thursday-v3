@@ -42,7 +42,7 @@ async def test_open_app_is_verified_before_success_is_reported(
 
 async def test_dispatch_without_observable_effect_is_not_success(container, tmp_path, session_id):
     """The command is accepted, the process never appears — Thursday must not claim success."""
-    from thursday.conftest_helpers import connect_failing_node  # type: ignore[import-not-found]
+    from tests.helpers import connect_failing_node
 
     session = await connect_failing_node(container, tmp_path)
 

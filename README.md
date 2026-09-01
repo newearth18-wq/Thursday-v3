@@ -16,7 +16,7 @@ USER → THURSDAY → Understand → Plan → Delegate → Act → Verify → Re
 ## Status
 
 **Phase 1 is implemented and runnable**: the vertical slice from
-[docs/15-vertical-slice.md](docs/15-vertical-slice.md) works end to end, with 140 tests that
+[docs/15-vertical-slice.md](docs/15-vertical-slice.md) works end to end, with 179 tests that
 need no database, no network and no model credentials.
 
 ```
@@ -78,6 +78,7 @@ These are the design, and they are tested rather than documented and hoped for.
 | 5 | **Memory is curated, not a transcript.** Conflicts are recorded, never merged. | `memory/manager.py` |
 | 6 | **Everything is audited and, where possible, reversible.** | `security/audit.py`, `core/undo.py` |
 | 7 | **Providers are swappable.** Every port has a real adapter and an offline one. | `shared/interfaces.py`, `core/container.py` |
+| 8 | **Thursday proposes; the owner decides.** Learned routines arrive disabled; risky skills cannot self-activate. | `automation/routines.py`, `skills/registry.py` |
 
 Rule 1, concretely:
 
@@ -126,17 +127,25 @@ Full design in [`docs/`](docs/) — the fifteen deliverables, written before the
 - Layered memory with an explicit write policy, conflict recording, and decay
 - Obsidian vault that *refuses* credential material rather than redacting it
 - Agent orchestrator, capability-based selection, and a read-only Supervisor
+- Dynamic agents with intersected permissions, depth and count caps, destroyed with the task
+- Automation engine, proactivity gate with rate limits, routine learning that **proposes**
+- Skills: capture → sandbox test → approval → activate → rollback, with risky steps gated
+- Spatial memory that answers as a *sighting*, and gesture mode that expires when idle
 - Model router with tiers, cost/privacy routing and a local fallback
-- 29 REST endpoints, two WebSockets, 25-table schema with a working migration
+- Background worker: memory decay, health, device liveness, approval expiry
+- 40 REST endpoints, two WebSockets, 25-table schema with a working migration
 
 **Designed, ported, not yet implemented** — every one has an interface and a Phase in
 [the roadmap](docs/13-roadmap.md):
 
 - SQL-backed repositories behind the memory/task/audit ports (they run in-process today;
-  the schema and migrations are in place)
+  the schema and migrations are in place). This is the largest gap.
 - Redis event bus and worker queue (the in-process bus implements the same port)
-- Vision, camera, gesture, spatial memory (Phase 3)
-- Skills, automations, routine learning, dynamic agents (Phase 4–5)
+- Camera capture, OCR and object detection — the *interpretation* layers (spatial memory,
+  gesture classification from landmarks) are built and tested; the model that produces the
+  landmarks arrives in Phase 3
+- Real STT/TTS models — the ports and offline stubs are in place; faster-whisper and Piper
+  adapters are written but unexercised without the model files
 - Desktop and mobile clients (scaffolds in `apps/desktop`, `apps/mobile`)
 - Ed25519 device signature verification is scaffolded in the protocol and enforced only in
   `production`; the keypair generation and pairing flow land in Phase 2
@@ -149,7 +158,7 @@ the verification loop, the audit chain and the device round-trip are all real.
 ## Development
 
 ```bash
-pytest                       # 140 tests, no infrastructure
+pytest                       # 179 tests, no infrastructure
 pytest --cov=thursday
 ruff check . && ruff format .
 mypy thursday

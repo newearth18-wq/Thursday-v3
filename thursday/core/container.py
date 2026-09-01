@@ -13,8 +13,11 @@ from dataclasses import dataclass
 from typing import Any
 
 from thursday.agents.computer import ComputerAgent
+from thursday.agents.factory import AgentFactory
 from thursday.agents.registry import AgentRegistry
 from thursday.agents.research import ResearchAgent
+from thursday.automation.engine import AutomationEngine, ProactivityGate
+from thursday.automation.routines import RoutineLearner
 from thursday.core.bus import InProcessEventBus
 from thursday.core.composer import ResponseComposer
 from thursday.core.config import Settings, get_settings
@@ -45,8 +48,11 @@ from thursday.security.privacy import PrivacyClassifier, PrivacyZoneRegistry
 from thursday.security.redaction import SecretRedactor
 from thursday.security.vault import ChainVault, EnvVault, InMemoryVault
 from thursday.shared.enums import ModelTier
+from thursday.skills.registry import SkillRegistry
 from thursday.tools.builtin import register_builtin_tools
 from thursday.tools.registry import ToolRegistry, ToolRouter
+from thursday.vision.gestures import GestureMode
+from thursday.vision.spatial import SpatialMemory
 
 log = get_logger(__name__)
 
@@ -92,6 +98,14 @@ class Container:
     queue: Any = None
     supervisor: Any = None
     orchestrator: Any = None
+    agent_factory: Any = None
+
+    # automation, skills, perception
+    automations: Any = None
+    routines: Any = None
+    skills: Any = None
+    spatial: Any = None
+    gesture_mode: Any = None
 
     # conversation
     world: Any = None
@@ -144,6 +158,23 @@ class Container:
                 "detail": f"{len(self.queue.running())} running",
             }
         )
+        checks.append(
+            {
+                "component": "automations",
+                "ok": True,
+                "detail": (
+                    f"{len(self.automations.list(enabled_only=True))} enabled, "
+                    f"{len(self.routines.unproposed())} routine suggestions pending"
+                ),
+            }
+        )
+        checks.append(
+            {
+                "component": "skills",
+                "ok": True,
+                "detail": f"{len(self.skills.active())} active, {len(self.skills.list())} total",
+            }
+        )
         return checks
 
     async def emergency_stop(self, scope: str = "all") -> dict[str, Any]:
@@ -161,7 +192,9 @@ class Container:
         if scope in ("all", "devices"):
             actions["devices_disconnected"] = await self.hub.disconnect_all()
         if scope in ("all", "camera", "microphone"):
+            self.gesture_mode.close()
             actions["capture_disabled"] = True
+            actions["gesture_mode"] = "closed"
         if scope == "all":
             self.permissions.set_lockdown(True)
             actions["lockdown"] = True
@@ -233,7 +266,13 @@ def build_container(settings: Settings | None = None, *, configure_logs: bool = 
     c.agents = AgentRegistry()
     c.agents.register(ComputerAgent())
     c.agents.register(ResearchAgent())
+    c.agent_factory = AgentFactory(c.agents)
     c.supervisor = Supervisor(c.models, use_llm_critique=not settings.offline)
+
+    # -- automation, skills, perception ---------------------------------------
+    c.skills = SkillRegistry(executor=c.executor, tools=c.tools)
+    c.spatial = SpatialMemory()
+    c.gesture_mode = GestureMode()
 
     # -- conversation ---------------------------------------------------------
     c.world = WorldState()
@@ -258,6 +297,17 @@ def build_container(settings: Settings | None = None, *, configure_logs: bool = 
         max_attempts=settings.max_step_attempts,
     )
 
+    c.automations = AutomationEngine(
+        bus=c.bus,
+        executor=c.executor,
+        tasks=c.tasks,
+        world=c.world,
+        gate=ProactivityGate(settings.proactivity),
+    )
+    c.automations.attach()
+    c.routines = RoutineLearner()
+    c.routines.attach(c.bus)
+
     from thursday.core.engine import ThursdayEngine
 
     c.engine = ThursdayEngine(c)
@@ -269,6 +319,7 @@ def build_container(settings: Settings | None = None, *, configure_logs: bool = 
         offline=settings.offline,
         tools=len(c.tools.names()),
         agents=len(c.agents.specs()),
+        proactivity=settings.proactivity.name,
     )
     return c
 

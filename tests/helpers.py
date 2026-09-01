@@ -1,9 +1,10 @@
-"""Test helpers that need the real wiring (imported by tests, not by the runtime)."""
+"""Test helpers that need the real wiring."""
 
 from __future__ import annotations
 
 from pathlib import Path
 
+from tests.conftest import FakeAdapter
 from thursday.devices.hub import LoopbackDeviceSession
 from thursday.devices.node.executor import NodeExecutor
 from thursday.shared.ids import new_id
@@ -11,8 +12,6 @@ from thursday.shared.ids import new_id
 
 async def connect_failing_node(container, tmp_path: Path):
     """A node whose launch command reports success but whose process never appears."""
-    from tests.conftest import FakeAdapter
-
     adapter = FakeAdapter(fail_launch=True)
     session = LoopbackDeviceSession(
         device_id=new_id(),

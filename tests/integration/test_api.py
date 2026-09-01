@@ -151,3 +151,94 @@ async def test_tools_and_agents_are_introspectable(client):
 
     agents = (await client.get("/api/v1/agents")).json()["agents"]
     assert {"computer", "research"} <= {a["name"] for a in agents}
+
+
+async def test_a_risky_skill_cannot_be_activated_without_review(client):
+    """§51, §96 — a learned workflow may not start deleting on Thursday's authority."""
+    created = (
+        await client.post(
+            "/api/v1/skills",
+            json={
+                "name": "tidy downloads",
+                "description": "clear the downloads folder every Friday",
+                "steps": [{"tool": "delete", "args": {"path": "~/Downloads/old"}}],
+            },
+        )
+    ).json()
+    assert created["status"] == "draft"
+    assert created["needs_approval"] is True
+    assert created["risky_steps"] == ["delete"]
+
+    tested = (await client.post(f"/api/v1/skills/{created['id']}/test")).json()
+    assert tested["ok"] is True
+
+    refused = await client.post(f"/api/v1/skills/{created['id']}/activate")
+    assert refused.status_code == 403
+
+    await client.post(f"/api/v1/skills/{created['id']}/approve", params={"approved_by": "owner"})
+    activated = (await client.post(f"/api/v1/skills/{created['id']}/activate")).json()
+    assert activated["status"] == "active"
+
+
+async def test_a_harmless_skill_activates_after_its_tests(client):
+    created = (
+        await client.post(
+            "/api/v1/skills",
+            json={"name": "morning glance", "steps": [{"tool": "clock"}]},
+        )
+    ).json()
+    assert created["needs_approval"] is False
+
+    await client.post(f"/api/v1/skills/{created['id']}/test")
+    activated = (await client.post(f"/api/v1/skills/{created['id']}/activate")).json()
+    assert activated["status"] == "active"
+
+
+async def test_a_skill_can_be_rolled_back(client):
+    created = (
+        await client.post("/api/v1/skills", json={"name": "s", "steps": [{"tool": "clock"}]})
+    ).json()
+    await client.post(f"/api/v1/skills/{created['id']}/test")
+    await client.post(f"/api/v1/skills/{created['id']}/activate")
+
+    rolled = (
+        await client.post(f"/api/v1/skills/{created['id']}/rollback", params={"to": 1})
+    ).json()
+    assert rolled["current_version"] == 1
+
+    missing = await client.post(f"/api/v1/skills/{created['id']}/rollback", params={"to": 9})
+    assert missing.status_code == 404
+
+
+async def test_routine_suggestions_are_accepted_but_stay_disabled(client, container):
+    """§49 — accepting a suggestion records it; enabling it is a separate act."""
+    from datetime import UTC, datetime, timedelta
+
+    from thursday.shared.models import Event
+
+    base = datetime.now(UTC).replace(hour=8, minute=15)
+    for day in range(4):
+        for tool in ("open_app", "open_url", "list_dir"):
+            await container.routines.on_tool(
+                Event(
+                    kind="tool.executed",
+                    payload={"tool": tool},
+                    occurred_at=base - timedelta(days=day),
+                )
+            )
+
+    suggestions = (await client.get("/api/v1/routines/suggestions")).json()["suggestions"]
+    assert suggestions and "Routine" in suggestions[0]["prompt"]
+
+    accepted = (
+        await client.post("/api/v1/routines/suggestions/accept", params={"index": 0})
+    ).json()
+    assert accepted["enabled"] is False
+
+    listed = (await client.get("/api/v1/automations")).json()["automations"]
+    assert listed[0]["created_by"] == "thursday_suggested"
+
+    from uuid import UUID
+
+    enabled = (await client.post(f"/api/v1/automations/{UUID(accepted['id'])}/enable")).json()
+    assert enabled["enabled"] is True

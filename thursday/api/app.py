@@ -9,7 +9,7 @@ from fastapi.responses import JSONResponse
 
 from thursday import __version__
 from thursday.api.deps import error_body
-from thursday.api.routers import approvals, conversation, devices, memory, system
+from thursday.api.routers import approvals, conversation, devices, memory, skills, system
 from thursday.api.ws import router as realtime_router
 from thursday.core.config import Settings, get_settings
 from thursday.core.container import Container, build_container
@@ -69,6 +69,7 @@ def create_app(settings: Settings | None = None, container: Container | None = N
         devices.router,
         memory.router,
         approvals.router,
+        skills.router,
         system.router,
     ):
         app.include_router(router, prefix=api_prefix)
