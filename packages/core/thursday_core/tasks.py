@@ -132,6 +132,25 @@ class TaskManager:
             task.verification = verification
         return await self.transition(task_id, TaskState.FAILED, reason=error)
 
+    async def pause(self, task_id: UUID, *, reason: str = "paused by the owner") -> Task:
+        """PART 5. A paused task keeps its plan and its progress; it resumes where it stopped."""
+        return await self.transition(task_id, TaskState.PAUSED, reason=reason)
+
+    async def resume(self, task_id: UUID) -> Task:
+        """Back to RUNNING if it had started, READY if it had not."""
+        task = self._require(task_id)
+        if task.status is not TaskState.PAUSED:
+            raise InvalidTransition(
+                f"only a paused task can be resumed; this one is {task.status}",
+                task_id=str(task_id),
+            )
+        target = TaskState.RUNNING if task.started_at else TaskState.READY
+        return await self.transition(task_id, target, reason="resumed by the owner")
+
+    async def mark_ready(self, task_id: UUID) -> Task:
+        """Planned and authorised, waiting for a worker. This is what a queue schedules."""
+        return await self.transition(task_id, TaskState.READY)
+
     async def cancel(self, task_id: UUID, *, reason: str = "cancelled by user") -> Task:
         self._cancelled.add(task_id)
         return await self.transition(task_id, TaskState.CANCELLED, reason=reason)

@@ -41,7 +41,7 @@ async def get_device(device_id: UUID, c: Container = Depends(get_container)) -> 
     return summary.model_dump(mode="json")
 
 
-@router.post("/devices/{device_id}/action")
+@router.post("/devices/{device_id}/actions")
 async def act(
     device_id: UUID, request: DeviceActionRequest, c: Container = Depends(get_container)
 ) -> dict:

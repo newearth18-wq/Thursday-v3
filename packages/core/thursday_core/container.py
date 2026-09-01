@@ -49,6 +49,7 @@ from thursday_core.logging import configure_logging, get_logger
 from thursday_core.model_router import ModelRouter
 from thursday_core.orchestrator import AgentOrchestrator
 from thursday_core.planner import Planner
+from thursday_core.projects import ProjectManager
 from thursday_core.reasoning import ReasoningEngine
 from thursday_core.supervisor import Supervisor
 from thursday_core.tasks import TaskManager, TaskQueue
@@ -56,6 +57,15 @@ from thursday_core.undo import UndoRegistry
 from thursday_core.world import WorldState, WorldStateProjector
 
 log = get_logger(__name__)
+
+
+def _mask(url: str) -> str:
+    """Never return a password from /health, even to a local caller."""
+    if "://" not in url or "@" not in url:
+        return url
+    scheme, _, rest = url.partition("://")
+    _, _, host = rest.rpartition("@")
+    return f"{scheme}://***@{host}"
 
 
 @dataclass
@@ -96,6 +106,7 @@ class Container:
     executor: Any = None
     agents: Any = None
     tasks: Any = None
+    projects: Any = None
     queue: Any = None
     supervisor: Any = None
     orchestrator: Any = None
@@ -134,6 +145,23 @@ class Container:
                 "component": "devices",
                 "ok": bool(online),
                 "detail": f"{len(online)} online: {', '.join(d.name for d in online) or 'none'}",
+            }
+        )
+        checks.append(
+            {
+                "component": "database",
+                "ok": True,
+                "detail": _mask(self.settings.resolved_database_url),
+            }
+        )
+        checks.append(
+            {
+                "component": "redis",
+                "ok": True,
+                "detail": (
+                    self.settings.redis_url
+                    or "not configured — in-process bus and queue (ADR 0006)"
+                ),
             }
         )
         checks.append(
@@ -278,6 +306,7 @@ def build_container(settings: Settings | None = None, *, configure_logs: bool = 
         tasks=c.tasks,
         approval_timeout_s=settings.approval_ttl_seconds,
     )
+    c.projects = ProjectManager(tasks=c.tasks, memory=c.memory)
     c.agents = AgentRegistry()
     c.agents.register(ComputerAgent())
     c.agents.register(ResearchAgent())

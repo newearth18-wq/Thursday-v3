@@ -26,6 +26,34 @@ async def pending(c: Container = Depends(get_container)) -> dict:
     return {"approvals": [a.model_dump(mode="json") for a in rows], "count": len(rows)}
 
 
+@router.post("/{approval_id}/approve")
+async def approve(
+    approval_id: UUID,
+    scope: ApprovalScope = ApprovalScope.ONCE,
+    note: str | None = None,
+    c: Container = Depends(get_container),
+) -> dict:
+    """PART 71. An ASK_ALWAYS action silently narrows the scope to ONCE (ADR 0008)."""
+    approval = c.approvals.get(approval_id)
+    if approval is None:
+        raise HTTPException(status_code=404, detail="unknown approval")
+    decided = await c.approvals.decide(approval_id, approve=True, scope=scope, note=note)
+    return {
+        **decided.model_dump(mode="json"),
+        "scopes_offered": [s.value for s in decided.scopes_offered],
+    }
+
+
+@router.post("/{approval_id}/reject")
+async def reject(
+    approval_id: UUID, note: str | None = None, c: Container = Depends(get_container)
+) -> dict:
+    if c.approvals.get(approval_id) is None:
+        raise HTTPException(status_code=404, detail="unknown approval")
+    decided = await c.approvals.decide(approval_id, approve=False, note=note)
+    return decided.model_dump(mode="json")
+
+
 @router.post("/{approval_id}")
 async def decide(
     approval_id: UUID, request: ApprovalDecisionRequest, c: Container = Depends(get_container)

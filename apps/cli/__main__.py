@@ -217,7 +217,7 @@ async def run_remote(args: argparse.Namespace) -> None:
             if not line or line in ("/quit", "/exit"):
                 break
             response = await client.post(
-                "/api/v1/conversation", json={"text": line, "session_id": session_id}
+                "/api/v1/conversations", json={"text": line, "session_id": session_id}
             )
             if response.status_code >= 400:
                 print(f"  error: {response.text[:300]}")

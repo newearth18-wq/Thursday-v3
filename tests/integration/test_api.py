@@ -29,7 +29,7 @@ async def test_health_reports_every_component(client):
 
 
 async def test_a_conversation_turn_returns_a_verified_reply(client, adapter):
-    response = await client.post("/api/v1/conversation", json={"text": "Thursday เปิด chrome"})
+    response = await client.post("/api/v1/conversations", json={"text": "Thursday เปิด chrome"})
     assert response.status_code == 200
     body = response.json()
     assert body["verified"] is True
@@ -40,17 +40,17 @@ async def test_a_conversation_turn_returns_a_verified_reply(client, adapter):
 
 async def test_the_trace_id_survives_the_round_trip(client):
     response = await client.post(
-        "/api/v1/conversation", json={"text": "hello"}, headers={"x-trace-id": "abc123"}
+        "/api/v1/conversations", json={"text": "hello"}, headers={"x-trace-id": "abc123"}
     )
     assert response.headers["x-trace-id"] == "abc123"
 
 
 async def test_conversation_continues_within_a_session(client):
-    first = (await client.post("/api/v1/conversation", json={"text": "สวัสดี"})).json()
+    first = (await client.post("/api/v1/conversations", json={"text": "สวัสดี"})).json()
     session_id = first["session_id"]
-    await client.post("/api/v1/conversation", json={"text": "สถานะงาน", "session_id": session_id})
+    await client.post("/api/v1/conversations", json={"text": "สถานะงาน", "session_id": session_id})
 
-    history = (await client.get(f"/api/v1/conversation/{session_id}")).json()
+    history = (await client.get(f"/api/v1/conversations/{session_id}")).json()
     assert len(history["turns"]) >= 4  # two owner turns, two replies
 
 
@@ -59,13 +59,13 @@ async def test_direct_device_control_still_passes_the_permission_engine(
 ):
     """There is no back door around the Permission Engine, not even for the API."""
     allowed = await client.post(
-        f"/api/v1/devices/{office_pc.device_id}/action",
+        f"/api/v1/devices/{office_pc.device_id}/actions",
         json={"action": "system_info", "args": {}},
     )
     assert allowed.status_code == 200 and allowed.json()["verified"] is True
 
     refused = await client.post(
-        f"/api/v1/devices/{office_pc.device_id}/action",
+        f"/api/v1/devices/{office_pc.device_id}/actions",
         json={"action": "run_shell", "args": {"command": "rm -rf /"}},
     )
     assert refused.status_code == 403
@@ -76,7 +76,7 @@ async def test_an_unknown_device_is_a_404(client):
     from thursday_shared.ids import new_id
 
     response = await client.post(
-        f"/api/v1/devices/{new_id()}/action", json={"action": "system_info"}
+        f"/api/v1/devices/{new_id()}/actions", json={"action": "system_info"}
     )
     assert response.status_code == 404
 
@@ -90,7 +90,10 @@ async def test_memory_write_reports_an_honest_refusal(client):
     assert accepted.json()["written"] is True
 
     declined = await client.post("/api/v1/memory", json={"content": "ok", "layer": "semantic"})
-    assert declined.json() == {"written": False, "reason": "small talk"}
+    body = declined.json()
+    assert body["written"] is False
+    assert body["decision"] == "IGNORE"
+    assert body["reason"] == "small talk"
 
 
 async def test_memory_search_returns_scored_records_without_embeddings(client):
@@ -102,14 +105,14 @@ async def test_memory_search_returns_scored_records_without_embeddings(client):
             "importance": 0.8,
         },
     )
-    body = (await client.get("/api/v1/memory/search", params={"q": "Alpha", "k": 3})).json()
+    body = (await client.post("/api/v1/memory/search", json={"q": "Alpha", "k": 3})).json()
     assert body["memories"]
     assert "embedding" not in body["memories"][0]
     assert body["memories"][0]["score"] is not None
 
 
 async def test_the_audit_endpoint_exposes_the_chain_state(client):
-    await client.post("/api/v1/conversation", json={"text": "Thursday เปิด chrome"})
+    await client.post("/api/v1/conversations", json={"text": "Thursday เปิด chrome"})
     body = (await client.get("/api/v1/audit")).json()
     assert body["chain_intact"] is True
     assert any(entry["tool"] == "app.open" for entry in body["entries"])
@@ -122,7 +125,7 @@ async def test_emergency_stop_locks_down_and_can_be_released(client, office_pc):
 
     # While locked down, even an ordinary action is refused.
     refused = await client.post(
-        f"/api/v1/devices/{office_pc.device_id}/action",
+        f"/api/v1/devices/{office_pc.device_id}/actions",
         json={"action": "app.open", "args": {"name": "chrome"}},
     )
     assert refused.status_code == 403

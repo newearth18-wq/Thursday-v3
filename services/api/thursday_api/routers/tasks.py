@@ -7,6 +7,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException
 from thursday_core.container import Container
 from thursday_shared.enums import TaskState
+from thursday_shared.errors import ThursdayError
 from thursday_shared.models import Budget
 
 from thursday_api.deps import get_container
@@ -48,6 +49,29 @@ async def get_task(task_id: UUID, c: Container = Depends(get_container)) -> dict
     if task is None:
         raise HTTPException(status_code=404, detail="unknown task")
     return task.model_dump(mode="json")
+
+
+@router.post("/{task_id}/pause")
+async def pause(task_id: UUID, c: Container = Depends(get_container)) -> dict:
+    """PART 5 — a paused task keeps its plan; it resumes where it stopped."""
+    if c.tasks.get(task_id) is None:
+        raise HTTPException(status_code=404, detail="unknown task")
+    try:
+        task = await c.tasks.pause(task_id)
+    except ThursdayError as exc:
+        raise HTTPException(status_code=409, detail=exc.to_dict()) from exc
+    return {"status": task.status.value}
+
+
+@router.post("/{task_id}/resume")
+async def resume(task_id: UUID, c: Container = Depends(get_container)) -> dict:
+    if c.tasks.get(task_id) is None:
+        raise HTTPException(status_code=404, detail="unknown task")
+    try:
+        task = await c.tasks.resume(task_id)
+    except ThursdayError as exc:
+        raise HTTPException(status_code=409, detail=exc.to_dict()) from exc
+    return {"status": task.status.value}
 
 
 @router.post("/{task_id}/cancel")

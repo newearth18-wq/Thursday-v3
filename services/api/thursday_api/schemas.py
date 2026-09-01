@@ -26,12 +26,50 @@ class ConversationResponse(BaseModel):
     voice_mode: str
     avatar_state: str
     confidence: float
+    #: False when an action was dispatched but its effect could not be observed.
     verified: bool
     detail: str | None = None
+    task_id: UUID | None = None
+    status: str | None = None
     intent: dict[str, Any] | None = None
     citations: list[dict[str, Any]] = Field(default_factory=list)
     approvals: list[dict[str, Any]] = Field(default_factory=list)
+    actions: list[dict[str, Any]] = Field(default_factory=list)
+    ui_events: list[dict[str, Any]] = Field(default_factory=list)
+    speech: dict[str, Any] | None = None
     trace_id: str
+
+
+class ProjectCreateRequest(BaseModel):
+    name: str
+    goal: str = ""
+    description: str = ""
+
+
+class DecisionRequest(BaseModel):
+    """PART 44/55 — a decision worth remembering, with its reasoning."""
+
+    decision: str
+    reason: str = ""
+    alternatives: list[str] = Field(default_factory=list)
+    source: str = ""
+    impact: str = ""
+    project_id: UUID | None = None
+
+
+class MemorySearchRequest(BaseModel):
+    q: str = ""
+    layer: MemoryLayer | None = None
+    project_id: UUID | None = None
+    k: int = 8
+    min_confidence: float = 0.0
+
+
+class MemoryConfirmRequest(BaseModel):
+    """PART 39 — the owner's answer to an ASK_USER candidate."""
+
+    index: int = 0
+    accept: bool = True
 
 
 class TaskCreateRequest(BaseModel):

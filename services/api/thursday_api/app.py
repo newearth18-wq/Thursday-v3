@@ -20,7 +20,15 @@ from thursday_shared.errors import (
 from thursday_shared.ids import bind_trace_id, current_trace_id
 
 from thursday_api.deps import error_body
-from thursday_api.routers import approvals, conversation, devices, memory, skills, system
+from thursday_api.routers import (
+    approvals,
+    conversation,
+    devices,
+    memory,
+    projects,
+    skills,
+    system,
+)
 
 log = get_logger(__name__)
 
@@ -69,6 +77,7 @@ def create_app(settings: Settings | None = None, container: Container | None = N
         devices.router,
         memory.router,
         approvals.router,
+        projects.router,
         skills.router,
         system.router,
     ):

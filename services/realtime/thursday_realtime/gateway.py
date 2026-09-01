@@ -15,20 +15,33 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from thursday_core.logging import get_logger
 from thursday_shared.enums import ApprovalScope
 from thursday_shared.ids import new_id
-from thursday_shared.models import Event, ScreenContext
+from thursday_shared.models import Event, ScreenContext, UserRequest
 
 log = get_logger(__name__)
 router = APIRouter()
 
-#: Event kinds pushed to connected clients.
-CLIENT_EVENTS = (
-    "task.",
-    "agent.",
-    "approval.",
-    "device.",
-    "memory.conflict",
-    "system.",
-)
+#: PART 72's client vocabulary. Internal event kinds are translated on the way out, so the
+#: UI codes against a small stable set rather than against the core's internal topics.
+EVENT_TRANSLATION: dict[str, str] = {
+    "task.": "task.updated",
+    "agent.": "agent.updated",
+    "approval.required": "approval.required",
+    "approval.": "approval.resolved",
+    "device.": "device.updated",
+    "memory.conflict": "notification",
+    "memory.confirmation_required": "notification",
+    "notification.": "notification",
+    "automation.": "notification",
+    "system.": "notification",
+}
+
+
+def client_event(kind: str) -> str | None:
+    """Translate an internal event kind into the client vocabulary, or None to drop it."""
+    for prefix, translated in EVENT_TRANSLATION.items():
+        if kind.startswith(prefix):
+            return translated
+    return None
 
 
 @router.websocket("/realtime")
@@ -39,19 +52,21 @@ async def realtime(websocket: WebSocket) -> None:
     outbox: asyncio.Queue[dict] = asyncio.Queue(maxsize=256)
 
     async def forward(event: Event) -> None:
-        if not any(event.kind.startswith(prefix) for prefix in CLIENT_EVENTS):
+        translated = client_event(event.kind)
+        if translated is None:
             return
         try:
             outbox.put_nowait(
                 {
-                    "type": "event",
+                    "type": translated,
                     "kind": event.kind,
                     "payload": event.payload,
                     "task_id": str(event.task_id) if event.task_id else None,
+                    "priority": event.priority.value,
                 }
             )
         except asyncio.QueueFull:
-            # A slow client must not stall the core; it will resync from /world.
+            # A slow client must not stall the core; it resyncs from /world-state.
             log.warning("realtime_backpressure", session_id=str(session_id))
 
     container.bus.subscribe("*", forward)
@@ -70,29 +85,53 @@ async def realtime(websocket: WebSocket) -> None:
             kind = message.get("type")
 
             if kind == "turn":
-                reply = await container.engine.handle_turn(
-                    session_id=UUID(message.get("session_id", str(session_id))),
-                    text=message.get("text", ""),
-                    device_id=UUID(message["device_id"]) if message.get("device_id") else None,
-                    modality=message.get("modality", "text"),
-                    screen=ScreenContext.model_validate(message["screen"])
-                    if message.get("screen")
-                    else None,
+                response = await container.engine.handle_request(
+                    UserRequest(
+                        conversation_id=UUID(message.get("session_id", str(session_id))),
+                        text=message.get("text", ""),
+                        device_id=UUID(message["device_id"]) if message.get("device_id") else None,
+                        modality=message.get("modality", "text"),
+                        screen_context=(
+                            ScreenContext.model_validate(message["screen"])
+                            if message.get("screen")
+                            else None
+                        ),
+                    )
                 )
+                # PART 72: `assistant.delta` is the streaming text channel. The reply is
+                # emitted as a single delta plus a completion, so a client written for
+                # streaming works unchanged once token streaming lands.
                 await outbox.put(
                     {
-                        "type": "reply",
-                        "text": reply.text,
-                        "voice_mode": reply.voice_mode.value,
-                        "avatar_state": reply.avatar_state,
-                        "verified": reply.verified,
-                        "confidence": reply.confidence,
-                        "approvals": [a.model_dump(mode="json") for a in reply.approvals],
+                        "type": "assistant.delta",
+                        "text": response.text,
+                        "final": True,
+                        "voice_mode": response.voice_mode.value,
+                        "avatar_state": response.avatar_state,
+                        "verified": response.verified,
+                        "confidence": response.confidence,
+                        "task_id": str(response.task_id) if response.task_id else None,
+                        "approvals": [a.model_dump(mode="json") for a in response.approvals],
+                        "ui_events": [e.model_dump(mode="json") for e in response.ui_events],
                     }
                 )
+                if response.speech is not None:
+                    # The directive, not the waveform: audio is synthesised at the edge, so
+                    # the socket never carries megabytes the client may not even play.
+                    await outbox.put(
+                        {"type": "assistant.audio", **response.speech.model_dump(mode="json")}
+                    )
             elif kind == "interrupt":
+                # PART 98 — highest priority, and it bypasses the planner.
                 reply = await container.engine.handle_turn(session_id=session_id, text="stop")
-                await outbox.put({"type": "reply", "text": reply.text, "voice_mode": "NORMAL"})
+                await outbox.put(
+                    {
+                        "type": "assistant.delta",
+                        "text": reply.text,
+                        "final": True,
+                        "voice_mode": "NORMAL",
+                    }
+                )
             elif kind == "approve":
                 await container.approvals.decide(
                     UUID(message["approval_id"]),
