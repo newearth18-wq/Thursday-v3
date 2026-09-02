@@ -41,6 +41,8 @@ from thursday_tools.builtin import register_builtin_tools
 from thursday_tools.registry import ToolRegistry, ToolRouter
 from thursday_vision.gestures import GestureMode
 from thursday_vision.spatial import SpatialMemory
+from thursday_voice.routing import AudioRouter
+from thursday_voice.service import VoiceService
 
 from thursday_core.bus import InProcessEventBus
 from thursday_core.composer import ResponseComposer
@@ -129,6 +131,8 @@ class Container:
     stt: Any = None
     tts: Any = None
     wake_word: Any = None
+    audio_router: Any = None
+    voice: Any = None
 
     # conversation
     world: Any = None
@@ -328,6 +332,7 @@ def build_container(settings: Settings | None = None, *, configure_logs: bool = 
 
     # -- voice ----------------------------------------------------------------
     c.stt, c.tts, c.wake_word = _build_voice(settings)
+    c.audio_router = AudioRouter(follow_me=settings.voice_follow_me)
 
     # -- conversation ---------------------------------------------------------
     c.world = WorldState()
@@ -366,6 +371,18 @@ def build_container(settings: Settings | None = None, *, configure_logs: bool = 
     from thursday_core.engine import ThursdayCore
 
     c.engine = ThursdayCore(c)
+
+    # The voice loop last: it needs the engine to hand transcripts to (V4).
+    c.voice = VoiceService(
+        engine=c.engine,
+        stt=c.stt,
+        tts=c.tts,
+        wake_word=c.wake_word,
+        router=c.audio_router,
+        bus=c.bus,
+        voice=settings.voice_name,
+        require_wake_word=settings.require_wake_word,
+    )
     _register_undo_executors(c)
 
     c.permissions.set_autonomy(settings.autonomy)
@@ -419,8 +436,15 @@ def _playwright_available() -> bool:
 
 
 def _build_voice(settings: Settings) -> tuple[Any, Any, Any]:
-    """Wake word, STT and TTS. The stubs are text-driven, so the whole voice path — wake,
-    transcription, mode selection, routing — is exercisable in CI with no microphone."""
+    """Wake word, STT and TTS, each behind a fallback chain (V4).
+
+    The chain is what makes "cloud primary, local fallback" real rather than aspirational:
+    a provider that fails is stepped over inside the same utterance, so a dropped
+    connection costs latency instead of costing the turn. The stubs are text-driven, so the
+    whole path — wake, VAD, transcription, mode selection, routing — stays exercisable in
+    CI with no microphone and no model files.
+    """
+    from thursday_voice.fallback import STTChain, TTSChain
     from thursday_voice.providers import (
         KeywordWakeWord,
         PiperTTS,
@@ -429,12 +453,23 @@ def _build_voice(settings: Settings) -> tuple[Any, Any, Any]:
         WhisperSTT,
     )
 
-    stt: Any = WhisperSTT() if settings.stt_backend == "whisper" else TextStubSTT()
-    tts: Any = (
-        PiperTTS(model_path=str(settings.data_dir / "piper.onnx"))
-        if settings.tts_backend == "piper"
-        else TextStubTTS()
-    )
+    # Ordered best-first. The stub is always last so there is always *something* that
+    # answers: an assistant that goes mute when a model file is missing is worse than one
+    # that degrades to a plain voice.
+    stt_providers: list[Any] = []
+    if settings.stt_backend == "whisper":
+        stt_providers.append(WhisperSTT())
+    stt_providers.append(TextStubSTT())
+
+    tts_providers: list[Any] = []
+    if settings.tts_backend == "piper":
+        tts_providers.append(PiperTTS(model_path=str(settings.data_dir / "piper.onnx")))
+    tts_providers.append(TextStubTTS())
+
+    # Audio is HIGHLY_PRIVATE by default (§34), so the chain refuses to fall back onto a
+    # provider that would send it off the machine.
+    stt = STTChain(stt_providers, local_only=settings.voice_local_only)
+    tts = TTSChain(tts_providers, local_only=settings.voice_local_only)
     return stt, tts, KeywordWakeWord(settings.wake_word)
 
 

@@ -23,3 +23,5 @@ done this way?" and have no answer.
 | [0013](0013-device-token-bootstrap-auth.md) | Signed HELLO, actually verified | An impostor node could report success it never achieved |
 | [0014](0014-device-node-separation.md) | The core touches no OS | Confinement lives where the machine is, not where the model is |
 | [0015](0015-outbound-websocket-transport.md) | Node dials out; diagnostics are separate | A personal laptop cannot accept inbound connections |
+| [0016](0016-voice-state-machine.md) | The voice loop is a state machine | A boolean cannot express barge-in, so barge-in did not work |
+| [0017](0017-voice-provider-fallback.md) | Speech providers are an ordered chain | The network fails mid-utterance, not at startup |

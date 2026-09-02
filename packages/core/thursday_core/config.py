@@ -179,6 +179,14 @@ class Settings(BaseSettings):
     stt_backend: str = "stub"  # stub | whisper
     tts_backend: str = "stub"  # stub | piper
     voice_name: str = "thursday-neutral"
+    #: Refuse to send audio to a non-local provider, whatever the chain says (§34).
+    voice_local_only: bool = True
+    #: §46 — let spoken output follow the owner between devices. Off by default: audio
+    #: moving on its own is a surprise, and a surprise in a room with other people in it
+    #: is the kind that ends with the feature turned off.
+    voice_follow_me: bool = False
+    #: Nothing is transcribed until the name is heard (T9). Disabled only for push-to-talk.
+    require_wake_word: bool = True
     voice_always_ready: bool = False
     voice_barge_in: bool = True
 

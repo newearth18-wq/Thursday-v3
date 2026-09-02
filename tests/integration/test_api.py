@@ -318,3 +318,38 @@ async def test_the_autonomy_value_this_api_prints_is_one_it_accepts(client):
     nonsense = await client.post("/api/v1/autonomy", params={"autonomy": "TOTAL"})
     assert nonsense.status_code == 400
     assert "SUGGEST_ONLY" in nonsense.json()["detail"]
+
+
+# ------------------------------------------------------------------ voice (V4)
+
+
+async def test_the_voice_state_is_readable(client):
+    body = (await client.get("/api/v1/voice")).json()
+    assert body["state"] == "IDLE"
+    # The indicator a UI draws from. False at rest, or it is lying about the microphone.
+    assert body["listening"] is False
+    assert body["speaking"] is False
+
+
+async def test_interrupting_when_silent_is_harmless(client):
+    body = (await client.post("/api/v1/voice/interrupt")).json()
+    assert body["interrupted"] is False
+
+
+async def test_the_output_device_can_be_chosen_and_an_unknown_one_refused(client, container):
+    from thursday_voice.ports import AudioDevice
+
+    container.audio_router.register(
+        AudioDevice(id="buds", name="Earbuds", kind="speaker", transport="bluetooth")
+    )
+    body = (await client.post("/api/v1/voice/output", params={"device_id": "buds"})).json()
+    assert body["preferred_output_id"] == "buds"
+
+    missing = await client.post("/api/v1/voice/output", params={"device_id": "nope"})
+    assert missing.status_code == 404
+
+
+async def test_follow_me_is_off_until_it_is_turned_on(client):
+    assert (await client.get("/api/v1/voice")).json()["audio"]["follow_me"] is False
+    body = (await client.post("/api/v1/voice/output", params={"follow_me": True})).json()
+    assert body["follow_me"] is True

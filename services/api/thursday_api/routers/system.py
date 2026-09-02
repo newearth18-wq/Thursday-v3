@@ -239,3 +239,48 @@ async def emergency_stop(
 async def release_lockdown(c: Container = Depends(get_container)) -> dict:
     c.permissions.set_lockdown(False)
     return {"lockdown": False}
+
+
+# ------------------------------------------------------------------ voice (V4)
+
+
+@router.get("/voice")
+async def voice_state(c: Container = Depends(get_container)) -> dict:
+    """What the voice loop is doing, and where it would speak.
+
+    ``listening`` is the one a UI must trust: it is true exactly when the microphone is
+    capturing, so the recording indicator drawn from it is never wrong.
+    """
+    return c.voice.snapshot()
+
+
+@router.post("/voice/interrupt")
+async def voice_interrupt(c: Container = Depends(get_container)) -> dict:
+    """ "Thursday หยุด", as an endpoint.
+
+    Plain and model-free on purpose (§69): the reason to reach for this is often that
+    reasoning is what went wrong.
+    """
+    cut = await c.voice.interrupt(reason="interrupt requested")
+    return {
+        "interrupted": cut is not None,
+        "spoken": cut.partial if cut else "",
+        "unspoken": cut.unspoken if cut else "",
+    }
+
+
+@router.post("/voice/output")
+async def voice_output(
+    device_id: str | None = None,
+    follow_me: bool | None = None,
+    c: Container = Depends(get_container),
+) -> dict:
+    """Choose where Thursday speaks, or let output follow the owner between devices."""
+    if follow_me is not None:
+        c.audio_router.follow_me = follow_me
+    if device_id is not None:
+        try:
+            c.audio_router.prefer(device_id or None)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return c.audio_router.snapshot()
