@@ -77,6 +77,7 @@ from thursday_core.execution import ToolExecutor
 from thursday_core.focus import DeviceFocus
 from thursday_core.goals import GoalManager, PriorityQueue
 from thursday_core.logging import configure_logging, get_logger
+from thursday_core.metrics import MetricsCollector, build_registry
 from thursday_core.model_router import ModelRouter
 from thursday_core.orchestrator import AgentOrchestrator
 from thursday_core.planner import Planner
@@ -138,6 +139,7 @@ class Container:
     costs: Any = None
     backups: Any = None
     updates: Any = None
+    metrics: Any = None
 
     # devices
     hub: Any = None
@@ -320,7 +322,8 @@ def build_container(settings: Settings | None = None, *, configure_logs: bool = 
     c.policy = PolicyTable()
     c.zones = PrivacyZoneRegistry()
     c.classifier = PrivacyClassifier(c.redactor)
-    c.permissions = PermissionEngine(policy=c.policy, zones=c.zones)
+    c.metrics = build_registry()
+    c.permissions = PermissionEngine(policy=c.policy, zones=c.zones, metrics=c.metrics)
     c.approvals = ApprovalService(c.permissions, c.bus, default_ttl_s=settings.approval_ttl_seconds)
     c.undo = UndoRegistry()
 
@@ -345,7 +348,7 @@ def build_container(settings: Settings | None = None, *, configure_logs: bool = 
         daily_usd=settings.daily_cost_cap_usd,
         monthly_usd=settings.monthly_cost_cap_usd,
     )
-    c.models = _build_models(settings, c.vault, c.costs, c.redactor)
+    c.models = _build_models(settings, c.vault, c.costs, c.redactor, c.metrics)
 
     # -- devices --------------------------------------------------------------
     c.remote_gate = RemoteCommandGate()
@@ -500,6 +503,25 @@ def build_container(settings: Settings | None = None, *, configure_logs: bool = 
 
     c.updates = _build_updates(settings, c.backups)
 
+    # Metrics last: the gauges read from services above, and the collector subscribes to the
+    # bus rather than each of them having to remember to report (Sprint 49).
+    MetricsCollector(c.metrics).attach(c.bus)
+    c.metrics.register_gauge_source(
+        "thursday_devices_online",
+        help="Devices currently connected.",
+        read=lambda: len(c.hub.online()),
+    )
+    c.metrics.register_gauge_source(
+        "thursday_spend_today_usd",
+        help="What has been spent today, against the daily cap.",
+        read=lambda: c.costs.spent_today(),
+    )
+    c.metrics.register_gauge_source(
+        "thursday_approvals_pending",
+        help="Approvals waiting on the owner. A number that only goes up is a stuck system.",
+        read=lambda: len(c.approvals.pending()),
+    )
+
     # Registered here rather than beside the others because they hold references to
     # services built further down the file. An agent that needs a collaborator takes it in
     # its constructor rather than reaching for the container: the collaborator is then
@@ -626,9 +648,15 @@ def _build_embedder(settings: Settings) -> Any:
 
 
 def _build_models(
-    settings: Settings, vault: Any, meter: CostMeter | None = None, redactor: Any = None
+    settings: Settings,
+    vault: Any,
+    meter: CostMeter | None = None,
+    redactor: Any = None,
+    metrics: Any = None,
 ) -> ModelRouter:
-    router = ModelRouter(allow_cloud=settings.allow_cloud, meter=meter, redactor=redactor)
+    router = ModelRouter(
+        allow_cloud=settings.allow_cloud, meter=meter, redactor=redactor, metrics=metrics
+    )
     local = RuleBasedLLM()
 
     if settings.llm_backend == "ollama":

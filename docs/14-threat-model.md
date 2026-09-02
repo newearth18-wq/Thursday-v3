@@ -113,6 +113,14 @@ the backup fails.
 This build verifies updates and cannot install one — no installer is wired, and `apply` says
 so rather than reporting success. The HTTPS adapter has not been run against a real server.
 
+### Metrics (Sprint 49 · ADR 0034)
+
+`GET /api/v1/metrics` publishes Prometheus text. A metric label is an egress path that no
+classifier sees — scraped by a system with none of Thursday's controls, retained longer, read
+by whoever runs the dashboard — so label values are declared in advance and anything else
+collapses to `other`. Only outcomes are labelled: decisions, verdicts, agent and action names,
+redaction pattern names. Never a path, a resource or anything the owner typed.
+
 ## 14.4 Controls always on
 
 Least privilege · explicit permission · encryption at rest (DB + vault) and in transit ·

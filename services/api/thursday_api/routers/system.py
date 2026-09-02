@@ -6,6 +6,7 @@ from enum import IntEnum
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import PlainTextResponse
 from thursday_core.backup import BackupError
 from thursday_core.container import Container
 from thursday_security.policy import HARD_BLOCKED
@@ -583,3 +584,18 @@ async def apply_update(c: Container = Depends(get_container)) -> dict:
         status_code=501,
         detail="this build verifies updates but has no installer wired up",
     )
+
+
+# ------------------------------------------------------------------ metrics (§128, Sprint 49)
+
+
+@router.get("/metrics", response_class=PlainTextResponse)
+async def metrics(c: Container = Depends(get_container)) -> str:
+    """Prometheus exposition. Numbers only, and deliberately dull ones.
+
+    No label here carries a path, a resource, a filename or anything the owner typed. A
+    monitoring system has none of Thursday's privacy controls, keeps data far longer than
+    Thursday does, and is read by whoever runs the dashboard — so what leaves through this
+    endpoint is bounded at the point the metric is declared, not filtered here.
+    """
+    return c.metrics.render()

@@ -82,6 +82,8 @@ class ModelRouter:
     #: The last stop before a prompt leaves for a provider (§90). Also optional, and also
     #: always wired — a router without one is a test's router, not a deployment's.
     redactor: Any = None
+    #: Counts what the two above do. Pattern names and fallback reasons only, both bounded.
+    metrics: Any = None
     _breaker: dict[str, int] = field(default_factory=dict)
     _tripped_at: dict[str, datetime] = field(default_factory=dict)
 
@@ -205,6 +207,8 @@ class ModelRouter:
             local = self.providers.get(ModelTier.LOCAL)
             if local is None or local is provider:
                 raise
+            if self.metrics is not None:
+                self.metrics.inc("thursday_model_fallbacks_total", reason="provider_failed")
             response = await local.complete(request)  # type: ignore[attr-defined]
             degraded = RouteDecision(
                 tier=ModelTier.LOCAL,
@@ -243,6 +247,8 @@ class ModelRouter:
                 cap=verdict.cap,
             )
         log.warning("model_cost_capped", period=verdict.period, spent=round(verdict.spent, 2))
+        if self.metrics is not None:
+            self.metrics.inc("thursday_model_fallbacks_total", reason="cost_cap")
         return RouteDecision(
             tier=ModelTier.LOCAL,
             provider_name=getattr(local, "name", "?"),
@@ -277,6 +283,9 @@ class ModelRouter:
             return request
 
         log.warning("prompt_redacted", provider=provider, patterns=sorted(hits))
+        if self.metrics is not None:
+            for pattern in hits:
+                self.metrics.inc("thursday_prompt_redactions_total", pattern=pattern)
         return request.model_copy(update={"messages": messages})
 
     def _meter(

@@ -15,6 +15,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 from fnmatch import fnmatch
+from typing import Any
 from uuid import UUID
 
 from thursday_shared.enums import (
@@ -61,10 +62,15 @@ class PermissionEngine:
         policy: PolicyTable | None = None,
         zones: PrivacyZoneRegistry | None = None,
         autonomy: AutonomyLevel = AutonomyLevel.MODERATE,
+        metrics: Any = None,
     ) -> None:
         self.policy = policy or PolicyTable()
         self.zones = zones or PrivacyZoneRegistry()
         self.autonomy = autonomy
+        #: Counts decisions, and only decisions. The action's *resource* is never a label —
+        #: a metric carrying the owner's file paths is a leak into a monitoring system that
+        #: has none of this engine's privacy controls (Sprint 49).
+        self._metrics = metrics
         self._grants: list[PermissionGrant] = []
         self._lockdown = False
 
@@ -116,6 +122,30 @@ class PermissionEngine:
     # ------------------------------------------------------------------ the decision
 
     def decide(
+        self,
+        req: ActionRequest,
+        *,
+        permissions: PermissionSet | None = None,
+        location: str | None = None,
+        mode: str | None = None,
+    ) -> PermissionVerdict:
+        """Decide, and count the decision.
+
+        A thin wrapper around `_decide` so the counting happens once. `_decide` has eighteen
+        return paths, and instrumenting each of them is how one gets missed — which is the
+        same mistake Sprint 45 found in cost accounting and Sprint 46 found in redaction.
+        """
+        verdict = self._decide(req, permissions=permissions, location=location, mode=mode)
+        if self._metrics is not None:
+            # The decision only. Not the action, not the resource: a metric carrying "the
+            # owner was asked about ~/tax/2026-divorce.pdf" is a leak, and it is one that
+            # looks like ordinary engineering.
+            self._metrics.inc(
+                "thursday_permission_decisions_total", decision=verdict.decision.value
+            )
+        return verdict
+
+    def _decide(
         self,
         req: ActionRequest,
         *,
