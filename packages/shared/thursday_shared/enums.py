@@ -300,6 +300,9 @@ class IntentKind(StrEnum):
     #: "forget X" and "don't remember this". Explicit memory commands outrank the write
     #: policy: the owner asking is the strongest signal there is (§7).
     MEMORY_FORGET = "MEMORY_FORGET"
+    #: "do the thing you already know how to do". Control-adjacent: it does not describe
+    #: work, it names work that already exists as a learned skill (§53, V9).
+    SKILL_RUN = "SKILL_RUN"
     STATUS = "STATUS"
     STOP = "STOP"
     APPROVE = "APPROVE"

@@ -120,6 +120,33 @@ _ANALYZE = re.compile(
     r"(?i)(analy[sz]e|วิเคราะห์|summari[sz]e|สรุป|report on|ทำรายงาน|เปรียบเทียบ|compare)"
 )
 _SEARCH = re.compile(r"(?i)(search|ค้นหา|หาข้อมูล|look up|research|ค้นคว้า|google)")
+# "the one from before". Does not identify *which* skill — that is `find_skill`'s job — but
+# says the owner believes one exists, which is what turns a request into a skill lookup
+# rather than a fresh plan (§53, V9).
+_LIKE_BEFORE = re.compile(
+    r"(?i)(แบบที่เคยทำ|แบบเคย|แบบเดิม|อย่างที่เคย|เหมือนเดิม|เหมือนที่เคยทำ|ตามที่เคยทำ|ที่เคยทำ|"
+    r"like last time|like before|same as last time|as usual|"
+    # "the usual" only when nothing follows it. "do the usual" is a skill request;
+    # "in the usual place" is a location, and treating it as one would hijack the
+    # sentence — which it did, until a file-search test caught it.
+    r"the usual\b(?!\s+\w))"
+)
+
+
+def without_like_before(text: str) -> str:
+    """The same sentence with "like last time" removed.
+
+    "ทำรายงานคะแนนแบบเดิม" is two claims: *make a grade report*, and *the way you already
+    do it*. When a learned skill exists the second claim names it. When none does, the
+    second claim still means something — it is the owner pointing at a remembered
+    instruction (§7, V5) — and the first claim is a perfectly ordinary request. Stripping
+    the marker recovers it.
+    """
+    # `_strip_particles`, not `str.strip("ครับค่ะ")`: `strip` removes *characters*, so a
+    # word ending in ร or บ would silently lose its last letter.
+    return _strip_particles(_LIKE_BEFORE.sub("", text))
+
+
 _STATUS = re.compile(r"(?i)(status|สถานะ|ไปถึงไหน|progress|คืบหน้า|what.*(working on|กำลังทำ)|pending)")
 # "How did that go?" asked after the fact, very often from a different device than the one
 # that did the work (V8 conversation handoff). Distinct from _STATUS, which asks what is
@@ -343,6 +370,19 @@ def parse(text: str, *, wake_word: str = "thursday") -> RuleMatch | None:
                 target_device=device,
                 confidence=0.85,
                 rationale="device status question",
+            )
+        )
+    if _LIKE_BEFORE.search(body):
+        # Ahead of everything that would build a fresh plan. "ทำรายงานคะแนนแบบที่เคยทำ"
+        # otherwise reads as a research question and comes back "I found nothing" while the
+        # skill that does exactly this sits in the registry.
+        return RuleMatch(
+            Intent(
+                kind=IntentKind.SKILL_RUN,
+                objective=body,
+                entities={"utterance": body},
+                confidence=0.88,
+                rationale="a request to repeat something already learned",
             )
         )
     if _LAST_RESULT.search(body):

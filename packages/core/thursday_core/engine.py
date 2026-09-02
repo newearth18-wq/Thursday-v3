@@ -210,8 +210,16 @@ class ThursdayCore:
         if intent.kind is IntentKind.STATUS and intent.entities.get("subject") == "last_task":
             return self._finish(session_id, self._last_task_reply(intent, context, language))
 
-        # 6. Plan.
-        plan = self.c.planner.plan(intent, context)
+        # 6. Plan. A skill run is the one intent whose plan does not come from the planner:
+        #    the steps were learned, not derived. Everything after this point is identical,
+        #    which is the point — a skill becomes an ordinary task the moment it has a plan.
+        if intent.kind is IntentKind.SKILL_RUN:
+            resolved = self._plan_from_skill(intent, context, language)
+            if isinstance(resolved, ThursdayReply):
+                return self._finish(session_id, resolved)
+            plan = resolved
+        else:
+            plan = self.c.planner.plan(intent, context)
 
         if not plan.steps:
             reply = await self._answer_directly(intent, context, language)
@@ -396,6 +404,62 @@ class ThursdayCore:
         if telemetry and telemetry.active_window:
             bits.append(f"active window: {telemetry.active_window}")
         return self.c.composer.answer(" · ".join(bits), language=language, confidence=0.95)
+
+    def _plan_from_skill(self, intent, context: ContextPackage, language: str):
+        """Find the skill the owner meant and turn it into a plan.
+
+        "แบบเดิม" carries two claims — *do this thing*, and *the way you already do it* —
+        and which one matters depends on what Thursday actually knows:
+
+        * **A learned skill matches.** The second claim names it; run it.
+        * **Two skills match equally.** The sentence does not identify one of them, so ask.
+          Running the wrong workflow is worse than asking: its steps have already happened
+          by the time anybody notices.
+        * **No skill matches.** The second claim is not about a skill at all — it is the
+          owner pointing at a remembered instruction ("these reports start with a summary
+          table", §7). So the marker is stripped and the sentence planned as the ordinary
+          request it also is, with that instruction applied. Announcing a missing skill here
+          would be answering a question the owner did not ask, while ignoring the one
+          they did.
+        """
+        from thursday_automation.skills.matching import find_skill
+        from thursday_automation.skills.planning import SkillNotRunnable, plan_from_skill
+
+        from thursday_core import intent_rules
+
+        utterance = str(intent.entities.get("utterance") or intent.objective)
+        match = find_skill(utterance, self.c.skills.active())
+
+        # Nothing active matched. Before falling through, check whether a skill exists that
+        # the owner has not approved yet: quietly planning something else in its place would
+        # do work they did not ask for while looking like it did what they wanted. A skill
+        # held back by its own lifecycle is a fact worth saying out loud (§52).
+        if match is None:
+            pending = find_skill(utterance, self.c.skills.list())
+            if pending is not None and pending.confident:
+                match = pending
+
+        if match is not None and not match.confident:
+            return self.c.composer.clarify(match.question(), language=language)
+        if match is not None:
+            try:
+                return plan_from_skill(match.skill)
+            except SkillNotRunnable as exc:
+                return self.c.composer.blocked(reason=exc.args[0], language=language)
+
+        plain = intent_rules.without_like_before(utterance)
+        if plain and (fallback := intent_rules.parse(plain)) is not None:
+            plan = self.c.planner.plan(fallback.intent, context)
+            if plan.steps:
+                return plan
+
+        text = (
+            "ผมยังไม่มีสกิลที่เคยทำแบบนี้ครับ — บอกขั้นตอนมาได้เลย แล้วผมจะจำไว้เป็นสกิล"
+            if language == "th"
+            else "I have no learned skill for that yet. Walk me through it once and I "
+            "will capture it as one."
+        )
+        return self.c.composer.answer(text, language=language, confidence=0.9)
 
     def _last_task_reply(self, intent, context: ContextPackage, language: str) -> ThursdayReply:
         """ "ผลเมื่อกี้เป็นยังไง" — asked, as often as not, from a different machine (V8).

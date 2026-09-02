@@ -15,6 +15,8 @@ from typing import Any
 
 from thursday_agents.browser import BrowserAgent, register_browser_tools
 from thursday_agents.computer import ComputerAgent
+from thursday_agents.data import DataAgent
+from thursday_agents.document import DocumentAgent
 from thursday_agents.factory import AgentFactory
 from thursday_agents.registry import AgentRegistry
 from thursday_agents.research import ResearchAgent
@@ -339,11 +341,13 @@ def build_container(settings: Settings | None = None, *, configure_logs: bool = 
     c.agents.register(ComputerAgent())
     c.agents.register(ResearchAgent())
     c.agents.register(BrowserAgent())
+    c.agents.register(DataAgent())
+    c.agents.register(DocumentAgent())
     c.agent_factory = AgentFactory(c.agents)
     c.supervisor = Supervisor(c.models, use_llm_critique=not settings.offline)
 
     # -- automation, skills, perception ---------------------------------------
-    c.skills = SkillRegistry(executor=c.executor, tools=c.tools)
+    c.skills = SkillRegistry(executor=c.executor, tools=c.tools, agents=c.agents)
     # After skills, because a project's picture includes what Thursday can already do
     # for it (PART 44).
     c.projects = ProjectManager(tasks=c.tasks, memory=c.memory, skills=c.skills)

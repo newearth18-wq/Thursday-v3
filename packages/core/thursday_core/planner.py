@@ -197,7 +197,13 @@ class Planner:
             objective=f"write the report for: {intent.objective}",
             args={},
             depends_on=[analyse.id],
-            success_criteria=["output.document is not empty", "claims name their source"],
+            success_criteria=[
+                "output.document is not empty",
+                # "Not empty" is satisfied by any string, including a model's apology for
+                # being offline. This is the criterion that means the report is a report.
+                "output.grounded is true",
+                "claims name their source",
+            ],
         )
         return Plan(
             objective=intent.objective,

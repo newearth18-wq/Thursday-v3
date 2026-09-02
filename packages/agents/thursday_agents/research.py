@@ -32,6 +32,7 @@ class ResearchAgent(BaseAgent):
         agent_type="research",
         supported_input=["text", "question"],
         supported_output=["text", "citations"],
+        output_schema={"answer": "string?", "findings": "list", "sources": "list"},
         permission_ceiling=PermissionLevel.READ,
         default_budget=Budget(seconds=90, tool_calls=6, usd=0.05),
         model_tier=ModelTier.STANDARD,

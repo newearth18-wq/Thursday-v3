@@ -32,3 +32,5 @@ done this way?" and have no answer.
 | [0022](0022-a-gesture-is-not-a-signature.md) | A gesture is not a signature | It is inferred, not performed — so it may never confirm anything consequential |
 | [0023](0023-the-conversation-knows-which-machine.md) | The conversation knows which machine, and says so | A command that succeeds on the wrong machine is reported as success |
 | [0024](0024-a-command-that-crosses-machines.md) | A command that crosses machines is a different command | Distance removes the owner's ability to notice and intervene |
+| [0025](0025-a-figure-in-a-report-was-computed.md) | Every figure in a report was computed | A plausible wrong number survives every check except the one nobody ran |
+| [0026](0026-a-learned-skill-is-code-nobody-reviewed.md) | A learned skill is code nobody reviewed | Running it must not become a way around the rules everything else obeys |

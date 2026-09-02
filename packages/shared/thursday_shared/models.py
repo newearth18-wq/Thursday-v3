@@ -663,6 +663,14 @@ class JobContract(Base):
     objective: str
     instructions: str = ""
     inputs: dict[str, Any] = Field(default_factory=dict)
+    #: What the steps this one depends on produced, keyed by step name (§16, V9).
+    #:
+    #: Without this a plan is a sequence, not a DAG: "gather → analyse → report" would run
+    #: in the right order and the analyse step would never see the gathered data. Passed as
+    #: a separate field rather than merged into ``inputs`` so an agent can always tell what
+    #: the planner asked for apart from what another agent handed it — the second is a
+    #: result, and results are wrong sometimes.
+    upstream: dict[str, dict[str, Any]] = Field(default_factory=dict)
     context: dict[str, Any] = Field(default_factory=dict)
     allowed_tools: list[str] = Field(default_factory=list)
     output_schema: dict[str, Any] = Field(default_factory=dict)
@@ -698,6 +706,12 @@ class AgentSpec(Base):
     latency_profile: Literal["instant", "fast", "moderate", "slow"] = "fast"
     #: LOCAL_ONLY means this agent must never see cloud-routed content.
     privacy_profile: Literal["local_only", "local_preferred", "any"] = "any"
+    #: The fields this agent's ``output`` always carries, as ``{name: type}``. Checked by
+    #: the Supervisor. Declared by the agent rather than inferred by the planner, because
+    #: the planner is guessing at what a step will produce and the agent knows — a guess
+    #: that is wrong fails the work for a schema nobody promised (§18, V9). A ``?`` suffix
+    #: marks a field that may legitimately be absent.
+    output_schema: dict[str, str] = Field(default_factory=dict)
     temporary: bool = False
     system_prompt: str = ""
 

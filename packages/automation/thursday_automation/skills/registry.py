@@ -32,10 +32,19 @@ class SandboxResult:
 
 
 class SkillRegistry:
-    def __init__(self, *, executor: object | None = None, tools: object | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        executor: object | None = None,
+        tools: object | None = None,
+        agents: object | None = None,
+    ) -> None:
         self._skills: dict[UUID, Skill] = {}
         self._executor = executor
         self._tools = tools
+        #: Checked during the sandbox pass, so a skill delegating to an agent that does not
+        #: exist fails review rather than failing halfway through a run against real data.
+        self._agents = agents
 
     # ------------------------------------------------------------------ capture
 
@@ -59,7 +68,7 @@ class SkillRegistry:
         )
         version = SkillVersion(
             steps=steps,
-            tools=sorted({s.tool for s in steps}),
+            tools=sorted({s.tool for s in steps if s.tool}),
             permissions=permissions or PermissionSet(),
             tests=tests or [],
             changelog="captured from demonstration",
@@ -68,6 +77,33 @@ class SkillRegistry:
         skill.current_version = version.version
         self._skills[skill.id] = skill
         log.info("skill_captured", name=name, steps=len(steps), risk=str(version.risk))
+        return skill
+
+    def compose(
+        self,
+        *,
+        name: str,
+        description: str,
+        skill_ids: list[UUID],
+    ) -> Skill:
+        """Chain several active skills into one new **draft** (§53).
+
+        A draft, never an active skill, however trustworthy its parts are. Composition
+        rearranges authority — three workflows the owner approved separately are not the
+        same thing as one workflow that does all three in sequence, and the second is what
+        they would be agreeing to. So the result re-enters the lifecycle at the beginning
+        and is tested and approved on its own terms.
+        """
+        from thursday_automation.skills.planning import compose as compose_steps
+
+        parts = [self._require(skill_id) for skill_id in skill_ids]
+        steps, sources = compose_steps(name, description, parts)
+        skill = self.capture(name=name, description=description, steps=steps)
+        skill.tags = sorted({tag for part in parts for tag in part.tags} | {"composed"})
+        version = skill.latest
+        if version is not None:
+            version.changelog = "composed from " + ", ".join(sources)
+        log.info("skill_composed", name=name, parts=len(parts), steps=len(steps))
         return skill
 
     def add_version(self, skill_id: UUID, version: SkillVersion) -> SkillVersion:
@@ -95,6 +131,11 @@ class SkillRegistry:
             for tool in target.tools:
                 if not self._tools.has(canonical(tool)):  # type: ignore[attr-defined]
                     failures.append(f"tool {tool!r} is not registered")
+        for step in target.steps:
+            if (
+                step.is_agent_step and self._agents is not None and not self._agents.has(step.agent)  # type: ignore[attr-defined]
+            ):
+                failures.append(f"step {step.seq} delegates to unknown agent {step.agent!r}")
         if not target.steps:
             failures.append("the skill has no steps")
         for step in target.steps:

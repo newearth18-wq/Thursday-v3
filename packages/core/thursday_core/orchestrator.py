@@ -122,7 +122,17 @@ class AgentOrchestrator:
                 break
             # Independent steps run together; dependent ones wait for the frontier to clear.
             results = await asyncio.gather(
-                *(self._run_step(task, step, context, wait_for_approval) for step in ready),
+                *(
+                    self._run_step(
+                        task,
+                        step,
+                        context,
+                        wait_for_approval,
+                        upstream=self._upstream(plan.steps, step),
+                        plan_objective=plan.objective,
+                    )
+                    for step in ready
+                ),
                 return_exceptions=True,
             )
             for step, step_outcome in zip(ready, results, strict=True):
@@ -152,8 +162,31 @@ class AgentOrchestrator:
 
     # ------------------------------------------------------------------ one step
 
+    @staticmethod
+    def _upstream(plan_steps: list[PlanStep], step: PlanStep) -> dict[str, dict]:
+        """What this step's dependencies produced, keyed by their names.
+
+        Keyed by name rather than by id because the agent reading it is looking for "the
+        analysis" or "the file", not for a UUID it has never seen. Two steps sharing a name
+        would collide; the planner does not produce those, and if it ever does, the later
+        one winning is the same rule a dict has anywhere else.
+        """
+        by_id = {s.id: s for s in plan_steps}
+        return {
+            by_id[dep].name: by_id[dep].output
+            for dep in step.depends_on
+            if dep in by_id and by_id[dep].output
+        }
+
     async def _run_step(
-        self, task: Task, step: PlanStep, context: ContextPackage, wait_for_approval: bool
+        self,
+        task: Task,
+        step: PlanStep,
+        context: ContextPackage,
+        wait_for_approval: bool,
+        *,
+        upstream: dict[str, dict] | None = None,
+        plan_objective: str = "",
     ) -> StepOutcome:
         if step.kind is not StepKind.AGENT:
             raise ThursdayError(f"step kind {step.kind} is not executable yet", step=step.name)
@@ -173,7 +206,12 @@ class AgentOrchestrator:
                 agent=agent.spec.name,  # type: ignore[attr-defined]
                 objective=step.objective,
                 inputs=step.args,
-                output_schema=_schema_for(step),
+                upstream=upstream or {},
+                # What this step is part of. A step objective describes one step — "document:
+                # as demonstrated" — and an agent producing an artefact for a person needs
+                # the name of the whole job, not the name of its own slot in it.
+                context={"task": task.title, "plan": plan_objective},
+                output_schema=_schema_for(step, agent),
                 success_criteria=step.success_criteria,
                 permissions=permissions,
                 deadline_s=min(task.budget.seconds or 120.0, 120.0),
@@ -360,7 +398,20 @@ def _capabilities_for(step: PlanStep) -> list[str]:
     return ["os"]
 
 
-def _schema_for(step: PlanStep) -> dict[str, str]:
+def _schema_for(step: PlanStep, agent: object | None = None) -> dict[str, str]:
+    """What this step's output must contain.
+
+    The agent's own declaration wins. The planner names a step and hopes an agent exists to
+    fill it; only the agent knows what it produces, and a schema inferred from the step's
+    arguments held the whole DAG hostage to that guess — a ``data`` step carrying a
+    ``question`` argument was checked against the *research* agent's schema and failed for
+    missing ``findings`` it never claimed to return.
+
+    The heuristic stays as the fallback, for agents that declare nothing.
+    """
+    declared = getattr(getattr(agent, "spec", None), "output_schema", None)
+    if declared:
+        return dict(declared)
     if step.args.get("action"):
         return {"action": "string", "verified": "bool"}
     if "question" in step.args:

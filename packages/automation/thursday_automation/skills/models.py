@@ -40,17 +40,43 @@ class SkillStatus(StrEnum):
 
 @dataclass
 class SkillStep:
+    """One step of a learned workflow: either a tool call or a job for an agent.
+
+    Both are things the owner demonstrated, and both belong in a captured skill — "read the
+    file" is a tool call, "work out the pass rate" is not. Keeping them in one field with
+    the kind inferred from the name was tried and is worse: an unregistered tool and an
+    agent job look identical, so a typo would validate as an agent step and a real agent
+    step would fail sandbox validation as a missing tool.
+    """
+
     seq: int
-    tool: str
+    #: The tool this step calls. Empty when ``agent`` is set.
+    tool: str = ""
+    #: The agent this step delegates to, for work no single tool does — analysis, writing.
+    #: Exactly one of ``tool`` and ``agent`` is set.
+    agent: str = ""
     args: dict[str, Any] = field(default_factory=dict)
     #: A plain-language rule for when to skip or branch, captured from the demonstration.
     condition: str | None = None
     on_error: str = "stop"  # stop | continue | ask
 
+    def __post_init__(self) -> None:
+        if bool(self.tool) == bool(self.agent):
+            raise ValueError("a skill step names exactly one of tool or agent")
+
+    @property
+    def is_agent_step(self) -> bool:
+        return bool(self.agent)
+
     @property
     def destructive(self) -> bool:
-        """Changes something with no way back."""
-        return is_destructive(self.tool)
+        """Changes something with no way back.
+
+        An agent step is judged by its permission ceiling rather than by a verb, and the
+        agents that exist for analysis and writing hold no write permission at all. A future
+        agent that does would be caught by `risky` below, through the same policy table.
+        """
+        return bool(self.tool) and is_destructive(self.tool)
 
     @property
     def risky(self) -> bool:
@@ -60,6 +86,11 @@ class SkillStep:
         quarantine folder and still not something a captured workflow should start doing
         on its own. So risk and permission level count too.
         """
+        if self.is_agent_step:
+            # Delegation itself is not risky; what the agent then *does* passes through the
+            # permission engine call by call, exactly as it would outside a skill. A skill
+            # cannot launder authority by wrapping an action in an agent (ADR 0011).
+            return False
         policy = _POLICY.get(canonical(self.tool))
         return (
             self.destructive

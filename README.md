@@ -16,7 +16,7 @@ USER → THURSDAY → Understand → Plan → Delegate → Act → Verify → Re
 ## Status
 
 **Phase 1 is implemented and runnable**: the vertical slice from
-[docs/15-vertical-slice.md](docs/15-vertical-slice.md) works end to end, with 578 tests that
+[docs/15-vertical-slice.md](docs/15-vertical-slice.md) works end to end, with 632 tests that
 need no database, no network and no model credentials.
 
 ```
@@ -201,6 +201,7 @@ each choice cost:
 | [Device protocol](docs/09-device-protocol.md) | [Events](docs/10-event-architecture.md) | [API](docs/11-api-spec.md) | [MVP scope](docs/12-mvp-scope.md) |
 | [Roadmap](docs/13-roadmap.md) | [Threat model](docs/14-threat-model.md) | [Vertical slice](docs/15-vertical-slice.md) | [Persona](docs/16-persona.md) |
 | [Voice](docs/17-voice.md) | [Vision](docs/18-vision.md) | [Gesture](docs/19-gestures.md) | [Multi-device](docs/20-multi-device.md) |
+| [Agents & skills](docs/21-agents-and-skills.md) | | | |
 
 ---
 
@@ -218,10 +219,16 @@ each choice cost:
   with "forget about X" and "don't remember this" as first-class commands
 - Obsidian vault that *refuses* credential material rather than redacting it, with
   durable knowledge mirrored into it automatically and passing detail left out
-- Agent orchestrator, capability-based selection, and a read-only Supervisor
+- Agent orchestrator running a real DAG — independent steps in parallel, each step's
+  output passed to its dependents — with capability-based selection and a read-only
+  Supervisor whose arithmetic checks now have figures to check
 - Dynamic agents with intersected permissions, depth and count caps, destroyed with the task
 - Automation engine, proactivity gate with rate limits, routine learning that **proposes**
-- Skills: capture → sandbox test → approval → activate → rollback, with risky steps gated
+- Skills: capture → sandbox test → approval → activate → rollback, with risky steps
+  gated; retrieved by what the owner *says* ("แบบที่เคยทำ"), turned into a plan, and
+  composable into new skills that re-enter the lifecycle as drafts
+- Data and document agents that compute every figure in Python and refuse to pass off a
+  report that does not contain the numbers it was written from
 - Vision: camera consent that is provable rather than promised, frame sampling that
   never lets a stream leave the machine, screen reading, "what is this?" resolution,
   and spatial memory that answers as a *sighting* with its age said out loud
@@ -276,7 +283,7 @@ the verification loop, the audit chain and the device round-trip are all real.
 
 ```bash
 ./scripts/check.sh           # everything CI runs: lint, format, types, tests, migrations
-pytest                       # 578 tests, no infrastructure
+pytest                       # 632 tests, no infrastructure
 ruff check . && ruff format .
 mypy packages services
 alembic upgrade head && alembic revision --autogenerate -m "what changed"
