@@ -15,8 +15,12 @@ USER → THURSDAY → Understand → Plan → Delegate → Act → Verify → Re
 
 ## Status
 
+**Release candidate for a single-owner deployment on a trusted network** — what is
+ready, what is not, and what closing each gap would take is in
+[docs/23-release-readiness.md](docs/23-release-readiness.md).
+
 **Phase 1 is implemented and runnable**: the vertical slice from
-[docs/15-vertical-slice.md](docs/15-vertical-slice.md) works end to end, with 969 tests that
+[docs/15-vertical-slice.md](docs/15-vertical-slice.md) works end to end, with 986 tests that
 need no database, no network and no model credentials.
 
 ```
@@ -195,8 +199,8 @@ The one path worth tracing: **nothing reaches a device without passing Authorize
 nothing completes without passing Verify.** Both are single choke points rather than
 conventions, so neither can be forgotten by a new caller.
 
-Full design in [`docs/`](docs/) — the twenty-three deliverables, written before the code,
-plus the [V2 review](docs/architecture/00-v2-review.md) and thirty-four
+Full design in [`docs/`](docs/) — the twenty-four deliverables, written before the code,
+plus the [V2 review](docs/architecture/00-v2-review.md) and thirty-five
 [architecture decisions](docs/architecture/decisions/) recording what was chosen and what
 each choice cost:
 
@@ -309,7 +313,7 @@ the verification loop, the audit chain and the device round-trip are all real.
 
 ```bash
 ./scripts/check.sh           # everything CI runs: lint, format, types, tests, migrations
-pytest                       # 969 tests, no infrastructure
+pytest                       # 986 tests, no infrastructure
 ruff check . && ruff format .
 mypy packages services
 alembic upgrade head && alembic revision --autogenerate -m "what changed"
@@ -330,7 +334,7 @@ packages/    shared · core · agents · tools · memory · devices · security
 services/    api · realtime · worker
 database/    migrations · seeds
 docker/      api and node images; docker-compose.yml at the root
-docs/        the twenty-three design deliverables + architecture/decisions (ADRs)
+docs/        the twenty-four design deliverables + architecture/decisions (ADRs)
 tests/       unit · integration · e2e
 scripts/     dev.sh · check.sh · check_no_secrets.py
 ```

@@ -47,6 +47,10 @@ class ComputerAgent(BaseAgent):
         agent_type="computer",
         supported_input=["text", "command"],
         supported_output=["text", "evidence"],
+        # Declared rather than left to the orchestrator's fallback heuristic. V9 added this
+        # field because guessing a schema from a step's arguments checked one agent's output
+        # against another's contract; two agents were still relying on the guess.
+        output_schema={"action": "string", "verified": "bool", "evidence": "dict"},
         permission_ceiling=PermissionLevel.MODIFY,
         default_budget=Budget(seconds=60, tool_calls=8, usd=0.02),
         model_tier=ModelTier.FAST,

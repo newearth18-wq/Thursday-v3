@@ -49,6 +49,14 @@ class BrowserAgent(BaseAgent):
         ],
         supported_input=["text", "url"],
         supported_output=["text", "screenshot"],
+        #: `page_text` is untrusted content by construction, and the schema says so alongside
+        #: the payload rather than leaving the caller to remember (ADR 0010).
+        output_schema={
+            "url": "string",
+            "title": "string?",
+            "page_text": "string",
+            "untrusted": "bool",
+        },
         permission_ceiling=PermissionLevel.MODIFY,
         default_budget=Budget(seconds=180, tool_calls=25, usd=0.05),
         model_tier=ModelTier.STANDARD,
