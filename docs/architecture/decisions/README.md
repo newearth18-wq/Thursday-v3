@@ -34,3 +34,5 @@ done this way?" and have no answer.
 | [0024](0024-a-command-that-crosses-machines.md) | A command that crosses machines is a different command | Distance removes the owner's ability to notice and intervene |
 | [0025](0025-a-figure-in-a-report-was-computed.md) | Every figure in a report was computed | A plausible wrong number survives every check except the one nobody ran |
 | [0026](0026-a-learned-skill-is-code-nobody-reviewed.md) | A learned skill is code nobody reviewed | Running it must not become a way around the rules everything else obeys |
+| [0027](0027-noticing-is-not-doing.md) | Noticing is not doing | Proactive must not become a system that does whatever it likes |
+| [0028](0028-one-correction-is-not-a-rule.md) | One correction is not a rule, and a repair is not a permission | Both let the system quietly change what it is |

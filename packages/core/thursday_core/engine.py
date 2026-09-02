@@ -176,6 +176,15 @@ class ThursdayCore:
 
         if intent.kind is IntentKind.STOP:
             return self._finish(session_id, await self._handle_stop(language))
+        if intent.kind in (IntentKind.APPROVE, IntentKind.DECLINE):
+            # Answering a question, which is a different act from giving an instruction and
+            # has to be resolved before anything tries to plan the word "yes".
+            return self._finish(
+                session_id,
+                await self._handle_answer(
+                    intent, session_id, language, yes=intent.kind is IntentKind.APPROVE
+                ),
+            )
         if intent.kind is IntentKind.VISION:
             return self._finish(session_id, await self._handle_vision(intent, language))
         if intent.kind is IntentKind.MEMORY_FORGET:
@@ -404,6 +413,116 @@ class ThursdayCore:
         if telemetry and telemetry.active_window:
             bits.append(f"active window: {telemetry.active_window}")
         return self.c.composer.answer(" · ".join(bits), language=language, confidence=0.95)
+
+    async def _handle_answer(
+        self, intent, session_id: UUID, language: str, *, yes: bool
+    ) -> ThursdayReply:
+        """ "ทำเลย" / "ไม่ต้อง" — the answer to whatever Thursday last asked.
+
+        Two different things can be outstanding and both are answered with the same word.
+        An **approval** gates work already under way and was asked *for*; an **offer** is a
+        suggestion nobody requested. When both are open the approval wins, because someone
+        answering has almost certainly just been interrupted by it — and because guessing
+        wrong on an approval means either blocking work the owner released or releasing work
+        they meant to leave alone, while guessing wrong on an offer means a suggestion is
+        re-asked later.
+        """
+        approvals = self.c.approvals.pending()
+        if approvals:
+            approval = approvals[0]
+            await self.c.approvals.decide(approval.id, approve=yes)
+            text = (
+                (f"อนุมัติแล้วครับ — {approval.action}" if yes else f"ยกเลิก {approval.action} แล้วครับ")
+                if language == "th"
+                else (f"Approved — {approval.action}." if yes else f"Left {approval.action} alone.")
+            )
+            return self.c.composer.answer(text, language=language, confidence=0.95)
+
+        offer = self.c.offers.accept() if yes else self.c.offers.decline()
+        if offer is None:
+            text = (
+                "ตอนนี้ผมยังไม่ได้ถามอะไรค้างไว้ครับ"
+                if language == "th"
+                else "There is nothing outstanding for me to act on."
+            )
+            return self.c.composer.answer(text, language=language, confidence=0.9)
+        if not yes:
+            # Declined offers are not re-raised immediately; the observation stays
+            # suppressed for its window, which is what stops "no" being asked again in a
+            # minute's time.
+            text = "ครับ ไม่ทำแล้วครับ" if language == "th" else "Understood — I will leave it."
+            return self.c.composer.answer(text, language=language, confidence=0.95)
+
+        return await self._act_on_offer(offer, session_id, language)
+
+    async def _act_on_offer(self, offer, session_id: UUID, language: str) -> ThursdayReply:
+        """Turn an accepted offer into ordinary work.
+
+        Ordinary is the point: the offer becomes a `UserRequest` and goes down the same
+        path as anything the owner typed — planner, permission engine, agents, Supervisor.
+        A proactive request that took a shortcut past any of those would be a second
+        execution path, and the one thing V10 must not introduce is a way for Thursday to
+        act on its own initiative *and* on its own terms.
+        """
+        plan = self.c.planner.plan_for_offer(offer.action)
+        if plan is None:
+            # No structured shape for this offer — it is an instruction, so it goes through
+            # the ordinary path exactly as if the owner had typed it.
+            reply = await self.handle_turn(
+                session_id=session_id,
+                text=str(offer.action.get("instruction") or offer.text),
+            )
+            reply.detail = (reply.detail or "") + f" (accepted: {offer.text})"
+            return reply
+
+        return await self._run_plan(
+            plan, session_id=session_id, language=language, source=offer.text
+        )
+
+    async def _run_plan(
+        self, plan, *, session_id: UUID, language: str, source: str
+    ) -> ThursdayReply:
+        """Run a plan Thursday built for itself, down the ordinary path.
+
+        The same task record, the same orchestrator, the same Supervisor, the same audit.
+        The only thing that differs is where the plan came from — and that is recorded on
+        the reply rather than being invisible, because "Thursday did this because it offered
+        and I said yes" is a different fact from "I asked for this" and the owner should be
+        able to tell them apart later.
+        """
+        context = await self.c.context_engine.build(
+            ConversationTurn(session_id=session_id, role="system", text=plan.objective),
+            budget=Budget(
+                usd=self.c.settings.default_task_budget_usd,
+                seconds=self.c.settings.default_task_budget_seconds,
+            ),
+            offline=self.c.settings.offline,
+        )
+        task = await self.c.tasks.create(
+            title=plan.objective[:80],
+            objective=plan.objective,
+            session_id=session_id,
+            budget=context.budget,
+        )
+        await self.c.tasks.transition(task.id, TaskState.PLANNING)
+
+        try:
+            outcome = await self.c.orchestrator.run(task, plan, context, wait_for_approval=False)
+        except ApprovalRequired as exc:
+            approval = self.c.approvals.get(UUID(exc.details["approval_id"]))
+            reply = self.c.composer.needs_approval(approval, language=language)
+            reply.task_id = task.id
+            return self._finish(session_id, reply)
+        except (PermissionDenied, DeviceUnavailable, BudgetExceeded) as exc:
+            await self.c.tasks.fail(task.id, exc.message)
+            reply = self.c.composer.failure(reason=exc.message, language=language)
+            reply.task_id = task.id
+            return self._finish(session_id, reply)
+
+        reply = await self._report(task, outcome, context, None, language)
+        reply.task_id = task.id
+        reply.detail = (reply.detail or "") + f" (accepted: {source})"
+        return self._finish(session_id, reply)
 
     def _plan_from_skill(self, intent, context: ContextPackage, language: str):
         """Find the skill the owner meant and turn it into a plan.

@@ -7,7 +7,7 @@ from typing import Any
 from uuid import UUID
 
 from pydantic import BaseModel, Field
-from thursday_shared.enums import ApprovalScope, MemoryLayer, TaskState
+from thursday_shared.enums import ApprovalScope, MemoryLayer, Priority, TaskState
 from thursday_shared.models import DeviceTelemetry, ScreenContext, SelectionContext
 
 
@@ -78,7 +78,7 @@ class TaskCreateRequest(BaseModel):
     title: str | None = None
     project_id: UUID | None = None
     device_id: UUID | None = None
-    priority: int = 5
+    priority: Priority = Priority.NORMAL
     budget_usd: float | None = None
 
 

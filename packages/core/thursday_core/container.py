@@ -30,6 +30,8 @@ from thursday_agents.registry import AgentRegistry
 from thursday_agents.research import ResearchAgent
 from thursday_agents.vision import VisionAgent
 from thursday_automation.engine import AutomationEngine, ProactivityGate
+from thursday_automation.offers import OfferBook
+from thursday_automation.proactive import ProactiveEngine
 from thursday_automation.routines import RoutineLearner
 from thursday_automation.skills.learning import SkillObserver
 from thursday_automation.skills.registry import SkillRegistry
@@ -61,6 +63,7 @@ from thursday_vision.spatial import SpatialMemory
 from thursday_voice.routing import AudioRouter
 from thursday_voice.service import VoiceService
 
+from thursday_core.briefing import Briefer, DecisionJournal
 from thursday_core.bus import InProcessEventBus
 from thursday_core.composer import ResponseComposer
 from thursday_core.config import Settings, get_settings
@@ -68,12 +71,15 @@ from thursday_core.context import ContextEngine
 from thursday_core.device_router import DeviceRouter
 from thursday_core.execution import ToolExecutor
 from thursday_core.focus import DeviceFocus
+from thursday_core.goals import GoalManager, PriorityQueue
 from thursday_core.logging import configure_logging, get_logger
 from thursday_core.model_router import ModelRouter
 from thursday_core.orchestrator import AgentOrchestrator
 from thursday_core.planner import Planner
 from thursday_core.projects import ProjectManager
 from thursday_core.reasoning import ReasoningEngine
+from thursday_core.recovery import SelfRecovery
+from thursday_core.reflection import FeedbackLog, SelfEvaluator
 from thursday_core.state import build_state_store
 from thursday_core.supervisor import Supervisor
 from thursday_core.tasks import TaskManager, TaskQueue
@@ -147,6 +153,15 @@ class Container:
     calendar: Any = None
     outbox: Any = None
     skill_observer: Any = None
+    offers: Any = None
+    proactive: Any = None
+    goals: Any = None
+    priorities: Any = None
+    journal: Any = None
+    briefer: Any = None
+    evaluator: Any = None
+    feedback: Any = None
+    recovery: Any = None
     skills: Any = None
     spatial: Any = None
     camera: Any = None
@@ -428,6 +443,33 @@ def build_container(settings: Settings | None = None, *, configure_logs: bool = 
     c.routines.attach(c.bus)
     c.skill_observer = SkillObserver()
     c.skill_observer.attach(c.bus)
+
+    # Noticing and offering are separate objects on purpose: "what did Thursday notice" and
+    # "what did Thursday do about it" stay separately inspectable and separately testable.
+    c.offers = OfferBook()
+    c.proactive = ProactiveEngine(gate=c.automations.gate)
+
+    c.goals = GoalManager()
+    c.evaluator = SelfEvaluator()
+    c.feedback = FeedbackLog()
+    c.recovery = SelfRecovery()
+    # Only repairs that restore a capability Thursday already had. `register` refuses
+    # anything on the never-automatic list, so a forbidden repair cannot be wired in
+    # here by accident and found later.
+    c.recovery.register("reconnect_node", lambda: None)
+    c.recovery.register("switch_model", lambda: None)
+    c.priorities = PriorityQueue(c.tasks, c.goals)
+    c.journal = DecisionJournal()
+    c.briefer = Briefer(
+        tasks=c.tasks,
+        approvals=c.approvals,
+        calendar=c.calendar,
+        health=c.health,
+        offers=c.offers,
+        journal=c.journal,
+        memory=c.memory,
+        skills=c.skill_observer,
+    )
 
     # Registered here rather than beside the others because they hold references to
     # services built further down the file. An agent that needs a collaborator takes it in

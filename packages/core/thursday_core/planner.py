@@ -111,6 +111,52 @@ class Planner:
             ],
         )
 
+    def plan_for_offer(self, action: dict, *, objective: str = "") -> Plan | None:
+        """Build a plan from an accepted proactive offer (§46, V10).
+
+        An offer carries *structured* data — which meeting, when, who is coming — and
+        turning that back into a Thai sentence for the intent rules to re-parse throws all
+        of it away and hopes the parser lands on the right template. It did not: "เตรียม
+        เอกสารสรุปสำหรับการประชุม" read as a data analysis and went looking for a
+        spreadsheet that does not exist.
+
+        Returns None for an offer whose action is just an instruction, which the caller then
+        handles as an ordinary request.
+        """
+        kind = str(action.get("kind") or "")
+        if kind != "prepare_meeting":
+            return None
+
+        title = str(action.get("title") or "the meeting")
+        attendees = ", ".join(action.get("attendees") or []) or "no one listed"
+        gather = PlanStep(
+            seq=0,
+            kind=StepKind.AGENT,
+            name="research",
+            objective=f"recall what is already known about {title} and {attendees}",
+            args={"question": f"{title} {attendees}", "memory_only": True},
+            # Nothing may be known about this meeting yet, and that is a normal outcome
+            # rather than a failure: the document then says so instead of inventing context.
+            success_criteria=[],
+        )
+        write = PlanStep(
+            seq=1,
+            kind=StepKind.AGENT,
+            name="document",
+            objective=f"เอกสารเตรียมประชุม: {title}",
+            args={"title": title, "starts": action.get("starts", "")},
+            depends_on=[gather.id],
+            success_criteria=["output.document is not empty"],
+        )
+        return Plan(
+            objective=f"เตรียมเอกสารประชุม {title}",
+            rationale=(
+                "accepted a proactive offer: recall what is known, then write the "
+                "preparation note — no device action, so nothing is touched on disk"
+            ),
+            steps=[gather, write],
+        )
+
     def _apply_remembered_procedures(self, plan: Plan, context: ContextPackage) -> None:
         """Make "do it the way I asked last time" actually happen (§7, V5).
 

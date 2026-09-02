@@ -303,6 +303,9 @@ class IntentKind(StrEnum):
     #: "do the thing you already know how to do". Control-adjacent: it does not describe
     #: work, it names work that already exists as a learned skill (§53, V9).
     SKILL_RUN = "SKILL_RUN"
+    #: "no", "ไม่ต้อง" — the answer to a question Thursday asked. Distinct from `STOP`,
+    #: which halts work already running: declining is about work that never started (V10).
+    DECLINE = "DECLINE"
     STATUS = "STATUS"
     STOP = "STOP"
     APPROVE = "APPROVE"
@@ -392,6 +395,20 @@ class ControlTier(IntEnum):
     BROWSER = 3
     OS_API = 4
     GUI = 5
+
+
+class Priority(IntEnum):
+    """What waits for what (§41, V10).
+
+    An `IntEnum` so comparisons are meaningful and ordered — and, unlike `RiskLevel` which
+    is a `StrEnum` and silently ranked LOW above HIGH, comparing two of these does the thing
+    it looks like it does.
+    """
+
+    LOW = 0
+    NORMAL = 1
+    HIGH = 2
+    CRITICAL = 3
 
 
 class ProactivityLevel(IntEnum):

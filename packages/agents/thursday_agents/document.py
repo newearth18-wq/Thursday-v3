@@ -29,7 +29,7 @@ from thursday_shared.models import (
 )
 
 from thursday_agents.base import BaseAgent
-from thursday_agents.grounding import grounded
+from thursday_agents.grounding import grounded, reflects
 
 
 def _title_of(contract: JobContract) -> str:
@@ -169,7 +169,12 @@ class DocumentAgent(BaseAgent):
             )
         )
         text = response.text.strip()
-        if not grounded(text, figures):
+        # Two checks, because they cover different holes. `grounded` asks whether a computed
+        # figure survived into the prose — exact, and inapplicable when nothing was computed.
+        # `reflects` asks whether the body is about the material at all, which is what
+        # catches an offline apology being handed over as a meeting note.
+        material_texts = [str(v) for v in summaries.values() if v] + [contract.objective]
+        if not grounded(text, figures) or not reflects(text, material_texts):
             # The model returned *something* and it is not a report of this analysis — an
             # offline apology, a refusal, prose about a different question. Passing it on
             # would hand the owner a document that reads like a report, passes "the document

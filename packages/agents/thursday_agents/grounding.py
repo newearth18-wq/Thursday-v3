@@ -35,6 +35,37 @@ def grounded(text: str, figures: Any) -> bool:
     return any(str(n) in haystack or f"{n:g}" in haystack for n in numbers)
 
 
+def reflects(text: str, material: list[str], *, floor: float = 0.15) -> bool:
+    """Whether ``text`` is about the same thing as the material it was written from.
+
+    The companion to `grounded`, for the case that one cannot cover. With figures, "did any
+    of them reach the page" is an exact question. With none — a meeting note, a summary of
+    prose — there is no number to look for, and `grounded` therefore passes any non-empty
+    string. That is correct as far as it goes and it let an offline model's "I cannot answer
+    analytical questions right now" become a meeting preparation document.
+
+    So this asks the weaker question that still catches it: does the body share any
+    substance with what it was supposed to be assembled from. Character trigrams, like
+    everywhere else here, because Thai has no spaces. The floor is deliberately low — this
+    is a check for text about something *else entirely*, not a quality bar.
+    """
+    if not material:
+        return bool(text.strip())
+    body = _trigrams(text)
+    if not body:
+        return False
+    for item in material:
+        wanted = _trigrams(item)
+        if wanted and len(wanted & body) / len(wanted) >= floor:
+            return True
+    return False
+
+
+def _trigrams(text: str) -> set[str]:
+    cleaned = "".join(ch for ch in text.lower() if not ch.isspace())
+    return {cleaned[i : i + 3] for i in range(max(0, len(cleaned) - 2))}
+
+
 def numbers_in(value: Any) -> list[float]:
     """Every number inside a nested structure, flattened.
 

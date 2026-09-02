@@ -11,7 +11,7 @@ import asyncio
 from datetime import UTC, datetime
 from uuid import UUID
 
-from thursday_shared.enums import TASK_TRANSITIONS, TaskState
+from thursday_shared.enums import TASK_TRANSITIONS, Priority, TaskState
 from thursday_shared.errors import BudgetExceeded, ThursdayError
 from thursday_shared.models import Budget, Event, Plan, Spend, Task, VerificationReport
 
@@ -44,7 +44,7 @@ class TaskManager:
         parent_task_id: UUID | None = None,
         origin_device_id: UUID | None = None,
         budget: Budget | None = None,
-        priority: int = 5,
+        priority: Priority = Priority.NORMAL,
         deadline: datetime | None = None,
     ) -> Task:
         parent = self._tasks.get(parent_task_id) if parent_task_id else None

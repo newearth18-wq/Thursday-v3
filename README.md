@@ -16,7 +16,7 @@ USER → THURSDAY → Understand → Plan → Delegate → Act → Verify → Re
 ## Status
 
 **Phase 1 is implemented and runnable**: the vertical slice from
-[docs/15-vertical-slice.md](docs/15-vertical-slice.md) works end to end, with 678 tests that
+[docs/15-vertical-slice.md](docs/15-vertical-slice.md) works end to end, with 762 tests that
 need no database, no network and no model credentials.
 
 ```
@@ -201,7 +201,7 @@ each choice cost:
 | [Device protocol](docs/09-device-protocol.md) | [Events](docs/10-event-architecture.md) | [API](docs/11-api-spec.md) | [MVP scope](docs/12-mvp-scope.md) |
 | [Roadmap](docs/13-roadmap.md) | [Threat model](docs/14-threat-model.md) | [Vertical slice](docs/15-vertical-slice.md) | [Persona](docs/16-persona.md) |
 | [Voice](docs/17-voice.md) | [Vision](docs/18-vision.md) | [Gesture](docs/19-gestures.md) | [Multi-device](docs/20-multi-device.md) |
-| [Agents & skills](docs/21-agents-and-skills.md) | | | |
+| [Agents & skills](docs/21-agents-and-skills.md) | [Proactive](docs/22-proactive.md) | | |
 
 ---
 
@@ -235,6 +235,14 @@ each choice cost:
   report that does not contain the numbers it was written from
 - Skills learned by watching: the same ordered sequence, seen twice, with the arguments that
   varied recovered as its inputs — proposed as a draft, never activated
+- Proactive: observations that become *offers* rather than actions unless read-only,
+  reversible and local; "ทำเลย" accepts one and it becomes ordinary work through the same
+  planner, permissions and Supervisor; goals above tasks with preemption that pauses rather
+  than cancels; morning and end-of-day briefs assembled from state, never generated; a
+  decision journal that records the alternatives
+- Learning that will not run away with itself: one correction is an event, not a preference —
+  only a repeated, recent, consistent signal becomes a *question*. Self-recovery may restore
+  a capability and may never widen one, refused at wiring time rather than at call time
 - Vision: camera consent that is provable rather than promised, frame sampling that
   never lets a stream leave the machine, screen reading, "what is this?" resolution,
   and spatial memory that answers as a *sighting* with its age said out loud
@@ -295,7 +303,7 @@ the verification loop, the audit chain and the device round-trip are all real.
 
 ```bash
 ./scripts/check.sh           # everything CI runs: lint, format, types, tests, migrations
-pytest                       # 678 tests, no infrastructure
+pytest                       # 762 tests, no infrastructure
 ruff check . && ruff format .
 mypy packages services
 alembic upgrade head && alembic revision --autogenerate -m "what changed"

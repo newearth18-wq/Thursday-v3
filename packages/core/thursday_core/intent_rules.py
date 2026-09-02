@@ -164,7 +164,22 @@ _CONTINUE_ELSEWHERE = re.compile(
     r"ต่อจากเครื่อง(?:เมื่อกี้|ตะกี้|ที่แล้ว)|"
     r"continue (?:from|on) (?:the )?(?:last|previous|other) (?:machine|device|computer))"
 )
-_APPROVE = re.compile(r"(?i)^\s*(approve|yes,? do it|อนุมัติ|ตกลง|ทำเลย|ยืนยัน|confirm)\b")
+# Answering "yes" is a *complete short utterance*, not a prefix. Anchoring at both ends is
+# what keeps "confirm the booking" — an instruction to go and confirm something — out of a
+# rule that means "yes, the thing you just asked me". The same anchoring keeps the very
+# common Thai question ending "ใช่ไหม" from reading as agreement.
+_APPROVE = re.compile(
+    r"(?i)^\s*(approve[d]?|ok(?:ay)?|yes(?:,?\s*(?:do it|please|go ahead))?|go ahead|"
+    r"do it|sure|อนุมัติ|ตกลง|ทำเลย|ทำได้เลย|เอาเลย|จัดไป|ยืนยัน|confirm)"
+    r"\s*[.!]?\s*$"
+)
+# "No" to a question Thursday asked. Not `_STOP`: that halts work already running, and the
+# difference matters — one is "stop what you are doing", the other "do not start" (V10).
+_DECLINE = re.compile(
+    r"(?i)^\s*(no(?:,?\s*(?:thanks|thank you))?|not now|nope|ไม่ต้อง|ไม่เอา|ยังไม่ต้อง|"
+    r"ไว้ก่อน|เดี๋ยวก่อน|ปฏิเสธ|decline)"
+    r"\s*[.!]?\s*$"
+)
 _SCREENSHOT = re.compile(r"(?i)(screenshot|จับภาพหน้าจอ|แคปหน้าจอ|capture the screen)")
 _SYSINFO = re.compile(
     r"(?i)(system info|ข้อมูลเครื่อง|สเปคเครื่อง|สถานะเครื่อง|เครื่อง(?:นี้)?เป็นยังไง|"
@@ -349,7 +364,16 @@ def parse(text: str, *, wake_word: str = "thursday") -> RuleMatch | None:
                 rationale="explicit stop command",
             )
         )
-    if _APPROVE.match(body):
+    if _DECLINE.match(_strip_particles(body)):
+        return RuleMatch(
+            Intent(
+                kind=IntentKind.DECLINE,
+                objective="decline the pending suggestion",
+                confidence=0.9,
+                rationale="explicit refusal",
+            )
+        )
+    if _APPROVE.match(_strip_particles(body)):
         return RuleMatch(
             Intent(
                 kind=IntentKind.APPROVE,

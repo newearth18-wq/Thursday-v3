@@ -28,6 +28,7 @@ from thursday_shared.enums import (
     NotificationPriority,
     PermissionLevel,
     PolicyDecision,
+    Priority,
     RiskLevel,
     StepKind,
     TaskState,
@@ -545,7 +546,10 @@ class Task(Base):
     title: str
     objective: str
     status: TaskState = TaskState.NEW
-    priority: int = 5
+    #: What waits for what (V10). Was a bare `int` on an undocumented 1-10 scale, which
+    #: nobody could justify a value on and which silently swallowed the `Priority` enum when
+    #: assigned — Pydantic coerced it to a plain int and every preemption check then failed.
+    priority: Priority = Priority.NORMAL
     progress: float = 0.0
     project_id: UUID | None = None
     parent_task_id: UUID | None = None
