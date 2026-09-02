@@ -154,9 +154,38 @@ class ComputerAgent(BaseAgent):
             return f"wrote {data.get('bytes', 0)} bytes to {target}{suffix}"
         if action == "file.list":
             return f"listed {len(data.get('entries', []))} entries in {target}"
+        if action == "file.search":
+            return _describe_search(data, target)
         if action == "system.info":
             return f"read system information from {data.get('hostname', 'the device')}"
         return f"{action} on {target}{suffix}".strip()
+
+
+def _describe_search(data: dict, root: str) -> str:
+    """Answer the question that was asked.
+
+    Someone who asks for the latest spreadsheet wants its name, not the news that a search
+    ran. "file.search on ~/Downloads" is a report about Thursday's activity; "Sales-Aug.xlsx,
+    modified 3 hours ago" is a report about their files.
+    """
+    from datetime import UTC, datetime
+
+    matches = data.get("matches") or []
+    if not matches:
+        return f"found no matching files in {root}"
+
+    newest = matches[0]
+    when = datetime.fromtimestamp(newest["mtime"], tz=UTC).strftime("%Y-%m-%d %H:%M")
+    name = newest.get("name") or newest["path"]
+    if len(matches) == 1:
+        found = f"{name} (modified {when})"
+    else:
+        found = f"{name} (modified {when}), newest of {len(matches)}"
+    # A truncated walk is said out loud: "the newest of what I looked at" is a different
+    # claim from "the newest", and only one of them is what was asked.
+    if data.get("truncated"):
+        found += " — the folder was larger than one search covers, so there may be newer"
+    return f"found {found} in {root}"
 
 
 def _parent_of(path: str) -> str:

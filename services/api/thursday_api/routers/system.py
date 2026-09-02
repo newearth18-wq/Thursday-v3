@@ -188,11 +188,26 @@ async def set_policy(
 @router.get("/audit")
 async def audit(
     task_id: UUID | None = None,
+    trace_id: str | None = None,
+    device_id: UUID | None = None,
+    actor: str | None = None,
     tool: str | None = None,
     limit: int = 100,
     c: Container = Depends(get_container),
 ) -> dict:
-    entries = c.audit.entries(task_id=task_id, tool=tool, limit=limit)
+    """The trail, filterable by the identifiers a person actually has in hand.
+
+    ``trace_id`` is the one printed in every log line for a request, so it is the bridge
+    from "this reply looked wrong" to every action that produced it.
+    """
+    entries = c.audit.entries(
+        task_id=task_id,
+        trace_id=trace_id,
+        device_id=device_id,
+        actor=actor,
+        tool=tool,
+        limit=limit,
+    )
     return {
         "entries": [e.model_dump(mode="json") for e in entries],
         "chain_intact": c.audit.verify_chain(),

@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any
 from uuid import UUID
 
 from pydantic import BaseModel, Field
 from thursday_shared.enums import ApprovalScope, MemoryLayer, TaskState
-from thursday_shared.models import ScreenContext, SelectionContext
+from thursday_shared.models import DeviceTelemetry, ScreenContext, SelectionContext
 
 
 class ConversationRequest(BaseModel):
@@ -121,3 +122,27 @@ class TaskFilter(BaseModel):
     status: TaskState | None = None
     project_id: UUID | None = None
     limit: int = 50
+
+
+class DeviceRegistration(BaseModel):
+    """The HTTP form of a HELLO. Signed exactly as the WebSocket handshake is."""
+
+    device_id: UUID
+    name: str
+    kind: str = "desktop"
+    os: str
+    os_version: str = ""
+    capabilities: list[str] = Field(default_factory=list)
+    nonce: str
+    issued_at: datetime
+    signature: str
+
+
+class DeviceHeartbeat(BaseModel):
+    device_id: UUID
+    name: str
+    os: str
+    telemetry: DeviceTelemetry = Field(default_factory=DeviceTelemetry)
+    nonce: str
+    issued_at: datetime
+    signature: str

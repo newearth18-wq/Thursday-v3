@@ -11,7 +11,7 @@ from thursday_core.logging import get_logger
 from thursday_devices.hub import WebSocketDeviceSession
 from thursday_shared.enums import PolicyDecision
 from thursday_shared.errors import ThursdayError
-from thursday_shared.models import ActionRequest, DeviceAction
+from thursday_shared.models import ActionRequest, DeviceAction, DeviceCapabilities
 from thursday_shared.protocol import (
     ActionResultFrame,
     ErrorFrame,
@@ -22,7 +22,7 @@ from thursday_shared.protocol import (
 )
 
 from thursday_api.deps import get_container
-from thursday_api.schemas import DeviceActionRequest
+from thursday_api.schemas import DeviceActionRequest, DeviceHeartbeat, DeviceRegistration
 
 log = get_logger(__name__)
 router = APIRouter(tags=["devices"])
@@ -39,6 +39,73 @@ async def get_device(device_id: UUID, c: Container = Depends(get_container)) -> 
     if summary is None:
         raise HTTPException(status_code=404, detail="unknown device")
     return summary.model_dump(mode="json")
+
+
+@router.post("/devices/register")
+async def register_device(
+    request: DeviceRegistration, c: Container = Depends(get_container)
+) -> dict:
+    """Pair a device.
+
+    The same signature the WebSocket handshake requires — a second door into the trusted
+    device set would be worth exactly as much as the weaker of the two, so there is only
+    one check and both doors call it.
+
+    Registration is not connection. The reply says where to dial for commands, and the
+    device stays OFFLINE until it does: a device listed as reachable that cannot receive
+    anything would be selected by the router and fail three steps into a task.
+    """
+    outcome = c.device_auth.verify(
+        device_id=str(request.device_id),
+        name=request.name,
+        os=request.os,
+        nonce=request.nonce,
+        issued_at=request.issued_at,
+        signature=request.signature,
+    )
+    if not outcome.ok:
+        log.warning("device_registration_rejected", device=request.name, reason=outcome.reason)
+        raise HTTPException(status_code=401, detail="device authentication failed")
+
+    summary = await c.hub.enrol(
+        device_id=request.device_id,
+        name=request.name,
+        kind=request.kind,
+        os=request.os,
+        capabilities=DeviceCapabilities.of(*request.capabilities),
+    )
+    return {
+        "device": summary.model_dump(mode="json"),
+        "command_channel": "/api/v1/device",
+        "heartbeat_s": c.settings.device_heartbeat_s,
+    }
+
+
+@router.post("/devices/heartbeat")
+async def device_heartbeat(request: DeviceHeartbeat, c: Container = Depends(get_container)) -> dict:
+    """Keep an enrolled device marked as seen.
+
+    Signed like registration. An unauthenticated heartbeat would let anyone hold a device
+    that is actually gone in the ONLINE set, and the router would keep choosing it.
+    """
+    outcome = c.device_auth.verify(
+        device_id=str(request.device_id),
+        name=request.name,
+        os=request.os,
+        nonce=request.nonce,
+        issued_at=request.issued_at,
+        signature=request.signature,
+    )
+    if not outcome.ok:
+        log.warning("device_heartbeat_rejected", device=request.name, reason=outcome.reason)
+        raise HTTPException(status_code=401, detail="device authentication failed")
+
+    if c.hub.summary(request.device_id) is None:
+        raise HTTPException(status_code=404, detail="unknown device; register first")
+
+    await c.hub.heartbeat(request.device_id, request.telemetry)
+    summary = c.hub.summary(request.device_id)
+    return {"device_id": str(request.device_id), "status": summary.status if summary else None}
 
 
 @router.post("/devices/{device_id}/actions")
@@ -112,18 +179,38 @@ async def device_socket(websocket: WebSocket) -> None:
             await websocket.close(code=4400)
             return
 
-        if container.settings.require_device_signature and not frame.signature:
-            # A production deployment verifies the Ed25519 signature over the nonce here
-            # against devices.public_key; an unsigned HELLO is refused (T3).
-            log.warning("device_hello_unsigned", device=frame.name)
-            if container.settings.environment == "production":
-                await websocket.send_text(
-                    ErrorFrame(
-                        code="unauthenticated", message="a device signature is required", fatal=True
-                    ).model_dump_json()
-                )
-                await websocket.close(code=4401)
-                return
+        # A node is what actually runs commands on the owner's machine and reports whether
+        # they worked. An impostor could act; worse, it could report `verified: true` for
+        # something it never did, which is the one property everything else rests on. So
+        # the signature is *checked*, and a failure closes the socket in every environment
+        # — a development build that trusts anything is a development build that teaches
+        # you the system is safe when it is not (T3).
+        outcome = container.device_auth.verify(
+            device_id=str(frame.device_id),
+            name=frame.name,
+            os=frame.os,
+            nonce=frame.nonce,
+            issued_at=frame.ts,
+            signature=frame.signature,
+        )
+        if not outcome.ok:
+            # The reason goes to the log for the operator and to the node in general terms;
+            # telling an unauthenticated caller *which* check failed helps only an attacker.
+            log.warning(
+                "device_hello_rejected",
+                device=frame.name,
+                device_id=str(frame.device_id),
+                reason=outcome.reason,
+            )
+            await websocket.send_text(
+                ErrorFrame(
+                    code="unauthenticated",
+                    message="device authentication failed",
+                    fatal=True,
+                ).model_dump_json()
+            )
+            await websocket.close(code=4401)
+            return
 
         session = WebSocketDeviceSession(websocket, frame)
         summary = await container.hub.register(session)

@@ -358,14 +358,14 @@ DEVICE_TOOL_SPECS: dict[str, ToolSpec] = {
     ),
     "file.search": ToolSpec(
         name="file.search",
-        description="Find files by glob pattern, newest first.",
+        description="Find files by one or more glob patterns, newest first. Read-only.",
         capabilities=["file", "search"],
         permission=PermissionLevel.READ,
         control_tier=ControlTier.OS_API,
         latency_ms=400,
         requires_device=True,
         local_only=True,
-        input_schema={"root": "string", "pattern": "string"},
+        input_schema={"root": "string", "pattern": "string|list", "limit": "int?"},
     ),
     "file.move": ToolSpec(
         name="file.move",

@@ -238,6 +238,38 @@ class DeviceHub:
         )
         return result
 
+    async def enrol(
+        self,
+        *,
+        device_id: UUID,
+        name: str,
+        kind: str,
+        os: str,
+        capabilities: DeviceCapabilities,
+    ) -> DeviceSummary:
+        """Record a device the owner has paired, without claiming it can be reached.
+
+        Enrolment and connection are different facts. A node that has registered but is not
+        holding a socket has no way to receive a command, so it is recorded OFFLINE — a
+        device listed as reachable that cannot act would have the router select it and fail
+        three steps later, instead of saying so up front.
+        """
+        existing = self._known.get(device_id)
+        summary = DeviceSummary(
+            id=device_id,
+            name=name,
+            kind=kind,
+            os=os,
+            status=DeviceStatus.ONLINE if device_id in self._sessions else DeviceStatus.OFFLINE,
+            capabilities=capabilities,
+            last_seen_at=datetime.now(UTC),
+            location_context=existing.location_context if existing else None,
+        )
+        self._known[device_id] = summary
+        log.info("device_enrolled", device=name, os=os, connected=device_id in self._sessions)
+        await self._emit("device.enrolled", device_id, {"name": name, "os": os})
+        return summary
+
     async def heartbeat(self, device_id: UUID, telemetry: DeviceTelemetry) -> None:
         summary = self._known.get(device_id)
         if summary is None:

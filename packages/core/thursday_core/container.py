@@ -9,6 +9,7 @@ Tests build a container of fakes with the same attribute surface.
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from typing import Any
 
@@ -29,6 +30,7 @@ from thursday_memory.vector import InMemoryVectorStore
 from thursday_models.llm import AnthropicLLM, OllamaLLM, RuleBasedLLM
 from thursday_security.approvals import ApprovalService
 from thursday_security.audit import AuditLog
+from thursday_security.device_auth import DeviceAuthenticator
 from thursday_security.permissions import PermissionEngine
 from thursday_security.policy import PolicyTable
 from thursday_security.privacy import PrivacyClassifier, PrivacyZoneRegistry
@@ -101,6 +103,7 @@ class Container:
     # devices
     hub: Any = None
     device_router: Any = None
+    device_auth: Any = None
 
     # execution
     tools: Any = None
@@ -284,6 +287,7 @@ def build_container(settings: Settings | None = None, *, configure_logs: bool = 
     # -- devices --------------------------------------------------------------
     c.hub = DeviceHub(c.bus)
     c.device_router = DeviceRouter(c.hub)
+    c.device_auth = _build_device_auth(settings)
 
     # -- execution ------------------------------------------------------------
     c.tools = ToolRegistry()
@@ -379,6 +383,23 @@ def build_container(settings: Settings | None = None, *, configure_logs: bool = 
 
 
 # --------------------------------------------------------------------------- builders
+
+
+def _build_device_auth(settings: Settings) -> DeviceAuthenticator:
+    """Resolve the node enrolment token once, from the environment, never from a file.
+
+    Reading it here rather than per-HELLO keeps the secret out of the request path, and
+    keeps the one place that knows its name next to the one place that checks it.
+    """
+    handle = settings.device_shared_secret_handle
+    key = EnvVault().prefix + handle.upper().replace("-", "_").replace(".", "_")
+    token = os.environ.get(key)
+    if settings.require_device_signature and not token:
+        # Not fatal at build time — a test container and the CLI's loopback node never
+        # open the socket. It becomes fatal at the first unsigned HELLO, which is where
+        # refusing is actually useful.
+        log.warning("device_token_not_configured", expected_env=key)
+    return DeviceAuthenticator(token, required=settings.require_device_signature)
 
 
 def _build_vault(settings: Settings) -> Any:

@@ -83,13 +83,26 @@ class AuditLog:
         self,
         *,
         task_id: UUID | None = None,
+        trace_id: str | None = None,
+        device_id: UUID | None = None,
         actor: str | None = None,
         tool: str | None = None,
         limit: int = 100,
     ) -> list[AuditEntry]:
+        """Filter the trail.
+
+        ``trace_id`` is the one that matters when something has gone wrong: it is stamped on
+        the request and carried through core, agent, tool and device, so it reassembles one
+        conversation turn across every component that touched it. A task id only covers the
+        part that became a task; the turns that were refused before that never had one.
+        """
         rows = self._entries
         if task_id is not None:
             rows = [e for e in rows if e.task_id == task_id]
+        if trace_id is not None:
+            rows = [e for e in rows if e.trace_id == trace_id]
+        if device_id is not None:
+            rows = [e for e in rows if e.device_id == device_id]
         if actor is not None:
             rows = [e for e in rows if e.actor == actor]
         if tool is not None:

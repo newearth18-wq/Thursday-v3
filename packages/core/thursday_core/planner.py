@@ -163,7 +163,12 @@ class Planner:
         if action == "file.write":
             return {"path": entities.get("path", ""), "content": entities.get("content", "")}
         if action == "file.search":
-            return {"root": entities.get("root", "~"), "pattern": entities.get("pattern", "*")}
+            args = {"root": entities.get("root", "~"), "pattern": entities.get("pattern", "*")}
+            if "limit" in entities:
+                # "the latest one" is limit=1, and it has to reach the node: trimming a
+                # 200-file list in the reply would still have walked and returned all 200.
+                args["limit"] = entities["limit"]
+            return args
         if action in ("shell.run", "powershell.run"):
             return {"command": entities.get("command", "")}
         if action == "browser.open":

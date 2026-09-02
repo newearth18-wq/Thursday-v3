@@ -16,6 +16,7 @@ import argparse
 import asyncio
 import contextlib
 import json
+import os
 import platform
 import secrets
 import uuid
@@ -25,6 +26,7 @@ import websockets
 from thursday_core.logging import configure_logging, get_logger
 from thursday_devices.node.adapters import for_current_platform
 from thursday_devices.node.executor import NodeExecutor
+from thursday_security.device_auth import sign, signing_payload
 from thursday_shared.models import DeviceAction
 from thursday_shared.protocol import (
     ActionFrame,
@@ -36,14 +38,25 @@ from thursday_shared.protocol import (
     parse_frame,
 )
 
+from apps.node.diagnostics import serve_diagnostics
+
 log = get_logger("thursday.node")
+
+#: Must match the core's `device_shared_secret_handle`, which the EnvVault reads from
+#: the same variable. One name, both sides.
+TOKEN_ENV = "THURSDAY_SECRET_DEVICE_ENROLLMENT_SECRET"  # noqa: S105
 
 RECONNECT_BASE_S = 2.0
 RECONNECT_MAX_S = 60.0
 
 
 class NodeIdentity:
-    """Stable device id plus a keypair placeholder, persisted between runs."""
+    """The node's stable device id, persisted between runs.
+
+    Only the id lives here. The enrolment token comes from the environment and is never
+    written to this file: a stolen laptop should yield a device id, not a credential that
+    lets the thief register a second machine as the owner's.
+    """
 
     def __init__(self, path: Path) -> None:
         self.path = path
@@ -51,8 +64,14 @@ class NodeIdentity:
 
     def _load(self) -> dict:
         if self.path.exists():
-            return json.loads(self.path.read_text())
-        identity = {"device_id": str(uuid.uuid4()), "secret": secrets.token_hex(32)}
+            data = json.loads(self.path.read_text())
+            # Older nodes stored a random `secret` that the core never checked. It
+            # authenticated nothing, so it is dropped rather than migrated.
+            if data.pop("secret", None) is not None:
+                self.path.write_text(json.dumps(data, indent=2))
+                log.info("node_identity_secret_dropped", path=str(self.path))
+            return data
+        identity = {"device_id": str(uuid.uuid4())}
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.path.write_text(json.dumps(identity, indent=2))
         self.path.chmod(0o600)
@@ -63,12 +82,6 @@ class NodeIdentity:
     def device_id(self) -> uuid.UUID:
         return uuid.UUID(self.data["device_id"])
 
-    def sign(self, nonce: str) -> str:
-        """Placeholder for the Ed25519 signature the core verifies at HELLO (§9.1)."""
-        import hashlib
-
-        return hashlib.sha256(f"{self.data['secret']}{nonce}{self.device_id}".encode()).hexdigest()
-
 
 class NodeClient:
     def __init__(
@@ -78,6 +91,7 @@ class NodeClient:
         name: str,
         identity: NodeIdentity,
         executor: NodeExecutor,
+        token: str,
         kind: str = "desktop",
         heartbeat_s: float = 15.0,
     ) -> None:
@@ -85,9 +99,15 @@ class NodeClient:
         self.name = name
         self.identity = identity
         self.executor = executor
+        #: The enrolment token, from the environment. Held only in memory and never logged.
+        self.token = token
         self.kind = kind
         self.heartbeat_s = heartbeat_s
         self._running: dict[uuid.UUID, asyncio.Task] = {}
+        #: Read by the diagnostics endpoint. The point of that endpoint is to answer
+        #: "why is nothing happening", so the reason a connection failed is kept.
+        self.connected = False
+        self.last_error: str | None = None
 
     async def run_forever(self) -> None:
         delay = RECONNECT_BASE_S
@@ -96,6 +116,8 @@ class NodeClient:
                 await self._session()
                 delay = RECONNECT_BASE_S
             except (OSError, websockets.WebSocketException) as exc:
+                self.connected = False
+                self.last_error = f"{type(exc).__name__}: {exc}"
                 log.warning("node_disconnected", error=str(exc), retry_in=round(delay, 1))
                 await asyncio.sleep(delay)
                 delay = min(delay * 2, RECONNECT_MAX_S)
@@ -114,13 +136,31 @@ class NodeClient:
                 capabilities=self.executor.adapter.capabilities(),
                 telemetry=await self.executor.adapter.telemetry(),
                 nonce=nonce,
-                signature=self.identity.sign(nonce),
+            )
+            # Sign the frame's own fields and its own timestamp, so the core can tell this
+            # HELLO from a replay of one it saw earlier under a different name.
+            hello.signature = sign(
+                self.token,
+                signing_payload(
+                    device_id=str(hello.device_id),
+                    name=hello.name,
+                    os=hello.os,
+                    nonce=hello.nonce,
+                    issued_at=hello.ts,
+                ),
             )
             await ws.send(hello.model_dump_json())
 
-            welcome = parse_frame(await ws.recv())
-            if not isinstance(welcome, Welcome):
-                raise RuntimeError(f"core refused the connection: {welcome}")
+            reply = parse_frame(await ws.recv())
+            if not isinstance(reply, Welcome):
+                # Most often an ERROR frame saying the signature did not check out. Say so
+                # in terms the person running the node can act on.
+                detail = getattr(reply, "message", str(reply))
+                self.connected = False
+                self.last_error = f"core refused the connection: {detail}"
+                raise RuntimeError(self.last_error)
+            self.connected = True
+            self.last_error = None
             log.info("node_connected", core=self.core_url, name=self.name)
 
             heartbeat = asyncio.create_task(self._heartbeat(ws))
@@ -138,6 +178,7 @@ class NodeClient:
                         log.info("node_shutdown_requested", reason=frame.reason)
                         return
             finally:
+                self.connected = False
                 heartbeat.cancel()
                 with contextlib.suppress(asyncio.CancelledError):
                     await heartbeat
@@ -186,10 +227,30 @@ def main() -> None:
         help="a directory this node may touch (repeatable). Defaults to the home directory.",
     )
     parser.add_argument("--key-file", default=str(Path.home() / ".thursday" / "node.json"))
+    parser.add_argument(
+        "--diagnostics-port",
+        type=int,
+        default=int(os.environ.get("THURSDAY_NODE_PORT", "8765")),
+        help="loopback port for GET /health and GET /capabilities (0 disables)",
+    )
+    parser.add_argument(
+        "--diagnostics-host", default=os.environ.get("THURSDAY_NODE_HOST", "127.0.0.1")
+    )
     parser.add_argument("--log-level", default="INFO")
     args = parser.parse_args()
 
     configure_logging(level=args.log_level)
+
+    # From the environment, never from a flag: a token on the command line lands in the
+    # shell history and in every `ps` listing on the machine.
+    token = os.environ.get(TOKEN_ENV, "")
+    if not token:
+        raise SystemExit(
+            f"{TOKEN_ENV} is not set. The core will refuse an unsigned HELLO.\n"
+            f"Set the same value on both sides, e.g.\n"
+            f"  export {TOKEN_ENV}=$(python -c 'import secrets;print(secrets.token_urlsafe(32))')"
+        )
+
     roots = [Path(p) for p in (args.allow_root or [str(Path.home())])]
     executor = NodeExecutor(for_current_platform(), allowed_roots=roots)
     client = NodeClient(
@@ -197,6 +258,7 @@ def main() -> None:
         name=args.name,
         identity=NodeIdentity(Path(args.key_file)),
         executor=executor,
+        token=token,
         kind=args.kind,
     )
     log.info(
@@ -205,10 +267,30 @@ def main() -> None:
         os=executor.adapter.os_name,
         roots=[str(r) for r in roots],
     )
-    try:
-        asyncio.run(client.run_forever())
-    except KeyboardInterrupt:
-        log.info("node_stopped")
+
+    async def run() -> None:
+        tasks = [asyncio.create_task(client.run_forever())]
+        if args.diagnostics_port:
+            tasks.append(
+                asyncio.create_task(
+                    serve_diagnostics(
+                        client, host=args.diagnostics_host, port=args.diagnostics_port
+                    )
+                )
+            )
+            log.info(
+                "node_diagnostics_listening",
+                url=f"http://{args.diagnostics_host}:{args.diagnostics_port}/health",
+            )
+        try:
+            await asyncio.gather(*tasks)
+        finally:
+            for task in tasks:
+                task.cancel()
+
+    with contextlib.suppress(KeyboardInterrupt):
+        asyncio.run(run())
+    log.info("node_stopped")
 
 
 if __name__ == "__main__":

@@ -113,6 +113,53 @@ _SYSINFO = re.compile(
     r"(?i)(system info|ข้อมูลเครื่อง|สเปคเครื่อง|สถานะเครื่อง|เครื่อง(?:นี้)?เป็นยังไง|"
     r"how much (ram|memory|disk)|disk space|พื้นที่ดิสก์)"
 )
+#: File types the owner names by their everyday word rather than an extension. Each maps to
+#: every glob that word actually means — "Excel" is .xlsx *and* .xls, and answering with only
+#: one of them would quietly miss the file they were looking for.
+FILE_TYPE_GLOBS: dict[str, list[str]] = {
+    "excel": ["*.xlsx", "*.xls", "*.xlsm"],
+    "เอ็กเซล": ["*.xlsx", "*.xls", "*.xlsm"],
+    "spreadsheet": ["*.xlsx", "*.xls", "*.csv"],
+    "word": ["*.docx", "*.doc"],
+    "เวิร์ด": ["*.docx", "*.doc"],
+    "pdf": ["*.pdf"],
+    "powerpoint": ["*.pptx", "*.ppt"],
+    "ppt": ["*.pptx", "*.ppt"],
+    "csv": ["*.csv"],
+    "image": ["*.png", "*.jpg", "*.jpeg", "*.gif", "*.webp"],
+    "รูป": ["*.png", "*.jpg", "*.jpeg", "*.gif", "*.webp"],
+    "รูปภาพ": ["*.png", "*.jpg", "*.jpeg", "*.gif", "*.webp"],
+    "video": ["*.mp4", "*.mov", "*.mkv"],
+    "วิดีโอ": ["*.mp4", "*.mov", "*.mkv"],
+    "text": ["*.txt", "*.md"],
+    "zip": ["*.zip", "*.7z", "*.rar"],
+}
+
+#: Folders the owner names rather than paths. Everything resolves under the home directory,
+#: so a search cannot be steered outside the node's allowed roots by naming a folder.
+FOLDER_ALIASES: dict[str, str] = {
+    "downloads": "~/Downloads",
+    "ดาวน์โหลด": "~/Downloads",
+    "desktop": "~/Desktop",
+    "หน้าจอ": "~/Desktop",
+    "เดสก์ท็อป": "~/Desktop",
+    "documents": "~/Documents",
+    "เอกสาร": "~/Documents",
+    "pictures": "~/Pictures",
+    "รูปภาพ": "~/Pictures",
+    "music": "~/Music",
+    "videos": "~/Videos",
+    "home": "~",
+}
+
+_SEARCH_FILES = re.compile(
+    r"(?i)(?:\b(?:find|search for|look for|show me)\b|ค้นหา|หา|ขอ)\s*"
+    r"(?:the\s+|a\s+)?(?P<latest>latest|newest|most recent|ล่าสุด|ใหม่สุด)?\s*"
+    r"(?:file|ไฟล์)?\s*(?P<kind>[\w฀-๿]+)?\s*(?:file|files|ไฟล์)?\s*"
+    r"(?P<latest2>ล่าสุด|ใหม่สุด)?\s*"
+    r"(?:\bin\b|ใน|ที่|จาก)\s*(?:the\s+)?(?:folder\s+)?(?P<folder>[\w฀-๿/\\.~-]+)"
+)
+
 _LIST_DIR = re.compile(r"(?i)\b(?:list|ls|ดู(?:ไฟล์)?ใน|show files in)\s+(?P<target>[^\s]+)")
 
 _THIS_DEVICE = re.compile(r"(?i)(this (?:machine|device|pc|computer)|เครื่องนี้|ที่นี่|here)")
@@ -256,6 +303,25 @@ def parse(text: str, *, wake_word: str = "thursday") -> RuleMatch | None:
                 )
             )
 
+    if (search := _match_file_search(body)) is not None:
+        globs, folder, newest_first = search
+        return RuleMatch(
+            Intent(
+                kind=IntentKind.FILE_ACTION,
+                objective=body,
+                entities={
+                    "action": "file.search",
+                    "root": folder,
+                    "pattern": globs,
+                    # Reading is all this does. The planner maps it to a READ-level tool,
+                    # and nothing downstream can turn a search into a modification.
+                    "limit": 1 if newest_first else 20,
+                },
+                target_device=_device_hint(body),
+                confidence=0.86,
+                rationale="a request to find files of a named type in a named folder",
+            )
+        )
     if (remember := _match_remember(body)) is not None:
         fact, layer = remember
         return RuleMatch(
@@ -297,6 +363,51 @@ def parse(text: str, *, wake_word: str = "thursday") -> RuleMatch | None:
             )
         )
     return None
+
+
+def _looks_like_path(candidate: str) -> bool:
+    """A path, rather than a word the folder table should have known."""
+    return (
+        candidate.startswith(("~", "/", "./"))
+        or (len(candidate) > 2 and candidate[1] == ":")  # C:\Users\...
+        or "/" in candidate
+        or "\\" in candidate
+    )
+
+
+def _match_file_search(body: str) -> tuple[list[str], str, bool] | None:
+    """Turn "หาไฟล์ Excel ล่าสุดใน Downloads" into globs, a folder and an ordering.
+
+    Returns ``None`` unless both halves are recognised. A search whose file type or folder
+    the rules could not place is better handed to the model than run against the home
+    directory with ``*``, which would walk the whole disk to answer the wrong question.
+    """
+    match = _SEARCH_FILES.search(body)
+    if match is None:
+        return None
+
+    kind = (match.group("kind") or "").strip().lower()
+    globs = FILE_TYPE_GLOBS.get(kind)
+    if globs is None:
+        # "หาไฟล์ report.xlsx" — an explicit extension is its own glob.
+        if "." in kind and not kind.startswith("."):
+            globs = [f"*{kind[kind.rindex('.') :]}"]
+        else:
+            return None
+
+    raw_folder = match.group("folder").strip()
+    folder = FOLDER_ALIASES.get(raw_folder.strip("/\\.").lower())
+    if folder is None:
+        # An explicit path is fine too — "find pdfs in ~/work". It is not a hole: the node
+        # confines every path to its own allowed roots, so naming a directory here can
+        # widen the search no further than that node already permits.
+        if _looks_like_path(raw_folder):
+            folder = raw_folder
+        else:
+            return None
+
+    newest_first = bool(match.group("latest") or match.group("latest2"))
+    return globs, folder, newest_first
 
 
 def _match_remember(body: str) -> tuple[str, str] | None:

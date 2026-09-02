@@ -16,7 +16,7 @@ USER → THURSDAY → Understand → Plan → Delegate → Act → Verify → Re
 ## Status
 
 **Phase 1 is implemented and runnable**: the vertical slice from
-[docs/15-vertical-slice.md](docs/15-vertical-slice.md) works end to end, with 298 tests that
+[docs/15-vertical-slice.md](docs/15-vertical-slice.md) works end to end, with 353 tests that
 need no database, no network and no model credentials.
 
 ```
@@ -49,11 +49,43 @@ python -m apps.cli                        # embedded core + local node, one comm
 Three-process setup (how it runs for real):
 
 ```bash
+# 1. One enrolment token, shared by the core and every node (ADR 0013).
+#    The core refuses an unsigned or wrongly-signed HELLO in every environment,
+#    so this is not optional and there is no development bypass.
+export THURSDAY_SECRET_DEVICE_ENROLLMENT_SECRET=$(python -c "import secrets;print(secrets.token_urlsafe(32))")
+
 python -m apps.server                                  # core API on :8000
 python -m apps.node --name Office-PC --allow-root ~    # one per machine
 python -m apps.cli --remote                            # or the desktop app
 
 cd apps/desktop && npm install && npm run tauri dev    # the window
+```
+
+Check a node from the machine it runs on — this listens on loopback and executes nothing,
+so it still answers when the node cannot reach the core:
+
+```bash
+curl -s localhost:8765/health | jq        # connected_to_core, last_error, allowed_roots
+curl -s localhost:8765/capabilities | jq  # what this node will actually do
+```
+
+Then send the command:
+
+```bash
+curl -s localhost:8000/api/v1/conversations \
+  -H 'content-type: application/json' \
+  -d '{"text": "Thursday เปิด Chrome"}' | jq
+
+# {"text": "เปิด chrome เรียบร้อย (ยืนยันแล้ว)", "status": "COMPLETED", "verified": true, ...}
+```
+
+`verified: true` is the part that matters. It means the node looked for the process after
+launching it and found it — not that the launch command returned without an error.
+
+Reconstruct any single turn from the trail:
+
+```bash
+curl -s "localhost:8000/api/v1/audit?trace_id=$TRACE" | jq '.entries[] | {tool, action, result}'
 ```
 
 With Postgres, Redis and a separate worker:
@@ -104,20 +136,61 @@ if not verification.passed:
 
 ## Architecture at a glance
 
-```
-       voice · text · screen · files · camera · gesture · sensors
-                              ↓
-                    THURSDAY CORE (one lifecycle)
-   context → classify → route model → understand → plan → authorize
-          → execute → verify → remember → report
-                              ↓
-        AGENT NETWORK                    DEVICE + TOOL LAYER
-   research · computer · browser      Windows / macOS / Linux nodes
-   data · document · coding · …       browser · Obsidian · APIs · IoT
+```mermaid
+flowchart TB
+    subgraph clients [" "]
+        direction LR
+        UI["Desktop app · CLI · API"]
+    end
+
+    subgraph core ["Thursday Core — one lifecycle, no step skippable"]
+        direction TB
+        U["Understand<br/><i>rules first, model second</i>"]
+        P["Plan"]
+        A["Authorize<br/><i>PermissionEngine · ADR 0011</i>"]
+        X["Execute<br/><i>via an agent</i>"]
+        V["Verify<br/><i>observe, don't assume · ADR 0012</i>"]
+        R["Remember + Report"]
+        U --> P --> A --> X --> V --> R
+    end
+
+    subgraph agents ["Agents"]
+        direction LR
+        CA["Computer"]
+        RA["Research"]
+        BA["Browser"]
+        SUP["Supervisor<br/><i>read-only</i>"]
+    end
+
+    subgraph devices ["Devices — the only code that touches an OS · ADR 0014"]
+        direction LR
+        N1["Windows node"]
+        N2["macOS node"]
+        N3["Linux node"]
+        FN["FakeDeviceNode<br/><i>tests + --fake-device</i>"]
+    end
+
+    UI -->|"HTTP · WebSocket"| U
+    X --> agents
+    agents -->|"ToolCall"| A
+    A -->|"AUTO"| devices
+    A -->|"ASK"| APR["Approval<br/><i>nothing runs while this is open</i>"]
+    APR -->|"owner decides"| devices
+    devices -->|"result + evidence"| V
+    V --> SUP
+    SUP -->|"pass"| R
+    SUP -->|"fail"| FAIL["Task FAILED<br/><i>reported as unverified,<br/>never as success</i>"]
+
+    devices -.->|"outbound WebSocket<br/>ADR 0015"| core
+    R --> AUD[("Audit — hash-chained")]
 ```
 
+The one path worth tracing: **nothing reaches a device without passing Authorize, and
+nothing completes without passing Verify.** Both are single choke points rather than
+conventions, so neither can be forgotten by a new caller.
+
 Full design in [`docs/`](docs/) — the fifteen deliverables, written before the code, plus
-the [V2 review](docs/architecture/00-v2-review.md) and ten
+the [V2 review](docs/architecture/00-v2-review.md) and fifteen
 [architecture decisions](docs/architecture/decisions/) recording what was chosen and what
 each choice cost:
 
@@ -176,7 +249,7 @@ the verification loop, the audit chain and the device round-trip are all real.
 
 ```bash
 ./scripts/check.sh           # everything CI runs: lint, format, types, tests, migrations
-pytest                       # 298 tests, no infrastructure
+pytest                       # 353 tests, no infrastructure
 ruff check . && ruff format .
 mypy packages services
 alembic upgrade head && alembic revision --autogenerate -m "what changed"

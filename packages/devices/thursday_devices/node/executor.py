@@ -26,6 +26,9 @@ log = get_logger(__name__)
 #: How long to wait for a launched application to appear before giving up on verification.
 LAUNCH_SETTLE_S = 0.4
 LAUNCH_VERIFY_ATTEMPTS = 6
+#: How many matching files a search will walk before it stops and says it stopped.
+#: A Downloads folder is small; a home directory with a node_modules in it is not.
+SEARCH_SCAN_CAP = 5000
 
 
 class NodeExecutor:
@@ -38,6 +41,15 @@ class NodeExecutor:
         self.allowed_roots = [
             Path(p).expanduser().resolve() for p in (allowed_roots or [Path.home()])
         ]
+
+    def supported_actions(self) -> list[str]:
+        """The actions this node can actually run.
+
+        Derived from the dispatch table rather than declared separately, so it cannot claim
+        a capability the node has no handler for — the diagnostics endpoint that says
+        otherwise would be believed.
+        """
+        return sorted(self._handlers())
 
     async def execute(self, action: DeviceAction) -> DeviceActionResult:
         started = time.perf_counter()
@@ -333,21 +345,58 @@ class NodeExecutor:
     async def _file_search(
         self, args: dict[str, Any]
     ) -> tuple[dict, dict, bool, UndoRecord | None]:
+        """Find files under a root, newest first.
+
+        ``pattern`` takes one glob or several — "the latest Excel file" means ``*.xlsx``
+        *and* ``*.xls``, and asking twice would sort two lists the caller then has to merge.
+
+        The ordering is the subtle part. Truncating to ``limit`` during the walk and sorting
+        afterwards returns the newest of whatever the filesystem happened to yield first,
+        which is not the newest file and is wrong in a way nobody notices: the answer looks
+        entirely plausible. So the walk is bounded by its own much larger cap, the sort
+        happens over everything found, and ``limit`` applies last. When that cap is reached
+        the result says so rather than presenting a partial answer as complete.
+        """
         root = self._resolve(args["root"])
-        pattern = str(args["pattern"])
+        raw = args["pattern"]
+        patterns = [str(p) for p in (raw if isinstance(raw, list | tuple) else [raw])]
         limit = int(args.get("limit", 50))
+        scan_cap = int(args.get("scan_cap", SEARCH_SCAN_CAP))
 
-        def scan() -> list[dict[str, Any]]:
-            found: list[dict[str, Any]] = []
-            for path in root.rglob(pattern):
-                found.append({"path": str(path), "mtime": path.stat().st_mtime})
-                if len(found) >= limit:
+        def scan() -> tuple[list[dict[str, Any]], bool]:
+            seen: dict[str, dict[str, Any]] = {}
+            truncated = False
+            for pattern in patterns:
+                for path in root.rglob(pattern):
+                    if len(seen) >= scan_cap:
+                        truncated = True
+                        break
+                    try:
+                        if not path.is_file():
+                            continue
+                        stat = path.stat()
+                    except OSError:
+                        # A file that vanished or that this node may not stat is skipped,
+                        # not fatal: a search should not fail because of one bad entry.
+                        continue
+                    seen[str(path)] = {
+                        "path": str(path),
+                        "name": path.name,
+                        "mtime": stat.st_mtime,
+                        "size": stat.st_size,
+                    }
+                if truncated:
                     break
-            return found
+            found = sorted(seen.values(), key=lambda m: m["mtime"], reverse=True)
+            return found, truncated
 
-        matches = await asyncio.to_thread(scan)
-        matches.sort(key=lambda m: m["mtime"], reverse=True)
-        return {"matches": matches}, {"count": len(matches)}, True, None
+        matches, truncated = await asyncio.to_thread(scan)
+        return (
+            {"matches": matches[:limit], "truncated": truncated},
+            {"scanned": len(matches), "returned": min(len(matches), limit), "patterns": patterns},
+            True,
+            None,
+        )
 
     async def _window_active(
         self, args: dict[str, Any]
