@@ -29,3 +29,4 @@ done this way?" and have no answer.
 | [0019](0019-forgetting-is-a-first-class-operation.md) | Forgetting is an instruction | A memory wrongly kept is a failure the owner cannot see |
 | [0020](0020-the-camera-is-off.md) | The camera is off, provably | An indicator computed separately can disagree with reality |
 | [0021](0021-a-stream-never-leaves-the-machine.md) | A video stream never leaves the machine | 108,000 frames an hour is not something anyone can consent to |
+| [0022](0022-a-gesture-is-not-a-signature.md) | A gesture is not a signature | It is inferred, not performed — so it may never confirm anything consequential |

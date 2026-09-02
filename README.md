@@ -16,7 +16,7 @@ USER → THURSDAY → Understand → Plan → Delegate → Act → Verify → Re
 ## Status
 
 **Phase 1 is implemented and runnable**: the vertical slice from
-[docs/15-vertical-slice.md](docs/15-vertical-slice.md) works end to end, with 489 tests that
+[docs/15-vertical-slice.md](docs/15-vertical-slice.md) works end to end, with 534 tests that
 need no database, no network and no model credentials.
 
 ```
@@ -200,7 +200,7 @@ each choice cost:
 | [Interfaces](docs/05-core-interfaces.md) | [Agents](docs/06-agent-architecture.md) | [Memory](docs/07-memory-architecture.md) | [Permissions](docs/08-permission-model.md) |
 | [Device protocol](docs/09-device-protocol.md) | [Events](docs/10-event-architecture.md) | [API](docs/11-api-spec.md) | [MVP scope](docs/12-mvp-scope.md) |
 | [Roadmap](docs/13-roadmap.md) | [Threat model](docs/14-threat-model.md) | [Vertical slice](docs/15-vertical-slice.md) | [Persona](docs/16-persona.md) |
-| [Voice](docs/17-voice.md) | [Vision](docs/18-vision.md) | | |
+| [Voice](docs/17-voice.md) | [Vision](docs/18-vision.md) | [Gesture](docs/19-gestures.md) | |
 
 ---
 
@@ -225,6 +225,10 @@ each choice cost:
 - Vision: camera consent that is provable rather than promised, frame sampling that
   never lets a stream leave the machine, screen reading, "what is this?" resolution,
   and spatial memory that answers as a *sighting* with its age said out loud
+- Gesture: pointing, pinch, drag, swipe and two-hand zoom off a four-state mode that is
+  closed by default, a cooldown so a held gesture is one command rather than thirty, and
+  a safety gate under which **no gesture alone** can confirm a deletion, a payment, a
+  system change or anything that leaves the machine
 - Model router with tiers, cost/privacy routing and a local fallback
 - Realtime voice: wake word → VAD → STT → core → verification → TTS, with a
   state machine, working barge-in, per-mode prosody, audio routing and provider
@@ -249,8 +253,14 @@ each choice cost:
 - Mobile client (scaffold in `apps/mobile`). The desktop app is built — conversation,
   approvals, tasks, devices, memory and permissions — but has no voice capture and no
   embedded device node yet
-- Ed25519 device signature verification is scaffolded in the protocol and enforced only in
-  `production`; the keypair generation and pairing flow land in Phase 2
+- Per-device Ed25519 keys. HELLO signatures are really verified today — HMAC-SHA256 over
+  the identifying fields, constant-time compare, clock-skew window and nonce replay
+  cache, enforced in every environment — but on one shared enrolment token, which
+  authenticates *a* node rather than *this* node (ADR 0013). `device_credentials` already
+  holds the per-device public key; the keypair generation and pairing flow land in Phase 2
+- The MediaPipe hand-landmark source. Gesture classification, the mode machine, the safety
+  gate and speech+gesture fusion are built and tested against landmarks constructed
+  directly; nothing has yet read a real hand, and this container has no camera to read one
 
 Nothing is faked at a layer where faking would hide a design problem. The permission checks,
 the verification loop, the audit chain and the device round-trip are all real.
@@ -261,7 +271,7 @@ the verification loop, the audit chain and the device round-trip are all real.
 
 ```bash
 ./scripts/check.sh           # everything CI runs: lint, format, types, tests, migrations
-pytest                       # 489 tests, no infrastructure
+pytest                       # 534 tests, no infrastructure
 ruff check . && ruff format .
 mypy packages services
 alembic upgrade head && alembic revision --autogenerate -m "what changed"

@@ -50,6 +50,17 @@ class BoundingBox:
         cx, cy = self.centre
         return ((cx - x) ** 2 + (cy - y) ** 2) ** 0.5
 
+    def distance_to_edge(self, x: float, y: float) -> float:
+        """Distance to the nearest point *on* the box; zero when the point is inside.
+
+        Different from `distance_to` in the case that matters: a point just outside a large
+        box is far from its centre but touching its edge. Centre distance would rank a
+        small far-away box above the box the point is practically on.
+        """
+        dx = max(self.x - x, 0.0, x - (self.x + self.width))
+        dy = max(self.y - y, 0.0, y - (self.y + self.height))
+        return (dx * dx + dy * dy) ** 0.5
+
     def overlaps(self, other: BoundingBox) -> float:
         """Intersection over union — how much two boxes are the same thing."""
         left, right = max(self.x, other.x), min(self.x + self.width, other.x + other.width)

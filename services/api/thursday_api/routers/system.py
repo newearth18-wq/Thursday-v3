@@ -356,3 +356,30 @@ async def seen_objects(c: Container = Depends(get_container)) -> dict:
 async def forget_sightings(c: Container = Depends(get_container)) -> dict:
     """Wipe what was seen. Part of the privacy controls (§68)."""
     return {"forgotten": c.spatial.forget_all()}
+
+
+# ------------------------------------------------------------------ gestures (V7)
+
+
+@router.get("/gestures")
+async def gesture_state(c: Container = Depends(get_container)) -> dict:
+    """Whether hand movement is being read as commands at all (§28).
+
+    ``watching`` is the field a UI draws its indicator from: an ordinary wave is not a
+    command, and the owner should be able to see when that stops being true.
+    """
+    return c.gesture_mode.snapshot()
+
+
+@router.post("/gestures/open")
+async def open_gestures(c: Container = Depends(get_container)) -> dict:
+    c.gesture_mode.open()
+    return c.gesture_mode.snapshot()
+
+
+@router.post("/gestures/close")
+async def close_gestures(c: Container = Depends(get_container)) -> dict:
+    """ "หยุดรับท่าทาง". Closing is always available and never refused (§69)."""
+    c.gesture_mode.close()
+    c.gesture_tracker.reset()
+    return c.gesture_mode.snapshot()

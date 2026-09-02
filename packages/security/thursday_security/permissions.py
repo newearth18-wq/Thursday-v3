@@ -24,6 +24,7 @@ from thursday_shared.enums import (
     PermissionLevel,
     PolicyDecision,
     RiskLevel,
+    max_risk,
 )
 from thursday_shared.models import (
     ActionRequest,
@@ -311,5 +312,6 @@ class PermissionEngine:
 
 
 def _max_risk(a: RiskLevel, b: RiskLevel) -> RiskLevel:
-    order = [RiskLevel.NONE, RiskLevel.LOW, RiskLevel.MEDIUM, RiskLevel.HIGH, RiskLevel.CRITICAL]
-    return max(a, b, key=order.index)
+    """Delegates to the shared helper — `RiskLevel` is a StrEnum, so a plain `max()` would
+    order these alphabetically and rank LOW above HIGH."""
+    return max_risk(a, b)

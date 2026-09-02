@@ -145,6 +145,31 @@ class RiskLevel(StrEnum):
     CRITICAL = "CRITICAL"
 
 
+#: Severity order. `RiskLevel` is a StrEnum, so `>=` between two members compares *strings*
+#: — and alphabetically "LOW" sorts above "HIGH", which is exactly backwards for the two
+#: values that matter most. Every comparison goes through the helpers below instead.
+RISK_ORDER: tuple[RiskLevel, ...] = (
+    RiskLevel.NONE,
+    RiskLevel.LOW,
+    RiskLevel.MEDIUM,
+    RiskLevel.HIGH,
+    RiskLevel.CRITICAL,
+)
+
+
+def risk_rank(risk: RiskLevel) -> int:
+    return RISK_ORDER.index(risk)
+
+
+def risk_at_least(risk: RiskLevel, threshold: RiskLevel) -> bool:
+    """True when ``risk`` is as severe as ``threshold`` or worse."""
+    return risk_rank(risk) >= risk_rank(threshold)
+
+
+def max_risk(a: RiskLevel, b: RiskLevel) -> RiskLevel:
+    return a if risk_rank(a) >= risk_rank(b) else b
+
+
 class DataSensitivity(IntEnum):
     """§34. SECRET must never reach a cloud provider."""
 

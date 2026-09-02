@@ -110,7 +110,9 @@ def hand(extended: list[bool]) -> HandLandmarks:
         ([True, True, True, True, True], Gesture.OPEN_PALM),
         ([False, True, True, False, False], Gesture.PEACE),
         ([False, True, False, False, False], Gesture.POINT),
-        ([False, False, False, False, False], Gesture.PINCH),
+        # A closed hand is a fist, not a pinch. Reading it as a pinch — which this module
+        # did before V7 — makes every resting hand a click.
+        ([False, False, False, False, False], Gesture.FIST),
     ],
 )
 def test_landmark_patterns_classify(fingers, expected):
@@ -121,11 +123,6 @@ def test_landmark_patterns_classify(fingers, expected):
 
 def test_no_hands_is_not_a_gesture():
     assert classify([]) == (Gesture.NONE, 0.0)
-
-
-def test_two_hands_read_as_zoom():
-    gesture, _ = classify([hand([True] * 5), hand([True] * 5)])
-    assert gesture is Gesture.TWO_HAND_ZOOM
 
 
 def test_gestures_are_ignored_until_the_mode_is_open():
@@ -157,6 +154,7 @@ def test_gesture_mode_closes_itself_when_idle():
 
 
 def test_interaction_keeps_the_mode_alive():
+    """Five seconds apart is well clear of the cooldown, so each one is its own command."""
     mode = GestureMode()
     start = datetime(2026, 3, 7, 12, 0, tzinfo=UTC)
     mode.open(now=start)

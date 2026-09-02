@@ -41,7 +41,7 @@ from thursday_shared.enums import ModelTier
 from thursday_tools.builtin import register_builtin_tools
 from thursday_tools.registry import ToolRegistry, ToolRouter
 from thursday_vision.camera import CameraManager
-from thursday_vision.gestures import GestureMode
+from thursday_vision.gestures import GestureMode, GestureTracker
 from thursday_vision.providers import RuleBasedSceneAnalyzer
 from thursday_vision.service import VisionService
 from thursday_vision.spatial import SpatialMemory
@@ -133,6 +133,7 @@ class Container:
     camera: Any = None
     vision: Any = None
     gesture_mode: Any = None
+    gesture_tracker: Any = None
 
     # voice
     stt: Any = None
@@ -355,6 +356,10 @@ def build_container(settings: Settings | None = None, *, configure_logs: bool = 
         bus=c.bus,
     )
     c.gesture_mode = GestureMode()
+    # The tracker holds the frame history that swipe, drag and zoom need. Separate from the
+    # mode, because recognising a gesture and being willing to act on one are different
+    # questions and only the second is about permission.
+    c.gesture_tracker = GestureTracker()
 
     # -- voice ----------------------------------------------------------------
     c.stt, c.tts, c.wake_word = _build_voice(settings)

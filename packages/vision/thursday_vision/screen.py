@@ -30,6 +30,14 @@ log = get_logger(__name__)
 #: means is worse than asking, because the wrong target is often irreversible.
 MIN_REFERENCE_CONFIDENCE = 0.45
 
+#: How far outside an element a *gesture* aim may land and still count as pointing at it,
+#: in normalised screen units. A mouse pointer is a measured coordinate and gets no
+#: tolerance at all; a hand's aim is estimated from two-dimensional landmarks with no depth
+#: (see `HandLandmarks.aim_at`), so demanding it land exactly inside the icon would reject
+#: almost every real point. The number is deliberately smaller than a typical desktop icon:
+#: near enough to touch, not near enough to reach the next one along.
+GESTURE_AIM_TOLERANCE = 0.06
+
 
 @dataclass
 class ScreenElement:
@@ -127,7 +135,9 @@ class VisualReferenceResolver:
     did deliberately* to *what happens to be nearby*:
 
     1. **Selection.** They highlighted it. Nothing beats an explicit act.
-    2. **Pointer or gesture.** They are pointing at it, now.
+    2. **Pointer or gesture.** They are pointing at it, now. A mouse pointer must land
+       inside the thing; a hand's aim is allowed `GESTURE_AIM_TOLERANCE` of slop, and is
+       ranked lower for it.
     3. **A named thing in what they said.** "the total" when a cell is labelled total.
     4. **Sole candidate.** Only one thing is on screen; ambiguity does not arise.
     5. **Most prominent.** The last resort, and the weakest — which is why it alone is not
@@ -141,10 +151,27 @@ class VisualReferenceResolver:
         screen: ScreenReading | None = None,
         detections: list[Detection] | None = None,
         pointing_at: tuple[float, float] | None = None,
+        gesture: Any = None,
     ) -> ResolvedReference | None:
+        """Fuse everything available into one target.
+
+        ``gesture`` is a `GestureReading`. Its aim is used only when it is *pointing* and
+        confident — a thumbs-up carries no direction, and a low-confidence point is a hand
+        the tracker is guessing about. Taking its aim anyway would let noise silently
+        outrank the mouse.
+        """
         screen = screen or ScreenReading()
         detections = detections or []
-        pointer = pointing_at or screen.pointer
+
+        gesture_aim = None
+        if gesture is not None:
+            aiming = getattr(gesture, "pointing_at", None)
+            confident = getattr(gesture, "confidence", 0.0) >= 0.6
+            if aiming is not None and confident:
+                gesture_aim = aiming
+
+        # An explicit argument wins, then the hand, then whatever the screen last reported.
+        pointer = pointing_at or gesture_aim or screen.pointer
 
         # 1. An explicit selection.
         if screen.selection:
@@ -167,12 +194,42 @@ class VisualReferenceResolver:
             under = [e for e in screen.elements if e.box.contains(*pointer)]
             if under:
                 closest = min(under, key=lambda e: e.box.distance_to(*pointer))
+                how = "pointing at it" if gesture_aim else "the pointer is over it"
                 return ResolvedReference(
                     target=closest.describe(),
                     confidence=0.88,
-                    evidence=["the owner is pointing at it"],
+                    evidence=[f"the owner is {how}"],
                     element=closest,
                 )
+            if gesture_aim is not None:
+                near = sorted(
+                    (
+                        (e.box.distance_to_edge(*gesture_aim), e)
+                        for e in screen.elements
+                        if e.box.distance_to_edge(*gesture_aim) <= GESTURE_AIM_TOLERANCE
+                    ),
+                    key=lambda pair: pair[0],
+                )
+                if len(near) == 1:
+                    return ResolvedReference(
+                        target=near[0][1].describe(),
+                        confidence=0.72,
+                        evidence=["the owner is pointing at it", "aim is approximate"],
+                        element=near[0][1],
+                    )
+                if near:
+                    # Two things within a fingertip's error of each other. Returned rather
+                    # than dropped, and below the floor rather than above it, so the caller
+                    # asks "this one?" instead of picking one and being wrong half the time.
+                    return ResolvedReference(
+                        target=near[0][1].describe(),
+                        confidence=0.4,
+                        evidence=[
+                            "the owner is pointing at it",
+                            f"but {len(near) - 1} other thing(s) are just as close",
+                        ],
+                        element=near[0][1],
+                    )
             hit = [d for d in detections if d.box.contains(*pointer)]
             if hit:
                 closest_object = min(hit, key=lambda d: d.box.distance_to(*pointer))
