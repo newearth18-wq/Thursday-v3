@@ -91,6 +91,11 @@ DEDUPE_SIMILARITY = 0.95
 #: New information may only supersede old on this much extra confidence (§7.4).
 SUPERSEDE_CONFIDENCE_MARGIN = 0.15
 
+#: The layers that describe *how Thursday should behave* rather than what is true. Only the
+#: owner may write these (§110, PART 76): a standing instruction from anywhere else is an
+#: instruction nobody gave, and it would shape work for months without announcing itself.
+BEHAVIOUR_LAYERS = frozenset({MemoryLayer.PREFERENCE, MemoryLayer.PROCEDURAL})
+
 _DURABLE_MARKERS = re.compile(
     r"(?i)(always|never|from now on|remember that|ต่อไปนี้|ให้จำไว้|จำไว้ว่า|ทุกครั้ง|"
     r"เรียกฉันว่า|call me|i prefer|ฉันชอบ|ผมชอบ|ห้าม|my .* is|ของฉันคือ)"
@@ -153,19 +158,30 @@ class MemoryManager:
         if _SMALL_TALK.match(text):
             return MemoryJudgement(decision=MemoryDecision.IGNORE, reason="small talk")
 
-        # --- PART 76: an agent may not write the owner's preferences -------------
-        # A document Thursday read cannot redefine who the owner is or what they like.
-        # The proposal becomes a question instead of a fact.
-        if candidate.layer is MemoryLayer.PREFERENCE and candidate.source is not MemorySource.USER:
+        # --- PART 76 / §110: only the owner sets standing behaviour ---------------
+        # A document Thursday read cannot redefine who the owner is, what they like, or how
+        # they want work done. The proposal becomes a question instead of a fact.
+        #
+        # PROCEDURAL is in this list and was missing from it, which was the whole gap:
+        # a procedural memory is the layer built to *shape later work* (V5), so a web page or
+        # an agent writing one is a standing instruction nobody gave — precisely the
+        # substitution §110 forbids. PREFERENCE was guarded and PROCEDURAL, which is the
+        # layer that actually changes behaviour, was not.
+        #
+        # PROJECT is deliberately not here: a project memory is a fact about a project, and
+        # agents are supposed to record those.
+        if candidate.layer in BEHAVIOUR_LAYERS and candidate.source is not MemorySource.USER:
             return MemoryJudgement(
                 decision=MemoryDecision.ASK_USER,
                 reason=(
-                    f"a preference proposed by {candidate.proposed_by or candidate.source} "
-                    "needs the owner's confirmation"
+                    f"a {candidate.layer} memory proposed by "
+                    f"{candidate.proposed_by or candidate.source} needs the owner's confirmation"
                 ),
             )
 
         # --- durable ------------------------------------------------------------
+        # Reached only for owner-sourced procedural writes; the guard above turned every
+        # other source into a question.
         if candidate.layer in (MemoryLayer.PROCEDURAL, MemoryLayer.PROJECT):
             return MemoryJudgement(
                 decision=MemoryDecision.STORE, reason=f"{candidate.layer} writes are durable"

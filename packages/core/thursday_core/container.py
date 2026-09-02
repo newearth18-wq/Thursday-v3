@@ -337,7 +337,7 @@ def build_container(settings: Settings | None = None, *, configure_logs: bool = 
         daily_usd=settings.daily_cost_cap_usd,
         monthly_usd=settings.monthly_cost_cap_usd,
     )
-    c.models = _build_models(settings, c.vault, c.costs)
+    c.models = _build_models(settings, c.vault, c.costs, c.redactor)
 
     # -- devices --------------------------------------------------------------
     c.remote_gate = RemoteCommandGate()
@@ -612,8 +612,10 @@ def _build_embedder(settings: Settings) -> Any:
     return HashEmbeddingProvider(settings.embedding_dimensions)
 
 
-def _build_models(settings: Settings, vault: Any, meter: CostMeter | None = None) -> ModelRouter:
-    router = ModelRouter(allow_cloud=settings.allow_cloud, meter=meter)
+def _build_models(
+    settings: Settings, vault: Any, meter: CostMeter | None = None, redactor: Any = None
+) -> ModelRouter:
+    router = ModelRouter(allow_cloud=settings.allow_cloud, meter=meter, redactor=redactor)
     local = RuleBasedLLM()
 
     if settings.llm_backend == "ollama":

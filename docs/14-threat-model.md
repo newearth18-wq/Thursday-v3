@@ -67,6 +67,22 @@ verified under the cap reports unverified.
 
 Still outstanding: the ledger is in memory, so a restart resets the period totals.
 
+### The rules as tests (Sprint 46 · ADR 0031)
+
+`tests/integration/test_security_hardening_v46.py` asserts the absolute rules of V12 —
+§90 (no secret in a prompt, memory, note or audit payload), §94 (external text is data),
+§95 (one authorization point; no self-authorization; no override of ASK_ALWAYS), §102 and
+§104 (external communication and every form of delete always ask), §105 (camera off, the
+indicator derived from the same state the capture path checks), §110 (only the owner sets
+standing behaviour), §120 (no code path fetches and runs a URL), §194 (no success without a
+passed verification) — organised by section, run against the built container.
+
+Writing them found three rules that had already stopped being true: policy resolution did not
+inherit from a listed ancestor, so `file.delete.bulk` was ASK_ONCE while `file.delete` was
+ASK_ALWAYS; nothing redacted a prompt on its way to a provider despite the module claiming
+otherwise; and `MemoryLayer.PROCEDURAL` — the layer that shapes later work — accepted writes
+from any source. All three are fixed.
+
 ## 14.4 Controls always on
 
 Least privilege · explicit permission · encryption at rest (DB + vault) and in transit ·

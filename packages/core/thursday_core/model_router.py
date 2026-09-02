@@ -15,6 +15,13 @@ calls that turned out not to be reporting were the two every turn makes.
 is free. It does not refuse the work: a spending limit that stops Thursday working is worse
 than the overspend it prevents, and an outage the owner cannot tell from a broken assistant
 is one they fix by deleting the limit.
+
+**Redaction.** §90 puts a prompt transcript first on the list of places a secret may never
+appear, and §194 says the same thing as a rule: no credential is placed in a model prompt.
+The redactor's own docstring claimed it ran on every prompt and did not — nothing called it
+on the way to a provider. It does now, here, for every call including the local one: a secret
+does not become acceptable because the model is on this machine, and the prompt is logged
+either way.
 """
 
 from __future__ import annotations
@@ -22,6 +29,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
+from typing import Any
 from uuid import UUID
 
 from thursday_shared.enums import DataSensitivity, ModelTier
@@ -71,6 +79,9 @@ class ModelRouter:
     #: The spend ledger and its ceiling. Optional so a router built for a test is not
     #: obliged to have one; the container always wires it.
     meter: CostMeter | None = None
+    #: The last stop before a prompt leaves for a provider (§90). Also optional, and also
+    #: always wired — a router without one is a test's router, not a deployment's.
+    redactor: Any = None
     _breaker: dict[str, int] = field(default_factory=dict)
     _tripped_at: dict[str, datetime] = field(default_factory=dict)
 
@@ -182,6 +193,7 @@ class ModelRouter:
         decision = self._within_cap(decision)
         provider = self.providers[decision.tier]
         name = getattr(provider, "name", "?")
+        request = self._redact(request, provider=name)
         try:
             response = await provider.complete(request)  # type: ignore[attr-defined]
             self._breaker[name] = 0
@@ -237,6 +249,35 @@ class ModelRouter:
             reasons=(*decision.reasons, verdict.reason + "; using the local model"),
             fallback_from=decision.provider_name,
         )
+
+    def _redact(self, request: LLMRequest, *, provider: str) -> LLMRequest:
+        """Strip credential-shaped material out of a prompt before it is sent.
+
+        Applied to every call, local included. A secret does not stop being one because the
+        model runs on this machine, and the prompt reaches a log line either way.
+
+        The trade-off is the redactor's own and is the right way round: a false positive
+        costs a redacted string in one prompt, and a false negative costs a credential that
+        is now in somebody else's training pipeline. What gets logged is the *name* of the
+        pattern that matched, never the value — a log line that reports what it redacted has
+        not redacted it.
+        """
+        if self.redactor is None:
+            return request
+
+        messages = []
+        hits: set[str] = set()
+        for message in request.messages:
+            result = self.redactor.redact(message.content)
+            hits.update(result.hits)
+            messages.append(
+                message if result.clean else message.model_copy(update={"content": result.text})
+            )
+        if not hits:
+            return request
+
+        log.warning("prompt_redacted", provider=provider, patterns=sorted(hits))
+        return request.model_copy(update={"messages": messages})
 
     def _meter(
         self,

@@ -38,3 +38,4 @@ done this way?" and have no answer.
 | [0028](0028-one-correction-is-not-a-rule.md) | One correction is not a rule, and a repair is not a permission | Both let the system quietly change what it is |
 | [0029](0029-a-paired-device-leaves-the-shared-token-behind.md) | A paired device leaves the shared token behind | A secret that authenticates *a* node authenticates every impostor too |
 | [0030](0030-a-budget-that-stops-thursday-is-worse-than-the-overspend.md) | A spending cap degrades; it does not stop | A limit that becomes an outage is a limit the owner deletes |
+| [0031](0031-a-security-rule-nobody-tests-is-a-hope.md) | The absolute security rules are executable tests | A property asserted only in prose stops being true without failing |

@@ -225,9 +225,17 @@ class PolicyTable:
         self._overrides = {canonical(k): v for k, v in (overrides or {}).items()}
 
     def get(self, action: str, *, autonomy: AutonomyLevel = AutonomyLevel.MODERATE) -> ActionPolicy:
-        """Resolve a policy: exact match, then namespace, then fail closed."""
+        """Resolve a policy: exact match, then the nearest listed ancestor, then namespace.
+
+        The ancestor step is the one that is easy to leave out and expensive to leave out
+        (ADR 0007). Without it, ``file.delete.bulk`` — an action nobody listed — did not
+        inherit ``file.delete``'s ASK_ALWAYS/HIGH. It fell through to the ``file`` namespace
+        default of ASK_ONCE/MEDIUM, so the *more* dangerous action carried the *weaker*
+        policy, and "always ask before deleting" could be sidestepped by naming the action
+        something more specific.
+        """
         name = canonical(action)
-        policy = self._policies.get(name) or self._from_namespace(name)
+        policy = self._policies.get(name) or self._from_ancestor(name) or self._from_namespace(name)
 
         override = self._overrides.get(name)
         if override is not None and self._may_override(policy, override, name):
@@ -253,6 +261,28 @@ class PolicyTable:
         return not (
             policy.level >= PermissionLevel.SYSTEM or policy.default is PolicyDecision.ASK_ALWAYS
         )
+
+    def _from_ancestor(self, name: str) -> ActionPolicy | None:
+        """The nearest listed ancestor's policy, carried down to this action.
+
+        Most specific first, so a listed rule always beats a more general one. The inherited
+        policy keeps the ancestor's level, decision, risk and reversibility: a sub-action is
+        a *narrower* case of its parent, and there is no reason a narrower case of "always
+        ask before deleting" should ask less.
+        """
+        for prefix in prefixes(name)[1:]:  # [0] is the action itself, already missed
+            parent = self._policies.get(prefix)
+            if parent is not None:
+                return ActionPolicy(
+                    name,
+                    parent.level,
+                    parent.default,
+                    parent.risk,
+                    parent.reversible,
+                    parent.bulk_threshold,
+                    parent.requires_backup,
+                )
+        return None
 
     def _from_namespace(self, name: str) -> ActionPolicy:
         for prefix in prefixes(name):
