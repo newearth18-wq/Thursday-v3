@@ -96,6 +96,23 @@ nothing at all when it refuses. Policy overrides are reapplied through `override
 archive cannot auto-approve what the table always asks about, and audit entries keep their
 stored hashes so `verify_chain` still catches a tampered backup.
 
+### Software update (Sprint 48 · ADR 0033)
+
+§120 — never execute an arbitrary update URL supplied by a model — is kept by having nowhere
+to break it. `UpdateService.apply` takes a verified `Release` and its bytes, never a location;
+`POST /api/v1/updates/apply` takes no body. The channel URL and the release signing key are
+configuration with no setter, and an artifact must live under the configured base even when a
+correctly signed manifest says otherwise: a signature over "fetch this from somewhere else" is
+a valid signature.
+
+Releases are signed over version, digest and URL together. Downgrades are refused unless asked
+for, since a signed old release stays correctly signed for ever. Applying goes through the
+Permission Engine as `system.update` (SYSTEM, ASK_ALWAYS), takes a backup first, and stops if
+the backup fails.
+
+This build verifies updates and cannot install one — no installer is wired, and `apply` says
+so rather than reporting success. The HTTPS adapter has not been run against a real server.
+
 ## 14.4 Controls always on
 
 Least privilege · explicit permission · encryption at rest (DB + vault) and in transit ·

@@ -40,3 +40,4 @@ done this way?" and have no answer.
 | [0030](0030-a-budget-that-stops-thursday-is-worse-than-the-overspend.md) | A spending cap degrades; it does not stop | A limit that becomes an outage is a limit the owner deletes |
 | [0031](0031-a-security-rule-nobody-tests-is-a-hope.md) | The absolute security rules are executable tests | A property asserted only in prose stops being true without failing |
 | [0032](0032-a-backup-nobody-has-restored-is-a-hope.md) | A backup nobody has restored is a hope | The value is entirely in the restore path, used once, under pressure |
+| [0033](0033-the-updater-has-no-parameter-for-a-url.md) | The updater has no parameter for a URL | A rule enforced by a check is one somebody can forget to call |

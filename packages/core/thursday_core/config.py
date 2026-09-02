@@ -92,6 +92,11 @@ _YAML_MAP: dict[str, dict[str, str]] = {
         "daily_cost_cap_usd": "daily_cost_cap_usd",
         "monthly_cost_cap_usd": "monthly_cost_cap_usd",
     },
+    "updates": {
+        "channel_url": "update_channel_url",
+        "signing_key": "update_signing_key",
+        "manifest_path": "update_manifest_path",
+    },
     "logging": {"level": "log_level", "json": "log_json"},
 }
 
@@ -224,6 +229,14 @@ class Settings(BaseSettings):
     daily_cost_cap_usd: float | None = 5.0
     monthly_cost_cap_usd: float | None = 50.0
     approval_ttl_seconds: float = 300.0
+
+    # updates -------------------------------------------------------------------
+    #: Where this deployment looks for updates, and the key it trusts to sign them (§120).
+    #: Configuration, deliberately: nothing at runtime can change either, so there is no
+    #: parameter a model could put a download location into.
+    update_channel_url: str = ""
+    update_signing_key: str = ""
+    update_manifest_path: Path | None = None
 
     # security ------------------------------------------------------------------
     vault_backend: str = "env"  # env | memory | keychain

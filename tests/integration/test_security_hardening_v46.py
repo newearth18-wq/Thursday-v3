@@ -329,36 +329,53 @@ async def test_turning_the_camera_off_is_never_refused(client):
 # "Never execute arbitrary update URL supplied by model"
 
 
-def test_no_code_path_downloads_and_runs_something_from_a_url():
+def test_the_only_downloader_takes_its_url_from_configuration():
     """§120: never execute an arbitrary update URL supplied by a model.
 
-    Proven by absence, which is the only way this can be proven: there is no updater that
-    takes a URL at all, so there is nothing for a model to supply one to.
+    This test proved the rule by absence until Sprint 48 built an updater, and it kept
+    passing afterwards because it looked for `urlopen` and `urlretrieve` — names the new code
+    does not use. A check that survives the arrival of the thing it was written to catch is
+    worse than no check.
 
-    Walked as an AST rather than grepped. The first version of this test was a text scan and
-    matched the word "curl" inside a docstring — a security check that cries wolf at prose is
-    one somebody switches off, and a scan that cannot tell code from a comment cannot be
-    trusted when it stays silent either.
+    What it checks now, stated precisely because the precision is the point: every *direct*
+    `httpx.get`-style call in the tree is in a module a reviewer expects one in. It does not
+    catch a call through a client object (`self._client.post(...)`), which is how the model
+    and embedding providers reach the network — those are reviewed as providers, and pinning
+    their endpoints is §34's job rather than §120's. The claim here is about the update path.
     """
     import ast
+    import inspect as _inspect
 
-    dangerous = {"urlretrieve", "urlopen", "Request"}
-    findings: list[str] = []
+    from thursday_core.updates import UpdateService
 
+    #: Modules that may fetch directly, and why. Anything else is a finding.
+    EXPECTED = {
+        "packages/core/thursday_core/updates.py",  # the update channel, pinned by config
+        "apps/node/__main__.py",  # the node's own pairing request, to its configured core
+    }
+    fetchers = {"get", "post", "urlopen", "urlretrieve", "request", "Request"}
+    modules = {"httpx", "requests", "urllib"}
+
+    found: set[str] = set()
     for root in (Path("packages"), Path("services"), Path("apps")):
         for path in root.rglob("*.py"):
             tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
             for node in ast.walk(tree):
-                if isinstance(node, ast.Call):
-                    name = getattr(node.func, "attr", getattr(node.func, "id", ""))
-                    if name in dangerous:
-                        findings.append(f"{path}:{node.lineno} {name}")
-                if isinstance(node, ast.Import | ast.ImportFrom):
-                    module = getattr(node, "module", "") or ""
-                    if "urllib.request" in module:
-                        findings.append(f"{path}:{node.lineno} imports {module}")
+                if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
+                    owner = getattr(node.func.value, "id", "")
+                    if owner in modules and node.func.attr in fetchers:
+                        found.add(str(path))
 
-    assert findings == [], findings
+    # Non-empty, or a subset assertion passes by finding nothing — which is exactly how this
+    # test stopped meaning anything the first time.
+    assert found, "the walk found no HTTP calls at all; it has stopped matching real code"
+    assert found <= EXPECTED, f"unexpected network calls: {sorted(found - EXPECTED)}"
+
+    # And the updater itself: no signature takes a location, so there is nowhere for a
+    # model-supplied URL to enter even if one were offered.
+    for method in (UpdateService.apply, UpdateService.verify, UpdateService.check):
+        names = set(_inspect.signature(method).parameters)
+        assert not names & {"url", "uri", "location", "download_url"}, method
 
 
 # ===========================================================================  §194

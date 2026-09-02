@@ -514,3 +514,72 @@ async def verify_backup(name: str, c: Container = Depends(get_container)) -> dic
     except BackupError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     return {"name": name, "ok": not problems, "problems": problems}
+
+
+# ------------------------------------------------------------------ updates (§120, Sprint 48)
+
+
+@router.get("/updates")
+async def update_state(c: Container = Depends(get_container)) -> dict:
+    """Whether a newer version exists, on the channel this deployment was configured with.
+
+    A read. It cannot install anything, and it takes no parameters — in particular it takes
+    no URL, which is the whole of §120 expressed as a function signature.
+    """
+    state = c.updates.check()
+    return {
+        "current": state.current,
+        "latest": state.latest,
+        "available": state.available,
+        "critical": state.critical,
+        "notes": state.notes,
+        "checked_at": state.checked_at.isoformat() if state.checked_at else None,
+        "problem": state.problem,
+        "history": state.history,
+    }
+
+
+@router.post("/updates/apply")
+async def apply_update(c: Container = Depends(get_container)) -> dict:
+    """Install the latest release — through the Permission Engine, like anything destructive.
+
+    Takes no body at all. What gets installed is whatever the *configured* channel offers,
+    verified against the *configured* key; there is no argument through which a caller could
+    name a version, a URL or a file. That is deliberate: this endpoint is exactly where an
+    attacker would want a parameter.
+    """
+    state = c.updates.check()
+    if state.problem:
+        raise HTTPException(status_code=503, detail=state.problem)
+    if not state.available:
+        return {"applied": False, "reason": f"{state.current} is already the latest release"}
+
+    verdict = c.permissions.decide(
+        ActionRequest(
+            action="system.update",
+            resource=state.latest or "",
+            level=PermissionLevel.SYSTEM,
+            risk=RiskLevel.CRITICAL,
+            reversible=False,
+            expected_outcome=(
+                f"replace Thursday {state.current} with {state.latest}, "
+                "which is the code that enforces every other rule"
+            ),
+        )
+    )
+    if verdict.decision is not PolicyDecision.AUTO:
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "decision": verdict.decision.value,
+                "reason": verdict.reason,
+                "rule": verdict.rule,
+                "installing": {"version": state.latest, "notes": state.notes},
+            },
+        )
+    # Unreachable while `system.update` is ASK_ALWAYS, and written out rather than assumed:
+    # a policy that changes should not silently turn this into a no-op that reports success.
+    raise HTTPException(
+        status_code=501,
+        detail="this build verifies updates but has no installer wired up",
+    )

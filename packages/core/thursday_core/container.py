@@ -88,6 +88,11 @@ from thursday_core.state import build_state_store
 from thursday_core.supervisor import Supervisor
 from thursday_core.tasks import TaskManager, TaskQueue
 from thursday_core.undo import UndoRegistry
+from thursday_core.updates import (
+    LocalReleaseSource,
+    PinnedHttpReleaseSource,
+    UpdateService,
+)
 from thursday_core.world import WorldState, WorldStateProjector
 
 log = get_logger(__name__)
@@ -132,6 +137,7 @@ class Container:
     models: Any = None
     costs: Any = None
     backups: Any = None
+    updates: Any = None
 
     # devices
     hub: Any = None
@@ -492,6 +498,8 @@ def build_container(settings: Settings | None = None, *, configure_logs: bool = 
     # Built last: it needs every service it backs up to exist first (Sprint 47).
     c.backups = BackupService(default_components(c), redactor=c.redactor)
 
+    c.updates = _build_updates(settings, c.backups)
+
     # Registered here rather than beside the others because they hold references to
     # services built further down the file. An agent that needs a collaborator takes it in
     # its constructor rather than reaching for the container: the collaborator is then
@@ -722,3 +730,28 @@ def _register_undo_executors(c: Container) -> None:
         c.undo.register_executor(operation, device_undo)
     c.undo.register_executor("file.restore", restore_file)
     c.undo.register_executor("memory.forget", memory_forget)
+
+
+def _build_updates(settings: Settings, backups: Any) -> UpdateService:
+    """The update channel, from configuration and from nowhere else (§120).
+
+    No installer is wired here. This build can *tell the owner* an update exists and can
+    verify one, and it deliberately cannot swap its own code over: replacing the running
+    system is a platform concern, and a half-built installer is worse than none.
+    """
+    from thursday_shared import __version__
+
+    source: Any = None
+    if settings.update_manifest_path is not None:
+        source = LocalReleaseSource(
+            path=settings.update_manifest_path, base_url=settings.update_channel_url
+        )
+    elif settings.update_channel_url:
+        source = PinnedHttpReleaseSource(base_url=settings.update_channel_url)
+
+    return UpdateService(
+        current_version=__version__,
+        source=source,
+        signing_key=settings.update_signing_key,
+        backups=backups,
+    )
