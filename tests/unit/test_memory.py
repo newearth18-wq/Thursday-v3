@@ -7,6 +7,7 @@ from thursday_memory.embeddings import HashEmbeddingProvider, cosine
 from thursday_memory.manager import MemoryManager
 from thursday_memory.vector import InMemoryVectorStore
 from thursday_shared.enums import DataSensitivity, MemoryLayer, MemorySource
+from thursday_shared.ids import new_id
 from thursday_shared.models import MemoryQuery, MemoryWrite
 
 
@@ -296,3 +297,104 @@ def test_the_hash_embedder_is_deterministic_and_separates_topics():
     )
     assert cosine(a, b) == pytest.approx(1.0, abs=1e-9)
     assert cosine(a, c) < 0.5
+
+
+# ------------------------------------------------------------------ retrieval scoring (V5)
+
+"""Retrieval ranking (V5).
+
+These exercise ranking, so writes go in with ``force=True``: the write policy is tested
+above, and letting it decline a fixture would silently turn a ranking test into an
+assertion about an empty list.
+"""
+
+
+async def test_this_project_s_answer_outranks_a_general_one(memory):
+    """§7 — project relevance is a *preference*, not a filter."""
+    project = new_id()
+    await memory.write(
+        MemoryWrite(
+            layer=MemoryLayer.PROCEDURAL,
+            content="reports start with a summary table",
+            source=MemorySource.USER,
+            importance=0.8,
+        ),
+        force=True,
+    )
+    await memory.write(
+        MemoryWrite(
+            layer=MemoryLayer.PROCEDURAL,
+            content="reports start with a summary table",
+            key="report-format",
+            project_id=project,
+            source=MemorySource.USER,
+            importance=0.8,
+        ),
+        force=True,
+    )
+
+    found = await memory.recall(
+        MemoryQuery(text="how do I write reports", prefer_project_id=project, k=5)
+    )
+    assert found[0].project_id == project
+    # The general habit is still there. Excluding it would hide the thing that shaped it.
+    assert any(r.project_id is None for r in found)
+
+
+async def test_another_project_s_memory_is_ranked_below_a_general_one(memory):
+    mine, theirs = new_id(), new_id()
+    await memory.write(
+        MemoryWrite(
+            layer=MemoryLayer.PROJECT,
+            content="the deadline is Friday",
+            project_id=theirs,
+            source=MemorySource.USER,
+        ),
+        force=True,
+    )
+    await memory.write(
+        MemoryWrite(
+            layer=MemoryLayer.SEMANTIC,
+            content="the deadline is Friday",
+            source=MemorySource.USER,
+        ),
+        force=True,
+    )
+    found = await memory.recall(MemoryQuery(text="deadline", prefer_project_id=mine, k=5))
+    assert found[0].project_id is None
+
+
+async def test_the_owner_outranks_an_agent_on_the_same_claim(memory):
+    """Confidence measures how sure a source is, not how much it is worth believing."""
+    await memory.write(
+        MemoryWrite(
+            layer=MemoryLayer.SEMANTIC,
+            content="the dean prefers PDF attachments",
+            source=MemorySource.AGENT,
+            confidence=0.95,
+        ),
+        force=True,
+    )
+    await memory.write(
+        MemoryWrite(
+            layer=MemoryLayer.SEMANTIC,
+            content="the dean prefers PDF attachments over links",
+            source=MemorySource.USER,
+            confidence=0.8,
+        ),
+        force=True,
+    )
+    found = await memory.recall(MemoryQuery(text="dean attachments", k=5))
+    assert found[0].source is MemorySource.USER
+
+
+async def test_a_hard_project_filter_still_excludes_everything_else(memory):
+    """The soft hint did not replace the filter — both exist, for different questions."""
+    project = new_id()
+    await memory.write(
+        MemoryWrite(layer=MemoryLayer.PROJECT, content="inside", project_id=project), force=True
+    )
+    await memory.write(MemoryWrite(layer=MemoryLayer.SEMANTIC, content="outside"), force=True)
+
+    found = await memory.recall(MemoryQuery(text="", project_id=project, k=10))
+    assert [r.content for r in found] == ["inside"]

@@ -33,6 +33,32 @@ class ResponseComposer:
             avatar_state=AvatarState.WORKING,
         )
 
+    def forgotten(self, subject: str, count: int, *, language: str) -> ThursdayReply:
+        """Confirm a deletion, with the count.
+
+        The number is the point. "Forgotten" alone leaves the owner unable to tell a
+        successful deletion from a search that matched nothing, and those need different
+        follow-ups.
+        """
+        key = "forgotten" if count else "nothing_to_forget"
+        return ThursdayReply(
+            text=phrase(key, language, subject=subject, count=count),
+            voice_mode=VoiceMode.NORMAL if count else VoiceMode.QUIET,
+            avatar_state=AvatarState.IDLE,
+        )
+
+    def will_not_remember(self, *, language: str) -> ThursdayReply:
+        """Acknowledge an instruction not to store this exchange.
+
+        Said out loud rather than done silently: being ignored and being obeyed look
+        identical from the outside, and only one of them is what the owner asked for.
+        """
+        return ThursdayReply(
+            text=phrase("will_not_remember", language),
+            voice_mode=VoiceMode.QUIET,
+            avatar_state=AvatarState.IDLE,
+        )
+
     def remembered(self, fact: str, *, language: str) -> ThursdayReply:
         """Confirm a write, quoting it back.
 

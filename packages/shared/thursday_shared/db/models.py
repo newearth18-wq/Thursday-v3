@@ -307,6 +307,10 @@ class Memory(Base, IdMixin, TimestampMixin):
         GUID(), ForeignKey("projects.id"), nullable=True, index=True
     )
     task_id: Mapped[uuid.UUID | None] = mapped_column(GUID(), ForeignKey("tasks.id"), nullable=True)
+    #: Which conversation produced this. What "don't remember this" searches on — without
+    #: it persisted, that command would work in memory and quietly stop working the moment
+    #: the SQL repositories land.
+    session_id: Mapped[uuid.UUID | None] = mapped_column(GUID(), nullable=True, index=True)
     key: Mapped[str | None] = mapped_column(String(200), nullable=True, index=True)
     content: Mapped[str] = mapped_column(Text)
     structured: Mapped[dict[str, Any]] = mapped_column(JSONColumn, default=dict)

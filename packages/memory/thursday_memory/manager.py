@@ -52,6 +52,40 @@ HALF_LIFE_DAYS: dict[MemoryLayer, float] = {
     MemoryLayer.KNOWLEDGE: math.inf,
 }
 
+#: How much weight a claim carries by where it came from (§74). The owner stating something
+#: outranks an agent's inference about the same subject even when the inference is more
+#: confident in itself — confidence measures how sure the source is, not how much it is
+#: worth believing.
+SOURCE_TRUST: dict[MemorySource, float] = {
+    MemorySource.USER: 1.0,
+    MemorySource.FILE: 0.85,
+    MemorySource.DATABASE: 0.85,
+    MemorySource.EMAIL: 0.75,
+    MemorySource.SENSOR: 0.7,
+    MemorySource.CAMERA: 0.65,
+    MemorySource.AGENT: 0.6,
+    MemorySource.WEB: 0.5,
+    MemorySource.INFERENCE: 0.5,
+}
+
+
+def _trigrams(text: str) -> set[str]:
+    cleaned = "".join(ch for ch in text.lower() if not ch.isspace())
+    return {cleaned[i : i + 3] for i in range(max(0, len(cleaned) - 2))}
+
+
+def _lexical_overlap(subject: str, content: str) -> float:
+    """How much of the subject literally appears in the content, 0-1.
+
+    Character trigrams rather than words, because Thai is written without spaces: "ตาราง"
+    inside "เป็นตารางก่อน" is a real mention, and any word-splitting approach would miss it.
+    """
+    wanted = _trigrams(subject)
+    if not wanted:
+        return 0.0
+    return len(wanted & _trigrams(content)) / len(wanted)
+
+
 #: Near-duplicate threshold. Above this, a write updates rather than adds.
 DEDUPE_SIMILARITY = 0.95
 #: New information may only supersede old on this much extra confidence (§7.4).
@@ -268,6 +302,7 @@ class MemoryManager:
             source_ref=write.source_ref,
             project_id=write.project_id,
             task_id=write.task_id,
+            session_id=write.session_id,
             sensitivity=write.sensitivity,
             pinned=write.pinned,
             expires_at=write.expires_at
@@ -306,6 +341,64 @@ class MemoryManager:
         self._records.pop(memory_id, None)
         await self._vectors.delete([memory_id])  # type: ignore[attr-defined]
 
+    async def forget_about(
+        self, subject: str, *, threshold: float = 0.55, limit: int = 50
+    ) -> list[MemoryRecord]:
+        """Delete everything the owner meant by "forget about X".
+
+        Deletion is the one memory operation with no undo, so the threshold is deliberately
+        higher than a recall's: retrieving something marginally relevant is a small cost,
+        and deleting something marginally relevant is not recoverable. What was removed is
+        returned rather than counted, so the reply can name it and the owner can tell
+        immediately if the match was too wide.
+        """
+        if not subject.strip():
+            return []
+
+        vector = (await self._embedder.embed([subject]))[0]  # type: ignore[attr-defined]
+
+        def relevance(record: MemoryRecord) -> float:
+            """Similarity, or a literal overlap — whichever is stronger.
+
+            For deletion the lexical signal is the *better* one. "Forget about the budget"
+            means forget the things that mention the budget, and a record that literally
+            says so is a certain match, where a vector is a guess. It also keeps this
+            working on the offline embedder, whose paraphrase similarity is weak — without
+            it, "forget X" would quietly match nothing whenever Thursday is offline, which
+            is the worst possible failure for a privacy operation.
+            """
+            return max(
+                cosine(vector, record.embedding or []), _lexical_overlap(subject, record.content)
+            )
+
+        matches = [
+            record
+            for record in list(self._records.values())
+            if record.is_current and relevance(record) >= threshold
+        ]
+        matches.sort(key=relevance, reverse=True)
+
+        removed: list[MemoryRecord] = []
+        for record in matches[:limit]:
+            await self.forget(record.id)
+            removed.append(record)
+        if removed:
+            log.info("memory_forgotten_on_request", subject=subject[:40], count=len(removed))
+        return removed
+
+    async def forget_from_session(self, session_id: UUID) -> list[MemoryRecord]:
+        """Remove what one conversation wrote.
+
+        The other half of "don't remember this": stopping future writes would leave the
+        thing the owner was pointing at still stored, which is the opposite of what they
+        asked. Scoped to the session rather than to a time window, so it cannot reach into
+        a different conversation that happened to be running alongside.
+        """
+        doomed = [r for r in list(self._records.values()) if r.session_id == session_id]
+        for record in doomed:
+            await self.forget(record.id)
+        return doomed
+
     async def get(self, memory_id: UUID) -> MemoryRecord | None:
         return self._records.get(memory_id)
 
@@ -330,7 +423,7 @@ class MemoryManager:
         scored: list[MemoryRecord] = []
         for record in candidates:
             sim = similarity.get(record.id, 0.0)
-            record.score = self._score(record, sim, now)
+            record.score = self._score(record, sim, now, query)
             scored.append(record)
 
         scored.sort(key=lambda r: r.score or 0.0, reverse=True)
@@ -340,17 +433,47 @@ class MemoryManager:
             record.last_accessed_at = now
         return top
 
-    def _score(self, record: MemoryRecord, similarity: float, now: datetime) -> float:
+    def _score(
+        self, record: MemoryRecord, similarity: float, now: datetime, query: MemoryQuery
+    ) -> float:
+        """§7's retrieval score: similarity, recency, importance, project relevance and
+        source confidence, plus how often this memory has actually proved useful.
+
+        The two weakest signals are deliberately the ones that decay: recency is worthless
+        for a preference the owner stated once and still holds, which is why the half-life
+        table gives `SEMANTIC` and `PREFERENCE` an infinite one.
+        """
         half_life = HALF_LIFE_DAYS.get(record.layer, 45.0)
         age_days = max(0.0, (now - record.created_at).total_seconds() / 86400)
         recency = 1.0 if math.isinf(half_life) else math.exp(-age_days / half_life)
         usage = min(1.0, record.access_count / 10)
+
+        # Project relevance. A soft preference, not a filter: asked how these reports are
+        # usually written, this project's answer should come first — but a general habit
+        # is still a real answer, and excluding it would hide the thing that shaped it.
+        wanted = query.prefer_project_id or query.project_id
+        if wanted is None:
+            relevance = 0.5  # nothing to prefer; neutral rather than a penalty for all
+        elif record.project_id == wanted:
+            relevance = 1.0
+        elif record.project_id is None:
+            relevance = 0.6  # general knowledge still applies to this project
+        else:
+            relevance = 0.0  # belongs to a different project
+
+        # Source confidence: *who* asserted it, weighted, times how sure they were. The
+        # owner saying something outranks an agent's inference about the same subject even
+        # when the inference is more confident in itself.
+        trust = SOURCE_TRUST.get(record.source, 0.6)
+        source_confidence = trust * record.confidence
+
         score = (
-            0.35 * similarity
-            + 0.20 * recency
-            + 0.20 * record.importance
-            + 0.15 * record.confidence
-            + 0.10 * usage
+            0.30 * similarity
+            + 0.15 * recency
+            + 0.18 * record.importance
+            + 0.15 * relevance
+            + 0.14 * source_confidence
+            + 0.08 * usage
         )
         return min(1.0, score + 0.15) if record.pinned else score
 

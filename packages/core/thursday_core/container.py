@@ -317,7 +317,6 @@ def build_container(settings: Settings | None = None, *, configure_logs: bool = 
         tasks=c.tasks,
         approval_timeout_s=settings.approval_ttl_seconds,
     )
-    c.projects = ProjectManager(tasks=c.tasks, memory=c.memory)
     c.agents = AgentRegistry()
     c.agents.register(ComputerAgent())
     c.agents.register(ResearchAgent())
@@ -327,6 +326,9 @@ def build_container(settings: Settings | None = None, *, configure_logs: bool = 
 
     # -- automation, skills, perception ---------------------------------------
     c.skills = SkillRegistry(executor=c.executor, tools=c.tools)
+    # After skills, because a project's picture includes what Thursday can already do
+    # for it (PART 44).
+    c.projects = ProjectManager(tasks=c.tasks, memory=c.memory, skills=c.skills)
     c.spatial = SpatialMemory()
     c.gesture_mode = GestureMode()
 

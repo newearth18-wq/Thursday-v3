@@ -249,6 +249,9 @@ class MemoryRecord(Base):
     source_ref: str | None = None
     project_id: UUID | None = None
     task_id: UUID | None = None
+    #: Which conversation produced this. Lets "don't remember this" find what
+    #: "this" refers to, which is the exchange that just happened.
+    session_id: UUID | None = None
     sensitivity: DataSensitivity = DataSensitivity.PRIVATE
     created_at: datetime = Field(default_factory=utcnow)
     last_accessed_at: datetime | None = None
@@ -283,6 +286,9 @@ class MemoryWrite(Base):
     source_ref: str | None = None
     project_id: UUID | None = None
     task_id: UUID | None = None
+    #: Which conversation produced this. Lets "don't remember this" find what
+    #: "this" refers to, which is the exchange that just happened.
+    session_id: UUID | None = None
     sensitivity: DataSensitivity = DataSensitivity.PRIVATE
     pinned: bool = False
     expires_at: datetime | None = None
@@ -306,6 +312,7 @@ class MemoryCandidate(Base):
     sensitivity: DataSensitivity = DataSensitivity.PRIVATE
     project_id: UUID | None = None
     task_id: UUID | None = None
+    session_id: UUID | None = None
     reason_to_store: str = ""
     #: Set when an agent proposes the write, so PART 76's rule can be applied.
     proposed_by: str | None = None
@@ -324,6 +331,7 @@ class MemoryCandidate(Base):
             source_ref=self.source_ref,
             project_id=self.project_id,
             task_id=self.task_id,
+            session_id=self.session_id,
             sensitivity=self.sensitivity,
             pinned=self.pinned,
             expires_at=self.expires_at,
@@ -356,7 +364,12 @@ class MemoryLink(Base):
 class MemoryQuery(Base):
     text: str = ""
     layers: list[MemoryLayer] = Field(default_factory=list)
+    #: Hard filter: only memories belonging to this project are considered at all.
     project_id: UUID | None = None
+    #: Soft hint: memories from this project rank *higher*, but others still surface.
+    #: The distinction matters — "how do I usually write these reports" should prefer
+    #: this project's answer without pretending the general one does not exist.
+    prefer_project_id: UUID | None = None
     task_id: UUID | None = None
     key: str | None = None
     k: int = 8
@@ -481,6 +494,11 @@ class Plan(Base):
     objective: str
     steps: list[PlanStep] = Field(default_factory=list)
     rationale: str = ""
+    #: Remembered instructions this plan is following — "these reports start with a
+    #: summary table". Recorded on the plan, not just injected into a prompt, so the owner
+    #: can see *why* the output looks the way it does and correct the memory rather than
+    #: the output (§7).
+    following: list[str] = Field(default_factory=list)
 
     def ready_steps(self) -> list[PlanStep]:
         """Steps whose dependencies are all COMPLETED — the DAG frontier."""

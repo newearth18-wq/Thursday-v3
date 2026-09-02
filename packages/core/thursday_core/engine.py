@@ -50,12 +50,24 @@ from thursday_core.logging import get_logger
 
 log = get_logger(__name__)
 
+#: What the intent rules call a layer, and what it means to the memory manager.
+_MEMORY_LAYERS: dict[str, MemoryLayer] = {
+    "preference": MemoryLayer.PREFERENCE,
+    "procedural": MemoryLayer.PROCEDURAL,
+    "project": MemoryLayer.PROJECT,
+    "semantic": MemoryLayer.SEMANTIC,
+}
+
 
 class ThursdayCore:
     """The one entry point. Everything the owner says arrives through ``handle_request``."""
 
     def __init__(self, container: Any) -> None:
         self.c = container
+        #: Sessions the owner told Thursday not to remember. Held in memory only:
+        #: a suppression that outlived the conversation would be a setting, and the
+        #: owner said "this", not "from now on".
+        self._suppressed: set[UUID] = set()
 
     # ------------------------------------------------------------------ PART 6 entry point
 
@@ -162,11 +174,17 @@ class ThursdayCore:
 
         if intent.kind is IntentKind.STOP:
             return self._finish(session_id, await self._handle_stop(language))
+        if intent.kind is IntentKind.MEMORY_FORGET:
+            # Ahead of everything else in the memory pipeline: the owner asking is the
+            # strongest signal the write policy has, in both directions (§7).
+            return self._finish(session_id, await self._handle_forget(intent, session_id, language))
         if intent.kind is IntentKind.MEMORY_WRITE:
             # A control intent: it never reaches the planner, because there is nothing to
             # plan. The write policy still applies — being told to remember something is
             # not a licence to store a credential (§35).
-            return self._finish(session_id, await self._handle_remember(intent, language))
+            return self._finish(
+                session_id, await self._handle_remember(intent, session_id, language)
+            )
         if intent.kind is IntentKind.CLARIFY or intent.confidence < 0.35:
             # A conversational answer is harmless even when the classifier was unsure;
             # only a low-confidence *action* has to become a question.
@@ -379,7 +397,26 @@ class ThursdayCore:
 
     # ------------------------------------------------------------------ side paths
 
-    async def _handle_remember(self, intent, language: str) -> ThursdayReply:
+    async def _handle_forget(self, intent, session_id: UUID, language: str) -> ThursdayReply:
+        """ "ลืมเรื่อง X" and "อย่าจำเรื่องนี้" are two different instructions.
+
+        The first deletes what is stored. The second is about the conversation happening
+        now — and "this" means what was *just said*, so honouring it has to do both halves:
+        stop writing from here on, and remove what this session already wrote. Only
+        stopping would leave the thing the owner was pointing at still in memory, which is
+        the opposite of what they asked for.
+        """
+        if str(intent.entities.get("mode")) == "suppress":
+            self._suppressed.add(session_id)
+            removed = await self.c.memory.forget_from_session(session_id)
+            log.info("memory_suppressed", session=str(session_id), removed=len(removed))
+            return self.c.composer.will_not_remember(language=language)
+
+        subject = str(intent.entities.get("subject") or "").strip()
+        removed = await self.c.memory.forget_about(subject)
+        return self.c.composer.forgotten(subject, len(removed), language=language)
+
+    async def _handle_remember(self, intent, session_id: UUID, language: str) -> ThursdayReply:
         """PART 39's write path, driven by the owner saying so out loud.
 
         The owner asking is the strongest signal the write policy has, so this goes in as
@@ -387,10 +424,13 @@ class ThursdayCore:
         the credential and privacy refusals still hold.
         """
         fact = str(intent.entities.get("fact") or intent.objective).strip()
-        layer = (
-            MemoryLayer.PREFERENCE
-            if str(intent.entities.get("layer", "")).lower() == "preference"
-            else MemoryLayer.SEMANTIC
+        # The rules already decided which layer this belongs in, and the distinction
+        # matters: a procedural memory is *applied* to later work by the planner, while a
+        # semantic one is only ever recalled. Mapping every non-preference write to
+        # SEMANTIC silently threw that away, so "these reports start with a summary table"
+        # became trivia instead of an instruction.
+        layer = _MEMORY_LAYERS.get(
+            str(intent.entities.get("layer", "")).lower(), MemoryLayer.SEMANTIC
         )
         judgement, record = await self.c.memory.propose(
             MemoryCandidate(
@@ -400,6 +440,7 @@ class ThursdayCore:
                 confidence=0.95,
                 # The owner said it deliberately; that is what importance is measuring.
                 importance=0.8,
+                session_id=session_id,
             )
         )
         if record is None:
@@ -427,6 +468,16 @@ class ThursdayCore:
         """§7.3 — the write policy decides; this only proposes."""
         if context.sensitivity >= DataSensitivity.SECRET:
             return
+        if turn.session_id in self._suppressed:
+            # The owner said not to. That outranks every heuristic below it (§7).
+            #
+            # Note where this check sits: on the *implicit* write path only. A later
+            # explicit "จำไว้ว่า X" in the same conversation is still honoured, because
+            # "don't remember this" was about what had just been said, not a standing gag.
+            # Reading it as one would mean silently ignoring the clearest instruction the
+            # owner can give — the same failure as remembering what they asked to forget.
+            log.debug("memory_write_suppressed", session=str(turn.session_id))
+            return
         if outcome is not None and outcome.ok:
             await self.c.memory.write(
                 MemoryWrite(
@@ -441,6 +492,7 @@ class ThursdayCore:
                     confidence=0.9,
                     source=MemorySource.AGENT,
                     task_id=outcome.task.id,
+                    session_id=turn.session_id,
                     sensitivity=context.sensitivity,
                 )
             )
@@ -459,6 +511,7 @@ class ThursdayCore:
                         importance=0.7,
                         confidence=0.85,
                         source=MemorySource.AGENT,
+                        session_id=turn.session_id,
                         sensitivity=context.sensitivity,
                     )
                 )
@@ -471,6 +524,7 @@ class ThursdayCore:
                 importance=0.4,
                 confidence=0.8,
                 source=MemorySource.USER,
+                session_id=turn.session_id,
                 sensitivity=context.sensitivity,
             )
         )

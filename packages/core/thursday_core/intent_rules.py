@@ -91,6 +91,20 @@ _REMEMBER_TH_WRAPPED = re.compile(r"^\s*(?:ช่วย)?จำ\s*(?P<fact>.+?)\
 #: Thai routinely drops the subject, so a bare "ชอบ…" is the speaker's own preference; in
 #: English the first person has to be explicit, or "the dean prefers PDF" — a fact about
 #: someone else — would be filed as something the owner wants.
+#: A statement about *how work should be done*, as opposed to a fact about the world.
+#: "reports start with a summary table" is not trivia to recall later; it is an instruction
+#: for next time, and filing it as semantic means it is never applied to anything.
+_PROCEDURAL_MARKER = re.compile(
+    r"(?i)("
+    r"ให้(?:สรุป|ทำ|เขียน|ใส่|จัด|แนบ|เริ่ม|ตรวจ)|"  # "ให้สรุปเป็นตาราง" — do it this way
+    r"แบบนี้|ทุกครั้งที่|เวลาทำ|ก่อนเสมอ|ต้อง(?:สรุป|มี|ใส่|แนบ)|"
+    r"\balways (?:start|begin|include|attach|use|put|check|sort|group)\b|"
+    r"\bwhen (?:i|we|you) (?:make|write|do|create|prepare|send)\b|"
+    r"\bthese (?:reports?|documents?|emails?|files?)\b|"
+    r"\bshould (?:start|begin|include|be) \b"
+    r")"
+)
+
 _PREFERENCE_MARKER = re.compile(
     r"(?i)(ชอบ|ไม่ชอบ|ปกติ(?:ผม|ฉัน|เรา)?|เสมอ|ทุกครั้ง|"
     r"\bi (?:like|prefer|hate|always|never|usually|want|need)\b|"
@@ -151,6 +165,26 @@ FOLDER_ALIASES: dict[str, str] = {
     "videos": "~/Videos",
     "home": "~",
 }
+
+#: "Forget X" — remove what is already stored. Distinct from _SUPPRESS below, which is
+#: about the exchange happening right now.
+_FORGET = re.compile(
+    r"(?i)^\s*(?:please\s+)?(?:forget|delete|remove|erase)\s+"
+    r"(?:everything\s+|all\s+|what\s+i\s+said\s+|the\s+memory\s+|that\s+)?"
+    r"(?:you\s+know\s+)?(?:about\s+|regarding\s+|to\s+do\s+with\s+)?(?P<subject>.+)$"
+)
+_FORGET_TH = re.compile(
+    r"^\s*(?:ช่วย)?ลืม(?:ข้อมูล|เรื่อง|ที่)?\s*(?:เรื่อง|เกี่ยวกับ|ที่ผมบอก(?:ว่า)?)?\s*(?P<subject>.+?)"
+    r"(?:\s*(?:ด้วย|หน่อย|ซะ|นะ|ครับ|ค่ะ))*\s*$"
+)
+
+#: "Don't remember this" — about the current exchange, not about stored memories. Nothing
+#: to search for and nothing to delete: the instruction is to *not write*.
+_SUPPRESS = re.compile(
+    r"(?i)^\s*(?:please\s+)?(?:do\s*n[o']?t|don't|never)\s+"
+    r"(?:remember|store|save|keep|record|log)\b"
+)
+_SUPPRESS_TH = re.compile(r"^\s*(?:อย่า|ห้าม|ไม่ต้อง)\s*(?:จำ|เก็บ|บันทึก)")
 
 _SEARCH_FILES = re.compile(
     r"(?i)(?:\b(?:find|search for|look for|show me)\b|ค้นหา|หา|ขอ)\s*"
@@ -322,6 +356,29 @@ def parse(text: str, *, wake_word: str = "thursday") -> RuleMatch | None:
                 rationale="a request to find files of a named type in a named folder",
             )
         )
+    if _SUPPRESS.match(body) or _SUPPRESS_TH.match(body):
+        # Nothing to search and nothing to delete — the instruction is to not write. It is
+        # its own intent rather than a flag on the turn, because the owner deserves to be
+        # told it was heard: silence would be indistinguishable from being ignored.
+        return RuleMatch(
+            Intent(
+                kind=IntentKind.MEMORY_FORGET,
+                objective=body,
+                entities={"mode": "suppress"},
+                confidence=0.94,
+                rationale="an instruction not to remember this exchange",
+            )
+        )
+    if (forget := _match_forget(body)) is not None:
+        return RuleMatch(
+            Intent(
+                kind=IntentKind.MEMORY_FORGET,
+                objective=body,
+                entities={"mode": "forget", "subject": forget},
+                confidence=0.92,
+                rationale="an instruction to forget something already stored",
+            )
+        )
     if (remember := _match_remember(body)) is not None:
         fact, layer = remember
         return RuleMatch(
@@ -410,6 +467,28 @@ def _match_file_search(body: str) -> tuple[list[str], str, bool] | None:
     return globs, folder, newest_first
 
 
+def _match_forget(body: str) -> str | None:
+    """The subject the owner wants forgotten.
+
+    Returns ``None`` when the sentence is only the verb. "Forget it" is a figure of speech
+    far more often than an instruction to erase memory, and deleting on that reading is not
+    a mistake that can be undone.
+    """
+    for pattern in (_FORGET_TH, _FORGET):
+        match = pattern.match(body)
+        if match is None:
+            continue
+        subject = match.group("subject").strip(" \t:,.!?")
+        if len(subject) < 3 or subject.lower() in _NOT_A_SUBJECT:
+            return None
+        return subject
+    return None
+
+
+#: Words that follow "forget" without naming anything to forget.
+_NOT_A_SUBJECT = frozenset({"it", "that", "this", "them", "มัน", "นี่", "นั่น"})
+
+
 def _match_remember(body: str) -> tuple[str, str] | None:
     """Pull the fact out of "remember that …" / "จำ … ไว้", and pick its layer.
 
@@ -424,6 +503,11 @@ def _match_remember(body: str) -> tuple[str, str] | None:
         fact = match.group("fact").strip(" \t:,.!?")
         if len(fact) < 3:
             return None
+        if _PROCEDURAL_MARKER.search(fact):
+            # How to do the work. Filed procedurally so it can be *applied* next time
+            # rather than merely recalled — the difference between a second brain and a
+            # notebook.
+            return fact, "procedural"
         return fact, ("preference" if _PREFERENCE_MARKER.search(fact) else "semantic")
     return None
 

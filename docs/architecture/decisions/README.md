@@ -25,3 +25,5 @@ done this way?" and have no answer.
 | [0015](0015-outbound-websocket-transport.md) | Node dials out; diagnostics are separate | A personal laptop cannot accept inbound connections |
 | [0016](0016-voice-state-machine.md) | The voice loop is a state machine | A boolean cannot express barge-in, so barge-in did not work |
 | [0017](0017-voice-provider-fallback.md) | Speech providers are an ordered chain | The network fails mid-utterance, not at startup |
+| [0018](0018-memory-that-changes-behaviour.md) | Remembered instructions are applied, not just recalled | A memory that changes nothing is a note |
+| [0019](0019-forgetting-is-a-first-class-operation.md) | Forgetting is an instruction | A memory wrongly kept is a failure the owner cannot see |

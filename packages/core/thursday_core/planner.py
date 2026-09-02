@@ -7,12 +7,24 @@ genuinely composite work (analyse → chart → write → check) fans out.
 
 from __future__ import annotations
 
-from thursday_shared.enums import IntentKind, StepKind
+from thursday_shared.enums import IntentKind, MemoryLayer, StepKind
 from thursday_shared.models import ContextPackage, Intent, Plan, PlanStep
 
 from thursday_core.logging import get_logger
 
 log = get_logger(__name__)
+
+#: Agents that produce something the owner will look at. A remembered instruction about
+#: formatting belongs on these and nowhere else — attaching "start with a summary table"
+#: to a file search is noise, and noise in an objective makes an agent do the wrong thing.
+PRODUCING_AGENTS: frozenset[str] = frozenset({"document", "data", "design", "media", "coding"})
+
+#: Below this, a remembered instruction is a guess, and acting on a guess about how the
+#: owner wants their work done is worse than asking.
+PROCEDURE_MIN_CONFIDENCE = 0.6
+
+#: More than a handful stops being guidance and starts being a second prompt.
+MAX_PROCEDURES = 4
 
 
 class Planner:
@@ -33,6 +45,7 @@ class Planner:
         }.get(intent.kind, self._empty_plan)
 
         plan = builder(intent, context)
+        self._apply_remembered_procedures(plan, context)
         if len(plan.steps) > self.max_steps:
             plan.steps = plan.steps[: self.max_steps]
             plan.rationale += f" (truncated to the {self.max_steps}-step limit)"
@@ -97,6 +110,45 @@ class Planner:
                 )
             ],
         )
+
+    def _apply_remembered_procedures(self, plan: Plan, context: ContextPackage) -> None:
+        """Make "do it the way I asked last time" actually happen (§7, V5).
+
+        The procedural memories are already in the context package — the gap this closes is
+        that nothing read them. A stored instruction that never changes what Thursday does
+        is a note, not a memory, and the owner who took the trouble to say "these reports
+        start with a summary table" would have to say it again every time.
+
+        Applied to the *producing* steps rather than to every step: telling a file search
+        to start with a summary table is noise, and noise in an objective is what makes an
+        agent do the wrong thing.
+        """
+        procedures = [
+            record
+            for record in context.memories
+            if record.layer in (MemoryLayer.PROCEDURAL, MemoryLayer.PREFERENCE)
+            and record.confidence >= PROCEDURE_MIN_CONFIDENCE
+            and record.content.strip()
+        ][:MAX_PROCEDURES]
+        if not procedures:
+            return
+
+        plan.following = [record.content.strip() for record in procedures]
+        instructions = "; ".join(plan.following)
+        for step in plan.steps:
+            if step.name in PRODUCING_AGENTS:
+                step.objective = (
+                    f"{step.objective}. Follow the owner's standing instructions: {instructions}"
+                )
+                step.args = {**step.args, "conventions": plan.following}
+
+        # If nothing in the plan produces output, the instructions still belong on the
+        # record — silently dropping them would leave no trace that they were considered.
+        if not any(s.name in PRODUCING_AGENTS for s in plan.steps):
+            plan.rationale += f" (noted, not applied: {instructions})"
+        else:
+            plan.rationale += f" (following {len(plan.following)} remembered instruction(s))"
+        log.debug("plan_follows_procedures", count=len(plan.following))
 
     def _research_plan(self, intent: Intent, context: ContextPackage) -> Plan:
         return Plan(

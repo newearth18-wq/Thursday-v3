@@ -57,10 +57,17 @@ class Project:
 
 
 class ProjectManager:
-    def __init__(self, *, tasks: object | None = None, memory: object | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        tasks: object | None = None,
+        memory: object | None = None,
+        skills: object | None = None,
+    ) -> None:
         self._projects: dict[UUID, Project] = {}
         self._tasks = tasks
         self._memory = memory
+        self._skills = skills
 
     def create(self, *, name: str, goal: str = "", description: str = "", **extra: Any) -> Project:
         project = Project(name=name, goal=goal, description=description, metadata=extra)
@@ -120,6 +127,13 @@ class ProjectManager:
                 )
             )
 
+        skills: list[dict[str, Any]] = []
+        if self._skills is not None:
+            skills = [
+                {"name": s.name, "description": s.description, "version": s.current_version}
+                for s in self._skills.active()  # type: ignore[attr-defined]
+            ]
+
         return {
             "id": str(project.id),
             "name": project.name,
@@ -156,6 +170,10 @@ class ProjectManager:
                 {"content": m.content, "layer": str(m.layer), "confidence": m.confidence}
                 for m in memories
             ],
+            # PART 44 lists skills as part of a project's picture. Only the *active* ones:
+            # a draft skill is something Thursday might learn to do, not something it can
+            # do, and listing the two together would misrepresent what is available.
+            "skills": skills,
         }
 
 

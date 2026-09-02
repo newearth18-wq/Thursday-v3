@@ -272,6 +272,9 @@ class IntentKind(StrEnum):
     # capability-bearing list above.
     MEMORY_WRITE = "MEMORY_WRITE"
     MEMORY_RECALL = "MEMORY_RECALL"
+    #: "forget X" and "don't remember this". Explicit memory commands outrank the write
+    #: policy: the owner asking is the strongest signal there is (§7).
+    MEMORY_FORGET = "MEMORY_FORGET"
     STATUS = "STATUS"
     STOP = "STOP"
     APPROVE = "APPROVE"

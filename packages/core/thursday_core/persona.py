@@ -66,6 +66,18 @@ PHRASES: dict[str, dict[str, str]] = {
         "th": "ผมไม่ได้เก็บเรื่องนี้ไว้ — {reason}",
         "en": "I did not store that — {reason}",
     },
+    "forgotten": {
+        "th": "ลืมแล้ว — ลบไป {count} รายการเรื่อง{subject}",
+        "en": "Forgotten — I removed {count} thing(s) about {subject}",
+    },
+    "nothing_to_forget": {
+        "th": "ผมไม่ได้เก็บอะไรเกี่ยวกับ{subject}ไว้เลย",
+        "en": "I had nothing stored about {subject}",
+    },
+    "will_not_remember": {
+        "th": "รับทราบ ผมจะไม่เก็บเรื่องนี้ไว้",
+        "en": "Understood — I won't keep this.",
+    },
     "stopped": {
         "th": "หยุดแล้ว",
         "en": "Stopped.",

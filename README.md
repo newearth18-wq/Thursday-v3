@@ -16,7 +16,7 @@ USER → THURSDAY → Understand → Plan → Delegate → Act → Verify → Re
 ## Status
 
 **Phase 1 is implemented and runnable**: the vertical slice from
-[docs/15-vertical-slice.md](docs/15-vertical-slice.md) works end to end, with 405 tests that
+[docs/15-vertical-slice.md](docs/15-vertical-slice.md) works end to end, with 421 tests that
 need no database, no network and no model credentials.
 
 ```
@@ -190,7 +190,7 @@ nothing completes without passing Verify.** Both are single choke points rather 
 conventions, so neither can be forgotten by a new caller.
 
 Full design in [`docs/`](docs/) — the fifteen deliverables, written before the code, plus
-the [V2 review](docs/architecture/00-v2-review.md) and seventeen
+the [V2 review](docs/architecture/00-v2-review.md) and nineteen
 [architecture decisions](docs/architecture/decisions/) recording what was chosen and what
 each choice cost:
 
@@ -213,7 +213,9 @@ each choice cost:
 - Device node protocol (TNP/1) with Windows, macOS and Linux adapters, a path jail, and
   ACT→VERIFY on every action
 - Task state machine with budgets, bounded informed retries, and a queue
-- Layered memory with an explicit write policy, conflict recording, and decay
+- Layered memory with an explicit write policy, conflict recording and decay — and
+  remembered instructions that are *applied* to later work rather than only recalled,
+  with "forget about X" and "don't remember this" as first-class commands
 - Obsidian vault that *refuses* credential material rather than redacting it
 - Agent orchestrator, capability-based selection, and a read-only Supervisor
 - Dynamic agents with intersected permissions, depth and count caps, destroyed with the task
@@ -255,7 +257,7 @@ the verification loop, the audit chain and the device round-trip are all real.
 
 ```bash
 ./scripts/check.sh           # everything CI runs: lint, format, types, tests, migrations
-pytest                       # 405 tests, no infrastructure
+pytest                       # 421 tests, no infrastructure
 ruff check . && ruff format .
 mypy packages services
 alembic upgrade head && alembic revision --autogenerate -m "what changed"

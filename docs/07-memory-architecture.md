@@ -94,3 +94,52 @@ frames by default. Answers are always framed as last-known-sighting, with time a
 confidence, never as a guarantee:
 
 > "ครั้งล่าสุดที่ระบบเห็นคือบนโต๊ะทำงาน เวลา 18:22 (ความมั่นใจ 0.92) — ยังไม่ยืนยันว่าตอนนี้ยังอยู่ตรงนั้น"
+
+
+---
+
+## V5 additions
+
+### Retrieval score
+
+```
+0.30 · semantic similarity
+0.15 · recency          (half-life by layer; infinite for SEMANTIC and PREFERENCE)
+0.18 · importance
+0.15 · project relevance
+0.14 · source confidence (trust by provenance × the source's own confidence)
+0.08 · usage             (how often this memory has actually proved useful)
++0.15 if pinned
+```
+
+Project relevance is a **soft** term, distinct from the `project_id` hard filter. Asked how
+these reports are usually written, this project's answer comes first — but a general habit
+is still a real answer, and filtering it out would hide the thing that shaped it. Use
+`prefer_project_id` for the preference and `project_id` when the question genuinely does not
+extend beyond one project.
+
+Source confidence is weighted by `SOURCE_TRUST`: the owner asserting something outranks an
+agent's inference about the same subject even when the inference is more confident in
+itself. Confidence measures how sure a source is, not how much it is worth believing.
+
+### Procedural memory is applied, not merely recalled
+
+A "remember that…" statement describing *how work should be done* is filed as `PROCEDURAL`,
+and `Planner._apply_remembered_procedures` attaches it to the steps that produce something.
+`Plan.following` records what is being followed, so the owner can see why the output looks
+the way it does and correct the memory rather than the output. See
+[ADR 0018](architecture/decisions/0018-memory-that-changes-behaviour.md).
+
+### Explicit memory commands
+
+| The owner says | What happens |
+|---|---|
+| "จำไว้ว่า X" / "remember that X" | Stored, at the layer the statement implies, with the owner as its source |
+| "ลืมเรื่อง X" / "forget what I said about X" | Deleted — embedding similarity *or* literal overlap, at a higher threshold than recall uses |
+| "อย่าจำเรื่องนี้" / "don't remember this" | This conversation's writes removed, and further implicit writes stopped |
+| "forget it" | Refused — a figure of speech far more often than an instruction |
+
+None of these override §35: being told to remember an API key still does not store one.
+A later explicit "remember X" after a suppression is honoured; suppression was about what
+had just been said, not a standing gag. See
+[ADR 0019](architecture/decisions/0019-forgetting-is-a-first-class-operation.md).
