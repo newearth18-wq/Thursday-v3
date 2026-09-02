@@ -25,7 +25,11 @@ dependencies = [
 postgres = ["asyncpg>=0.29", "pgvector>=0.3"]
 redis = ["redis>=5.0", "dramatiq[redis]>=1.17"]
 browser = ["playwright>=1.47"]
-voice = ["faster-whisper>=1.0", "sounddevice>=0.4", "openwakeword>=0.6"]
+# openWakeWord is what a real deployment would use for wake-word detection on raw audio,
+# but it pulls tflite-runtime, which publishes no wheels for the Python this project
+# requires. Listing it made the extra uninstallable, and nothing imports it — the
+# WakeWord port is what the code depends on. See packages/voice/thursday_voice/providers.py.
+voice = ["faster-whisper>=1.0", "sounddevice>=0.4"]
 vision = ["opencv-python>=4.10", "mediapipe>=0.10", "onnxruntime>=1.19"]
 dev = [
     "pytest>=8.3",

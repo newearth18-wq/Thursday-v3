@@ -21,4 +21,6 @@ thursday_vault/
 # Tauri / desktop build output
 apps/desktop/src-tauri/target/
 apps/desktop/src-tauri/gen/
-apps/desktop/package-lock.json
+.coverage
+coverage.xml
+htmlcov/
