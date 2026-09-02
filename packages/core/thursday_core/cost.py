@@ -237,6 +237,49 @@ class CostMeter:
             "capped": not self.check(now=now).allowed,
         }
 
+    # ------------------------------------------------------------------ backup (Sprint 47)
+
+    def export_state(self) -> list[dict]:
+        return [
+            {
+                "at": c.at.isoformat(),
+                "provider": c.provider,
+                "tier": c.tier,
+                "tokens_in": c.tokens_in,
+                "tokens_out": c.tokens_out,
+                "usd": c.usd,
+                "task_id": str(c.task_id) if c.task_id else None,
+                "agent": c.agent,
+            }
+            for c in self._charges
+        ]
+
+    def import_state(self, rows: list[dict], *, replace: bool = True) -> int:
+        """Restore the ledger, which is what makes a period cap survive a restart.
+
+        Named as the fix for Sprint 45's stated gap: with the ledger only in memory, a
+        restart reset the daily total, so restarting was a way around the cap.
+        """
+        from uuid import UUID
+
+        if replace:
+            self._charges.clear()
+        for row in rows:
+            self._charges.append(
+                Charge(
+                    at=datetime.fromisoformat(row["at"]),
+                    provider=row.get("provider", ""),
+                    tier=row.get("tier", ""),
+                    tokens_in=int(row.get("tokens_in", 0)),
+                    tokens_out=int(row.get("tokens_out", 0)),
+                    usd=float(row.get("usd", 0.0)),
+                    task_id=UUID(row["task_id"]) if row.get("task_id") else None,
+                    agent=row.get("agent", ""),
+                )
+            )
+        self._charges.sort(key=lambda c: c.at)
+        return len(rows)
+
     # ------------------------------------------------------------------ internals
 
     def _prune(self, now: datetime) -> None:

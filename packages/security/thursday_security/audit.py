@@ -74,6 +74,25 @@ class AuditLog:
         self._entries.append(entry)
         return entry
 
+    # ------------------------------------------------------------------ backup (Sprint 47)
+
+    def export_state(self) -> list[dict]:
+        return [entry.model_dump(mode="json") for entry in self._entries]
+
+    def import_state(self, rows: list[dict], *, replace: bool = True) -> int:
+        """Restore audit entries with their hashes untouched.
+
+        Not re-recorded through `record`, which would recompute `prev_hash` and `hash` — and
+        a chain recomputed on restore is a chain that verifies whatever it was given. The
+        point of keeping the stored hashes is that `verify_chain` can still catch a backup
+        somebody edited.
+        """
+        if replace:
+            self._entries.clear()
+        for row in rows:
+            self._entries.append(AuditEntry.model_validate(row))
+        return len(rows)
+
     def verify_chain(self) -> bool:
         """True if no entry was altered or removed since it was written."""
         previous = GENESIS

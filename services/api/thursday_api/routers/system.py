@@ -1,4 +1,4 @@
-"""System endpoints: health, world state, audit, undo, emergency stop."""
+"""System endpoints: health, world state, audit, undo, emergency stop, backups."""
 
 from __future__ import annotations
 
@@ -6,10 +6,18 @@ from enum import IntEnum
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
+from thursday_core.backup import BackupError
 from thursday_core.container import Container
 from thursday_security.policy import HARD_BLOCKED
-from thursday_shared.enums import AutonomyLevel, PolicyDecision, ProactivityLevel
+from thursday_shared.enums import (
+    AutonomyLevel,
+    PermissionLevel,
+    PolicyDecision,
+    ProactivityLevel,
+    RiskLevel,
+)
 from thursday_shared.errors import ThursdayError
+from thursday_shared.models import ActionRequest, utcnow
 
 from thursday_api.deps import get_container
 from thursday_api.schemas import EmergencyStopRequest
@@ -420,3 +428,89 @@ async def cost_detail(days: int = 30, c: Container = Depends(get_container)) -> 
             for charge in reversed(c.costs.charges(limit=50))
         ],
     }
+
+
+# ------------------------------------------------------------------ backup (Sprint 47)
+
+
+@router.get("/backups")
+async def list_backups(c: Container = Depends(get_container)) -> dict:
+    """What is on disk, newest first, each with whether it actually verifies.
+
+    The verification is done here rather than reported from the manifest: a manifest that
+    says a backup is fine is the part an editor would fix first, and "is my backup any good"
+    should be answerable on a quiet Tuesday rather than during the emergency.
+    """
+    directory = c.settings.data_dir / "backups"
+    entries = []
+    for path in sorted(directory.glob("*.json"), reverse=True):
+        try:
+            entries.append({"name": path.name, **c.backups.inspect(path)})
+        except BackupError as exc:
+            entries.append({"name": path.name, "unreadable": str(exc)})
+    return {"backups": entries, "directory": str(directory), "components": c.backups.components}
+
+
+@router.post("/backups")
+async def create_backup(note: str = "", c: Container = Depends(get_container)) -> dict:
+    """Take a backup now. Reading state and writing a file the owner asked for."""
+    directory = c.settings.data_dir / "backups"
+    path = directory / f"thursday-{utcnow():%Y%m%d-%H%M%S}.json"
+    manifest = c.backups.create(path, note=note)
+    return {"path": str(path), "name": path.name, **manifest.to_dict()}
+
+
+@router.post("/backups/{name}/restore")
+async def restore_backup(name: str, c: Container = Depends(get_container)) -> dict:
+    """Replace everything Thursday holds with what is in this archive.
+
+    Goes through the Permission Engine like any other destructive act — there is no back
+    door around it for administration, which is precisely the kind of caller that would be
+    given one. `system.restore` resolves to the `system` namespace: SYSTEM level,
+    ASK_ALWAYS, and not something an override can turn into AUTO.
+    """
+    path = (c.settings.data_dir / "backups" / name).resolve()
+    directory = (c.settings.data_dir / "backups").resolve()
+    if directory not in path.parents:
+        # The name comes off a URL. Without this, `../../etc/passwd` is a restore source.
+        raise HTTPException(status_code=400, detail="that is not a backup in this directory")
+
+    verdict = c.permissions.decide(
+        ActionRequest(
+            action="system.restore",
+            resource=name,
+            level=PermissionLevel.SYSTEM,
+            risk=RiskLevel.CRITICAL,
+            reversible=False,
+            expected_outcome=(
+                "replace every memory, task, audit entry, credential and preference "
+                f"with the contents of {name}"
+            ),
+        )
+    )
+    if verdict.decision is not PolicyDecision.AUTO:
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "decision": verdict.decision.value,
+                "reason": verdict.reason,
+                "rule": verdict.rule,
+                "restoring": c.backups.inspect(path),
+            },
+        )
+
+    try:
+        restored = c.backups.restore(path, confirm=True)
+    except BackupError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return {"restored": restored, "name": name}
+
+
+@router.get("/backups/{name}/verify")
+async def verify_backup(name: str, c: Container = Depends(get_container)) -> dict:
+    path = c.settings.data_dir / "backups" / name
+    try:
+        problems = c.backups.verify(path)
+    except BackupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return {"name": name, "ok": not problems, "problems": problems}

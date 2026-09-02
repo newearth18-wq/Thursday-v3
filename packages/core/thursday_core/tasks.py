@@ -179,6 +179,25 @@ class TaskManager:
                 spent=getattr(task.spent, breach),
             )
 
+    # ------------------------------------------------------------------ backup (Sprint 47)
+
+    def export_state(self) -> list[dict]:
+        return [task.model_dump(mode="json") for task in self._tasks.values()]
+
+    def import_state(self, rows: list[dict], *, replace: bool = True) -> int:
+        """Restore tasks exactly as they were, terminal states included.
+
+        No transition validation on the way in. These states were already reached legally,
+        and re-validating a restore would refuse a task that is legitimately mid-flight —
+        making the backup useless for the case it exists for.
+        """
+        if replace:
+            self._tasks.clear()
+        for row in rows:
+            task = Task.model_validate(row)
+            self._tasks[task.id] = task
+        return len(rows)
+
     def _require(self, task_id: UUID) -> Task:
         task = self._tasks.get(task_id)
         if task is None:

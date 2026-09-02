@@ -13,8 +13,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from thursday_core.logging import get_logger
 from thursday_shared.actions import canonical, prefixes
 from thursday_shared.enums import AutonomyLevel, PermissionLevel, PolicyDecision, RiskLevel
+
+log = get_logger(__name__)
 
 
 @dataclass(frozen=True)
@@ -324,6 +327,36 @@ class PolicyTable:
         """
         name = canonical(action)
         return self._may_override(self.get(name), PolicyDecision.AUTO, name)
+
+    # ------------------------------------------------------------------ backup (Sprint 47)
+
+    def export_state(self) -> list[dict]:
+        """The owner's own overrides. The shipped defaults are code, not state."""
+        return [
+            {"action": action, "decision": decision.value}
+            for action, decision in sorted(self._overrides.items())
+        ]
+
+    def import_state(self, rows: list[dict], *, replace: bool = True) -> int:
+        """Reapply the owner's overrides, through `override` so the rules still hold.
+
+        Deliberately *not* a straight assignment into `_overrides`. A backup is a file, and a
+        file is external content: restoring one by writing the dict directly would let an
+        edited backup auto-approve an action the table says to always ask about, which is the
+        exact bypass `_may_override` exists to prevent. Anything refused is skipped and said.
+        """
+        if replace:
+            self._overrides.clear()
+        restored = 0
+        for row in rows:
+            try:
+                self.override(row["action"], PolicyDecision(row["decision"]))
+                restored += 1
+            except (PermissionError, ValueError, KeyError) as exc:
+                log.warning(
+                    "policy_override_not_restored", action=row.get("action"), error=str(exc)
+                )
+        return restored
 
     def clear_override(self, action: str) -> None:
         """Drop a user override, returning the action to its shipped default."""

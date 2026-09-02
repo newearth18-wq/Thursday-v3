@@ -415,6 +415,31 @@ class MemoryManager:
             await self.forget(record.id)
         return doomed
 
+    # ------------------------------------------------------------------ backup (Sprint 47)
+
+    def export_state(self) -> list[dict]:
+        """Every stored memory as plain data, for a backup.
+
+        A method here rather than a backup module reading `_records`: the shape of this state
+        is this class's business, and a backup that knows the shape breaks quietly the first
+        time the class changes.
+        """
+        return [record.model_dump(mode="json") for record in self._records.values()]
+
+    def import_state(self, rows: list[dict], *, replace: bool = True) -> int:
+        """Load memories back. Returns how many were restored.
+
+        Restored as-is, without re-running `judge`. A restore is not a new observation — the
+        decision to keep each of these was already made, and re-judging them would let a
+        policy change since the backup silently discard things the owner still has.
+        """
+        if replace:
+            self._records.clear()
+        for row in rows:
+            record = MemoryRecord.model_validate(row)
+            self._records[record.id] = record
+        return len(rows)
+
     async def get(self, memory_id: UUID) -> MemoryRecord | None:
         return self._records.get(memory_id)
 

@@ -105,6 +105,46 @@ class DecisionJournal:
     def for_task(self, task_id: UUID) -> list[JournalEntry]:
         return [e for e in self._entries if e.task_id == task_id]
 
+    # ------------------------------------------------------------------ backup (Sprint 47)
+
+    def export_state(self) -> list[dict]:
+        return [
+            {
+                "id": str(e.id),
+                "decision": e.decision,
+                "reason": e.reason,
+                "alternatives": list(e.alternatives),
+                "impact": e.impact,
+                "source": e.source,
+                "at": e.at.isoformat(),
+                "task_id": str(e.task_id) if e.task_id else None,
+                "project_id": str(e.project_id) if e.project_id else None,
+            }
+            for e in self._entries
+        ]
+
+    def import_state(self, rows: list[dict], *, replace: bool = True) -> int:
+        """Restore the journal. Losing it is losing the answer to "why does Thursday do X"."""
+        from uuid import UUID
+
+        if replace:
+            self._entries.clear()
+        for row in rows:
+            self._entries.append(
+                JournalEntry(
+                    id=UUID(row["id"]),
+                    decision=row.get("decision", ""),
+                    reason=row.get("reason", ""),
+                    alternatives=list(row.get("alternatives", [])),
+                    impact=row.get("impact", ""),
+                    source=row.get("source", "thursday"),
+                    at=datetime.fromisoformat(row["at"]),
+                    task_id=UUID(row["task_id"]) if row.get("task_id") else None,
+                    project_id=UUID(row["project_id"]) if row.get("project_id") else None,
+                )
+            )
+        return len(rows)
+
     def __len__(self) -> int:
         return len(self._entries)
 

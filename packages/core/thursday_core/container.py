@@ -65,6 +65,7 @@ from thursday_vision.spatial import SpatialMemory
 from thursday_voice.routing import AudioRouter
 from thursday_voice.service import VoiceService
 
+from thursday_core.backup import BackupService, default_components
 from thursday_core.briefing import Briefer, DecisionJournal
 from thursday_core.bus import InProcessEventBus
 from thursday_core.composer import ResponseComposer
@@ -130,6 +131,7 @@ class Container:
     # models
     models: Any = None
     costs: Any = None
+    backups: Any = None
 
     # devices
     hub: Any = None
@@ -486,6 +488,9 @@ def build_container(settings: Settings | None = None, *, configure_logs: bool = 
         skills=c.skill_observer,
         costs=c.costs,
     )
+
+    # Built last: it needs every service it backs up to exist first (Sprint 47).
+    c.backups = BackupService(default_components(c), redactor=c.redactor)
 
     # Registered here rather than beside the others because they hold references to
     # services built further down the file. An agent that needs a collaborator takes it in

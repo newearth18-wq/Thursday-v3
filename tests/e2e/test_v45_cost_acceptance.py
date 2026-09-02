@@ -229,8 +229,14 @@ async def test_a_cap_is_not_something_a_conversation_can_raise(client, container
     assert container.costs.daily_usd == 0.01
     assert not container.costs.check()
 
-    paths = [r.path for r in client._transport.app.routes if hasattr(r, "path")]
-    assert not any("cost" in p and p.endswith(("cap", "budget", "limit")) for p in paths)
+    # Read from the OpenAPI document, not `app.routes`: this FastAPI wraps included routers,
+    # so `app.routes` yields wrappers with no `.path` and an assertion over it passes by
+    # having nothing to check.
+    paths = list(client._transport.app.openapi()["paths"])
+    assert any("cost" in path for path in paths), "the cost endpoints should be in this listing"
+    assert not [path for path in paths if any(w in path for w in ("cap", "budget", "limit"))], (
+        "there is no endpoint that raises a spending limit"
+    )
 
 
 async def test_the_ledger_survives_the_day_boundary_and_the_month_does_not_reset_with_it(

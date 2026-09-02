@@ -83,6 +83,19 @@ ASK_ALWAYS; nothing redacted a prompt on its way to a provider despite the modul
 otherwise; and `MemoryLayer.PROCEDURAL` — the layer that shapes later work — accepted writes
 from any source. All three are fixed.
 
+### Backup and restore (Sprint 47 · ADR 0032)
+
+`GET/POST /api/v1/backups` capture the state a fresh install cannot reconstruct — memories,
+tasks, the audit chain with its hashes, the spend ledger, the owner's policy overrides and the
+decision journal. The vault is excluded rather than redacted: a backup that could restore the
+owner's keys hands them over when it is stolen.
+
+Restore is destructive and behaves like it. It goes through the Permission Engine, refuses
+without explicit confirmation, refuses again if the archive does not verify, and restores
+nothing at all when it refuses. Policy overrides are reapplied through `override` so an edited
+archive cannot auto-approve what the table always asks about, and audit entries keep their
+stored hashes so `verify_chain` still catches a tampered backup.
+
 ## 14.4 Controls always on
 
 Least privilege · explicit permission · encryption at rest (DB + vault) and in transit ·
