@@ -79,6 +79,31 @@ class SkillRegistry:
         log.info("skill_captured", name=name, steps=len(steps), risk=str(version.risk))
         return skill
 
+    def adopt(self, proposal: Any, *, name: str, description: str = "") -> Skill:
+        """Turn a watched workflow into a **draft** skill (§51).
+
+        A draft, and there is no argument for anything else: this was observed, not
+        reviewed. The lifecycle's sandbox and approval exist for exactly this input — a
+        workflow nobody wrote — and a learner that produced active skills would walk around
+        all of it (ADR 0026).
+
+        The proposal's varying arguments become the draft's input schema, so what the owner
+        has to supply on each run is written down rather than discovered when a step fails.
+        """
+        skill = self.capture(
+            name=name,
+            description=description
+            or f"observed {proposal.runs} times: " + " → ".join(proposal.signature),
+            steps=list(proposal.steps),
+        )
+        skill.tags = ["learned"]
+        version = skill.latest
+        if version is not None:
+            version.input_schema = dict.fromkeys(proposal.parameters, "string")
+            version.changelog = f"learned from {proposal.runs} observed runs"
+        log.info("skill_learned", name=name, steps=len(proposal.steps), runs=proposal.runs)
+        return skill
+
     def compose(
         self,
         *,

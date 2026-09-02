@@ -13,15 +13,25 @@ import os
 from dataclasses import dataclass
 from typing import Any
 
+from thursday_agents.automation import AutomationAgent
 from thursday_agents.browser import BrowserAgent, register_browser_tools
+from thursday_agents.calendar import CalendarAgent
+from thursday_agents.coding import CodingAgent
+from thursday_agents.communication import CommunicationAgent
 from thursday_agents.computer import ComputerAgent
 from thursday_agents.data import DataAgent
+from thursday_agents.design import DesignAgent
 from thursday_agents.document import DocumentAgent
 from thursday_agents.factory import AgentFactory
+from thursday_agents.files import FileAgent
+from thursday_agents.media import MediaAgent
+from thursday_agents.ports import LocalCalendar, LocalOutbox
 from thursday_agents.registry import AgentRegistry
 from thursday_agents.research import ResearchAgent
+from thursday_agents.vision import VisionAgent
 from thursday_automation.engine import AutomationEngine, ProactivityGate
 from thursday_automation.routines import RoutineLearner
+from thursday_automation.skills.learning import SkillObserver
 from thursday_automation.skills.registry import SkillRegistry
 from thursday_devices.hub import DeviceHub
 from thursday_memory.embeddings import HashEmbeddingProvider, OllamaEmbeddingProvider
@@ -134,6 +144,9 @@ class Container:
     # automation, skills, perception
     automations: Any = None
     routines: Any = None
+    calendar: Any = None
+    outbox: Any = None
+    skill_observer: Any = None
     skills: Any = None
     spatial: Any = None
     camera: Any = None
@@ -343,6 +356,10 @@ def build_container(settings: Settings | None = None, *, configure_logs: bool = 
     c.agents.register(BrowserAgent())
     c.agents.register(DataAgent())
     c.agents.register(DocumentAgent())
+    c.agents.register(FileAgent())
+    c.agents.register(CodingAgent())
+    c.agents.register(DesignAgent())
+    c.agents.register(MediaAgent())
     c.agent_factory = AgentFactory(c.agents)
     c.supervisor = Supervisor(c.models, use_llm_critique=not settings.offline)
 
@@ -409,6 +426,22 @@ def build_container(settings: Settings | None = None, *, configure_logs: bool = 
     c.automations.attach()
     c.routines = RoutineLearner()
     c.routines.attach(c.bus)
+    c.skill_observer = SkillObserver()
+    c.skill_observer.attach(c.bus)
+
+    # Registered here rather than beside the others because they hold references to
+    # services built further down the file. An agent that needs a collaborator takes it in
+    # its constructor rather than reaching for the container: the collaborator is then
+    # visible in the wiring, and a test can supply a different one.
+    # No account is configured, so the local adapters stand in — real behaviour, nothing
+    # leaving the machine (ADR 0001). What they are *not* is the owner's actual calendar or
+    # mail, and docs/21 says so rather than letting the agent names imply otherwise.
+    c.calendar = LocalCalendar()
+    c.outbox = LocalOutbox()
+    c.agents.register(CalendarAgent(c.calendar))
+    c.agents.register(CommunicationAgent(c.outbox))
+    c.agents.register(VisionAgent(c.vision))
+    c.agents.register(AutomationAgent(c.automations, routines=c.routines, skills=c.skill_observer))
 
     from thursday_core.engine import ThursdayCore
 

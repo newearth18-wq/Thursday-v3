@@ -16,7 +16,7 @@ USER → THURSDAY → Understand → Plan → Delegate → Act → Verify → Re
 ## Status
 
 **Phase 1 is implemented and runnable**: the vertical slice from
-[docs/15-vertical-slice.md](docs/15-vertical-slice.md) works end to end, with 632 tests that
+[docs/15-vertical-slice.md](docs/15-vertical-slice.md) works end to end, with 678 tests that
 need no database, no network and no model credentials.
 
 ```
@@ -227,8 +227,14 @@ each choice cost:
 - Skills: capture → sandbox test → approval → activate → rollback, with risky steps
   gated; retrieved by what the owner *says* ("แบบที่เคยทำ"), turned into a plan, and
   composable into new skills that re-enter the lifecycle as drafts
+- Thirteen specialist agents plus the Supervisor. Most sit at a READ ceiling on purpose:
+  `coding` proposes patches and never applies or runs one, `file` finds duplicates and never
+  deletes them, and `communication` drafts messages with **no code path to a sent one** —
+  the single action here with neither an undo nor a verification
 - Data and document agents that compute every figure in Python and refuse to pass off a
   report that does not contain the numbers it was written from
+- Skills learned by watching: the same ordered sequence, seen twice, with the arguments that
+  varied recovered as its inputs — proposed as a draft, never activated
 - Vision: camera consent that is provable rather than promised, frame sampling that
   never lets a stream leave the machine, screen reading, "what is this?" resolution,
   and spatial memory that answers as a *sighting* with its age said out loud
@@ -262,6 +268,12 @@ each choice cost:
   routing and fallback are built and tested end to end against synthetic audio; what is
   missing is the hardware layer (`sounddevice`) and a cloud provider at the head of the
   chain. faster-whisper and Piper adapters are written but unexercised without model files
+- Real calendar and mail accounts. `CalendarProvider` and `MessageProvider` are ports with
+  local adapters — real behaviour, nothing leaving the machine, and *not* the owner's actual
+  calendar or inbox. A Google or Outlook adapter is a new class behind the same protocol.
+- Media editing of any kind. No Pillow, no ffmpeg, no codec, so the media agent identifies
+  files from their headers and says outright that it cannot convert, resize or generate.
+  The design agent writes specifications with contrast computed, and does not draw.
 - Mobile client (scaffold in `apps/mobile`). The desktop app is built — conversation,
   approvals, tasks, devices, memory and permissions — but has no voice capture and no
   embedded device node yet
@@ -283,7 +295,7 @@ the verification loop, the audit chain and the device round-trip are all real.
 
 ```bash
 ./scripts/check.sh           # everything CI runs: lint, format, types, tests, migrations
-pytest                       # 632 tests, no infrastructure
+pytest                       # 678 tests, no infrastructure
 ruff check . && ruff format .
 mypy packages services
 alembic upgrade head && alembic revision --autogenerate -m "what changed"

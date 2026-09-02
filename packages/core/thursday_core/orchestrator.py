@@ -13,6 +13,7 @@ from dataclasses import dataclass, field
 from typing import Any
 from uuid import UUID
 
+from thursday_security.redaction import redact_dict
 from thursday_shared.enums import AgentVerdict, StepKind, TaskState
 from thursday_shared.errors import (
     ApprovalRequired,
@@ -271,7 +272,18 @@ class AgentOrchestrator:
                     Event(
                         kind="task.step.completed",
                         task_id=task.id,
-                        payload={"step": step.name, "agent": agent.spec.name, "attempt": attempt},  # type: ignore[attr-defined]
+                        payload={
+                            "step": step.name,
+                            "agent": agent.spec.name,  # type: ignore[attr-defined]
+                            "attempt": attempt,
+                            # What a learned skill step would need to repeat this: the
+                            # device action if there was one, and the arguments. Redacted,
+                            # because a workflow that carried a credential in its steps
+                            # would *be* a stored credential (§35).
+                            "action": step.args.get("action"),
+                            "args": redact_dict(step.args.get("args") or step.args),
+                            "verified": True,
+                        },
                     )
                 )
                 return outcome

@@ -232,6 +232,11 @@ class ToolExecutor:
                     "ok": result.ok,
                     "verified": result.verified,
                     "agent": agent,
+                    # Redacted, like the audit entry beside it. Skill learning reads these
+                    # to work out which arguments varied between runs, and a workflow that
+                    # carried a credential in its steps would *be* a stored credential
+                    # (§35) — learned by watching, saved to disk, and replayed for ever.
+                    "args": redact_dict(call.args),
                 },
             )
         )
