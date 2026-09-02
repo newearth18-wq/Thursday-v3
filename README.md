@@ -234,7 +234,7 @@ each choice cost:
   state machine, working barge-in, per-mode prosody, audio routing and provider
   fallback that survives a network failure mid-utterance
 - Background worker: memory decay, health, device liveness, approval expiry
-- 64 REST operations, two WebSockets, 29-table schema with working migrations and seeds
+- 78 REST operations, two WebSockets, 29-table schema with working migrations and seeds
 
 **Designed, ported, not yet implemented** — every one has an interface and a Phase in
 [the roadmap](docs/13-roadmap.md):
