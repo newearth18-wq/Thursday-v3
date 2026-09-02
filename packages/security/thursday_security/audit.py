@@ -30,6 +30,10 @@ class AuditEntry(BaseModel):
     agent: str | None = None
     task_id: UUID | None = None
     device_id: UUID | None = None
+    #: The machine the instruction came *from*, when that is not the machine it ran on.
+    #: "Who told my PC to do that, and from where" is not answerable after the fact from
+    #: an entry that records only the target (§9.4, V8).
+    origin_device_id: UUID | None = None
     tool: str | None = None
     action: str = ""
     resource: str = ""

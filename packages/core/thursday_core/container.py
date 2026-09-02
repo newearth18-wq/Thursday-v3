@@ -36,6 +36,7 @@ from thursday_security.permissions import PermissionEngine
 from thursday_security.policy import PolicyTable
 from thursday_security.privacy import PrivacyClassifier, PrivacyZoneRegistry
 from thursday_security.redaction import SecretRedactor
+from thursday_security.remote import RemoteCommandGate
 from thursday_security.vault import ChainVault, EnvVault, InMemoryVault
 from thursday_shared.enums import ModelTier
 from thursday_tools.builtin import register_builtin_tools
@@ -54,6 +55,7 @@ from thursday_core.config import Settings, get_settings
 from thursday_core.context import ContextEngine
 from thursday_core.device_router import DeviceRouter
 from thursday_core.execution import ToolExecutor
+from thursday_core.focus import DeviceFocus
 from thursday_core.logging import configure_logging, get_logger
 from thursday_core.model_router import ModelRouter
 from thursday_core.orchestrator import AgentOrchestrator
@@ -110,6 +112,8 @@ class Container:
     # devices
     hub: Any = None
     device_router: Any = None
+    device_focus: Any = None
+    remote_gate: Any = None
     device_auth: Any = None
 
     # execution
@@ -297,8 +301,10 @@ def build_container(settings: Settings | None = None, *, configure_logs: bool = 
     c.models = _build_models(settings, c.vault)
 
     # -- devices --------------------------------------------------------------
-    c.hub = DeviceHub(c.bus)
+    c.remote_gate = RemoteCommandGate()
+    c.hub = DeviceHub(c.bus, remote_gate=c.remote_gate)
     c.device_router = DeviceRouter(c.hub)
+    c.device_focus = DeviceFocus()
     c.device_auth = _build_device_auth(settings)
 
     # -- execution ------------------------------------------------------------
@@ -384,6 +390,7 @@ def build_container(settings: Settings | None = None, *, configure_logs: bool = 
         models=c.models,
         bus=c.bus,
         device_router=c.device_router,
+        device_focus=c.device_focus,
         hub=c.hub,
         max_attempts=settings.max_step_attempts,
     )

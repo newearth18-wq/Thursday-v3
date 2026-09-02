@@ -16,7 +16,7 @@ USER → THURSDAY → Understand → Plan → Delegate → Act → Verify → Re
 ## Status
 
 **Phase 1 is implemented and runnable**: the vertical slice from
-[docs/15-vertical-slice.md](docs/15-vertical-slice.md) works end to end, with 534 tests that
+[docs/15-vertical-slice.md](docs/15-vertical-slice.md) works end to end, with 578 tests that
 need no database, no network and no model credentials.
 
 ```
@@ -200,7 +200,7 @@ each choice cost:
 | [Interfaces](docs/05-core-interfaces.md) | [Agents](docs/06-agent-architecture.md) | [Memory](docs/07-memory-architecture.md) | [Permissions](docs/08-permission-model.md) |
 | [Device protocol](docs/09-device-protocol.md) | [Events](docs/10-event-architecture.md) | [API](docs/11-api-spec.md) | [MVP scope](docs/12-mvp-scope.md) |
 | [Roadmap](docs/13-roadmap.md) | [Threat model](docs/14-threat-model.md) | [Vertical slice](docs/15-vertical-slice.md) | [Persona](docs/16-persona.md) |
-| [Voice](docs/17-voice.md) | [Vision](docs/18-vision.md) | [Gesture](docs/19-gestures.md) | |
+| [Voice](docs/17-voice.md) | [Vision](docs/18-vision.md) | [Gesture](docs/19-gestures.md) | [Multi-device](docs/20-multi-device.md) |
 
 ---
 
@@ -229,12 +229,17 @@ each choice cost:
   closed by default, a cooldown so a held gesture is one command rather than thirty, and
   a safety gate under which **no gesture alone** can confirm a deletion, a payment, a
   system change or anything that leaves the machine
+- Multi-device: a conversation that remembers which machine it is about and *says* which
+  one it acted on, task handoff between devices, presence-based output routing, per-device
+  trust, and a remote-command gate under which an instruction crossing machines is a
+  different instruction — refused from an unvouched device, asked about when it writes,
+  and audited at both ends
 - Model router with tiers, cost/privacy routing and a local fallback
 - Realtime voice: wake word → VAD → STT → core → verification → TTS, with a
   state machine, working barge-in, per-mode prosody, audio routing and provider
   fallback that survives a network failure mid-utterance
 - Background worker: memory decay, health, device liveness, approval expiry
-- 78 REST operations, two WebSockets, 29-table schema with working migrations and seeds
+- 80 REST operations, two WebSockets, 29-table schema with working migrations and seeds
 
 **Designed, ported, not yet implemented** — every one has an interface and a Phase in
 [the roadmap](docs/13-roadmap.md):
@@ -271,7 +276,7 @@ the verification loop, the audit chain and the device round-trip are all real.
 
 ```bash
 ./scripts/check.sh           # everything CI runs: lint, format, types, tests, migrations
-pytest                       # 534 tests, no infrastructure
+pytest                       # 578 tests, no infrastructure
 ruff check . && ruff format .
 mypy packages services
 alembic upgrade head && alembic revision --autogenerate -m "what changed"

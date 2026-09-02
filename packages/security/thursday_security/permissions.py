@@ -35,6 +35,7 @@ from thursday_shared.models import (
 
 from thursday_security.policy import PolicyTable, canonical
 from thursday_security.privacy import PrivacyZoneRegistry
+from thursday_security.remote import needs_confirmation_when_remote
 
 #: Which privacy surface each action namespace touches, for zone checks (PART 51, §68).
 _ACTION_SURFACE: dict[str, str] = {
@@ -222,6 +223,30 @@ class PermissionEngine:
                     level=level,
                     risk=risk,
                 )
+
+        # 4b. The instruction came from one machine and will run on another (V8).
+        #
+        #     Ahead of the grant check on purpose. A grant is a decision the owner made in
+        #     one situation, and "I approved deleting files while sitting at my PC" is not
+        #     the same decision as "anything holding my phone may delete files on my PC".
+        #     Letting a grant satisfy a remote consequential action would turn one local
+        #     approval into a standing remote capability, which is the opposite of what the
+        #     owner agreed to.
+        #
+        #     ASK_ALWAYS rather than ASK_ONCE for the same reason: `ASK_ONCE` may be
+        #     remembered as a grant, and a standing grant is exactly what must not exist
+        #     here (ADR 0008).
+        if req.is_remote and needs_confirmation_when_remote(req.action, level=level):
+            return PermissionVerdict(
+                decision=PolicyDecision.ASK_ALWAYS,
+                reason=(
+                    f"{req.action!r} is being run on another machine from somewhere you "
+                    "cannot see the result"
+                ),
+                rule="remote_command",
+                level=level,
+                risk=risk,
+            )
 
         # 5. A standing, scoped, unexpired grant.
         if (grant := self._find_grant(req)) is not None:

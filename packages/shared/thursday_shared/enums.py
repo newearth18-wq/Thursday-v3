@@ -354,6 +354,33 @@ class DeviceStatus(StrEnum):
     SLEEPING = "sleeping"
 
 
+class TrustLevel(IntEnum):
+    """How far a device is trusted to *drive other devices* (§9, V8).
+
+    An `IntEnum` because the comparisons are the point and they must not be string
+    comparisons — see `RiskLevel` above for what that mistake looks like.
+
+    The scale answers one question, and it is not "can Thursday act on this machine". It is
+    "may an instruction that arrives *from* this machine reach another one". Those differ:
+    a shared tablet in the kitchen is a perfectly good thing to display a recipe on and a
+    poor thing to accept "wipe the server" from.
+
+    New devices enrol at ``LIMITED``. Fail-closed is the only defensible default here,
+    because the failure it prevents — a device the owner has not vouched for driving a
+    machine they are not standing next to — is silent, remote, and by definition happening
+    where they cannot see it.
+    """
+
+    #: Enrolled but not vouched for, or explicitly distrusted. Receives nothing.
+    UNTRUSTED = 0
+    #: May be commanded, may not command. The default at enrolment.
+    LIMITED = 1
+    #: May drive other devices.
+    TRUSTED = 2
+    #: The owner's own machine. Trusted, and preferred when routing is ambiguous.
+    PRIMARY = 3
+
+
 class ControlTier(IntEnum):
     """§19. Lower is preferred; GUI clicking is the last resort."""
 

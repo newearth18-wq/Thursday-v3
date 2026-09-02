@@ -30,3 +30,5 @@ done this way?" and have no answer.
 | [0020](0020-the-camera-is-off.md) | The camera is off, provably | An indicator computed separately can disagree with reality |
 | [0021](0021-a-stream-never-leaves-the-machine.md) | A video stream never leaves the machine | 108,000 frames an hour is not something anyone can consent to |
 | [0022](0022-a-gesture-is-not-a-signature.md) | A gesture is not a signature | It is inferred, not performed — so it may never confirm anything consequential |
+| [0023](0023-the-conversation-knows-which-machine.md) | The conversation knows which machine, and says so | A command that succeeds on the wrong machine is reported as success |
+| [0024](0024-a-command-that-crosses-machines.md) | A command that crosses machines is a different command | Distance removes the owner's ability to notice and intervene |

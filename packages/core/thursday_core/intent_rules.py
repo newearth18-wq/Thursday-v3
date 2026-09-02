@@ -121,6 +121,22 @@ _ANALYZE = re.compile(
 )
 _SEARCH = re.compile(r"(?i)(search|ค้นหา|หาข้อมูล|look up|research|ค้นคว้า|google)")
 _STATUS = re.compile(r"(?i)(status|สถานะ|ไปถึงไหน|progress|คืบหน้า|what.*(working on|กำลังทำ)|pending)")
+# "How did that go?" asked after the fact, very often from a different device than the one
+# that did the work (V8 conversation handoff). Distinct from _STATUS, which asks what is
+# running *now*: this asks about something that has already finished.
+_LAST_RESULT = re.compile(
+    r"(?i)(ผล(?:ลัพธ์)?(?:เมื่อกี้|ตะกี้|ที่แล้ว|อันเมื่อกี้)|"
+    r"(?:เมื่อกี้|ตะกี้)\s*(?:เป็นยังไง|ผลเป็นไง|ได้ผลยังไง|เสร็จยัง)|"
+    r"how did (?:that|it) go|what happened (?:with|to) (?:that|it)|"
+    r"(?:the )?result (?:of|from) (?:that|the last one|earlier))"
+)
+# "Carry on from the machine I was just at" — the device that last did work, which is not
+# necessarily the device the owner is holding now.
+_CONTINUE_ELSEWHERE = re.compile(
+    r"(?i)(ทำต่อจาก(?:เครื่อง)?(?:เมื่อกี้|ตะกี้|ที่แล้ว)|"
+    r"ต่อจากเครื่อง(?:เมื่อกี้|ตะกี้|ที่แล้ว)|"
+    r"continue (?:from|on) (?:the )?(?:last|previous|other) (?:machine|device|computer))"
+)
 _APPROVE = re.compile(r"(?i)^\s*(approve|yes,? do it|อนุมัติ|ตกลง|ทำเลย|ยืนยัน|confirm)\b")
 _SCREENSHOT = re.compile(r"(?i)(screenshot|จับภาพหน้าจอ|แคปหน้าจอ|capture the screen)")
 _SYSINFO = re.compile(
@@ -237,8 +253,52 @@ class RuleMatch:
         return self.intent.confidence >= 0.75
 
 
+#: Thai politeness and softener particles that trail a command. They stack ("ให้หน่อยครับ")
+#: and they are never part of what the owner is naming — "เปิด Chrome ให้หน่อย" asks for
+#: Chrome, not for an application called "chrome ให้หน่อย".
+_TRAILING_PARTICLES = (
+    "ให้หน่อยครับ",
+    "ให้หน่อยค่ะ",
+    "ให้หน่อย",
+    "หน่อยครับ",
+    "หน่อยค่ะ",
+    "ให้ที",
+    "หน่อย",
+    "ให้ด้วย",
+    "ด้วยครับ",
+    "ด้วยค่ะ",
+    "ด้วย",
+    "ครับ",
+    "ค่ะ",
+    "คะ",
+    "นะครับ",
+    "นะคะ",
+    "นะ",
+    "ที",
+    "please",
+)
+
+
+def _strip_particles(text: str) -> str:
+    """Peel trailing politeness off a target name, repeatedly.
+
+    Repeatedly because they stack. One pass turns "ให้หน่อยครับ" into "ให้หน่อย", which is
+    still not part of the application's name.
+    """
+    cleaned = text.strip().strip("\"'.,!? ")
+    changed = True
+    while changed and cleaned:
+        changed = False
+        for particle in _TRAILING_PARTICLES:
+            if cleaned.lower().endswith(particle) and len(cleaned) > len(particle):
+                cleaned = cleaned[: -len(particle)].strip().strip("\"'.,!? ")
+                changed = True
+                break
+    return cleaned
+
+
 def _normalise_app(raw: str) -> str:
-    cleaned = raw.strip().strip("\"'.,!? ").removesuffix("ครับ").removesuffix("ค่ะ").strip().lower()
+    cleaned = _strip_particles(raw).lower()
     return APP_ALIASES.get(cleaned, cleaned)
 
 
@@ -283,6 +343,26 @@ def parse(text: str, *, wake_word: str = "thursday") -> RuleMatch | None:
                 target_device=device,
                 confidence=0.85,
                 rationale="device status question",
+            )
+        )
+    if _LAST_RESULT.search(body):
+        return RuleMatch(
+            Intent(
+                kind=IntentKind.STATUS,
+                objective="report the outcome of the most recent task",
+                entities={"subject": "last_task"},
+                confidence=0.85,
+                rationale="a question about work that has already finished",
+            )
+        )
+    if _CONTINUE_ELSEWHERE.search(body):
+        return RuleMatch(
+            Intent(
+                kind=IntentKind.STATUS,
+                objective="continue from the device that did the last work",
+                entities={"subject": "last_task", "continue": True},
+                confidence=0.82,
+                rationale="a request to pick up where the last device left off",
             )
         )
     if _STATUS.search(body):

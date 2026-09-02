@@ -93,15 +93,27 @@ class ResponseComposer:
         citations: list[Citation] | None = None,
         detail: str | None = None,
         people_present: int = 1,
+        on_device: str | None = None,
     ) -> ThursdayReply:
+        """``on_device`` names the machine when the owner did not.
+
+        Passed only when the conversation, rather than the sentence, chose where the work
+        went — see `thursday_core.focus`. Saying "opened Chrome" when Chrome opened on a
+        machine in another room is true and useless.
+        """
         if not verification.passed:
             # Reaching here with a failed verification is a bug in the caller; degrade to
             # the honest phrasing rather than trusting it.
             return self.unverified(
                 summary=summary, verification=verification, language=language, intent=intent
             )
+        text = (
+            phrase("verified_success_on_device", language, result=summary, device=on_device)
+            if on_device
+            else phrase("verified_success", language, result=summary)
+        )
         return ThursdayReply(
-            text=phrase("verified_success", language, result=summary),
+            text=text,
             voice_mode=self._mode(VoiceMode.SUCCESS, people_present),
             avatar_state=AvatarState.SPEAKING,
             confidence=verification.confidence,

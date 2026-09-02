@@ -50,6 +50,19 @@ class DeviceActionFailed(ThursdayError):
     retryable = True
 
 
+class DeviceActionRefused(ThursdayError):
+    """A cross-device instruction the remote gate would not relay (§9.4, V8).
+
+    Not retryable and deliberately distinct from `DeviceActionFailed`: nothing was
+    attempted on the target machine, so "it failed" would be the wrong thing to tell the
+    owner and retrying would be the wrong thing to do. The remedy is trust or an approval,
+    neither of which a second attempt supplies.
+    """
+
+    code = "device_action_refused"
+    retryable = False
+
+
 class VerificationFailed(ThursdayError):
     """The action ran but its effect could not be observed (§20, §76)."""
 

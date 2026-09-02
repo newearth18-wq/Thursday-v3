@@ -8,11 +8,14 @@ is one of the least forgivable mistakes an assistant can make.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from difflib import SequenceMatcher
 from uuid import UUID
 
 from thursday_shared.enums import DeviceStatus
 from thursday_shared.models import DeviceSummary, WorldStateSnapshot
+
+from thursday_core.focus import Focus
 
 #: Below this, Thursday asks instead of picking.
 CONFIDENCE_FLOOR = 0.7
@@ -43,6 +46,10 @@ class DeviceResolution:
     confidence: float
     reason: str
     candidates: tuple[DeviceSummary, ...] = ()
+    #: True when neither this sentence nor the owner's own machine chose the device —
+    #: the conversation did. The reply must then say which machine it acted on, because
+    #: the owner has no other way to find out where their command landed.
+    announce: bool = False
 
     @property
     def needs_confirmation(self) -> bool:
@@ -66,24 +73,48 @@ class DeviceRouter:
         world: WorldStateSnapshot,
         origin_device_id: UUID | None = None,
         required_capability: str | None = None,
+        focus: Focus | None = None,
     ) -> DeviceResolution:
+        """Work out which machine an instruction is for.
+
+        ``focus`` is the device the conversation is already about (see `thursday_core.focus`).
+        It applies only when the sentence names no device *and* does not say "this machine" —
+        an explicit word always beats an inherited one, in both directions.
+        """
         devices = [d for d in self._hub.online() if self._capable(d, required_capability)]  # type: ignore[attr-defined]
         if not devices:
             return DeviceResolution(None, 0.0, "no online device has the required capability")
 
         normalised = (hint or "").strip().lower()
 
-        # "this machine" — the device the turn came from, then the active device.
+        # An explicit "this machine" overrides the focus: the owner just moved the subject
+        # back to where they are standing, and saying so must be enough.
+        if normalised in _THIS_WORDS:
+            focus = None
+
         if not normalised or normalised in _THIS_WORDS:
-            for candidate_id, reason in (
-                (origin_device_id, "the device you're speaking from"),
-                (world.active_device_id, "the active device"),
-            ):
+            candidates: list[tuple[UUID | None, str, float, bool]] = []
+            if focus is not None:
+                candidates.append(
+                    (focus.device_id, f"the {focus.device_name} you just asked about", 0.85, True)
+                )
+            candidates += [
+                (
+                    origin_device_id,
+                    "the device you're speaking from",
+                    0.95 if hint else 0.85,
+                    False,
+                ),
+                (world.active_device_id, "the active device", 0.95 if hint else 0.85, False),
+            ]
+            for candidate_id, reason, confidence, announce in candidates:
                 if candidate_id is None:
                     continue
                 match = next((d for d in devices if d.id == candidate_id), None)
                 if match is not None:
-                    return DeviceResolution(match, 0.95 if hint else 0.85, reason, tuple(devices))
+                    return DeviceResolution(
+                        match, confidence, reason, tuple(devices), announce=announce
+                    )
             if len(devices) == 1:
                 return DeviceResolution(devices[0], 0.8, "the only device online", tuple(devices))
             return DeviceResolution(
@@ -146,6 +177,48 @@ class DeviceRouter:
         return DeviceResolution(
             None, score, f"{hint!r} does not clearly match one device", tuple(devices)
         )
+
+    def follow_me(
+        self,
+        *,
+        world: WorldStateSnapshot,
+        origin_device_id: UUID | None = None,
+        capability: str = "audio",
+    ) -> DeviceSummary | None:
+        """Where the answer should come out (§9 follow-me, V8).
+
+        A different question from `resolve`, which asks where the *work* happens. The owner
+        can perfectly well ask their phone to do something on the office PC and still want
+        the answer on the phone — those are not the same device and conflating them means
+        Thursday replies to an empty room.
+
+        Presence is inferred from the last thing the owner actually did, because that is the
+        only evidence there is. Thursday does not know where anybody is; it knows which
+        machine last had a person typing or talking at it, and treats a more recent
+        interaction as better evidence than an older one. That is a heuristic and it is
+        wrong sometimes — which is why it only ever chooses where to *speak*, never what to
+        do, and why the fallbacks below end at "say nothing out loud" rather than at a
+        guess.
+        """
+        candidates = [
+            d
+            for d in self._hub.online()  # type: ignore[attr-defined]
+            if d.capabilities.supports(capability)
+        ]
+        if not candidates:
+            return None
+
+        for device_id in (origin_device_id, world.active_device_id):
+            if device_id is None:
+                continue
+            match = next((d for d in candidates if d.id == device_id), None)
+            if match is not None:
+                return match
+
+        # Nothing anchors the owner to a machine. The most recently seen device is the best
+        # remaining evidence, and one candidate is not evidence at all — it is the only
+        # option, which is a different thing and worth not confusing.
+        return max(candidates, key=lambda d: d.last_seen_at or datetime.min.replace(tzinfo=UTC))
 
     def _capable(self, device: DeviceSummary, capability: str | None) -> bool:
         if device.status is not DeviceStatus.ONLINE:

@@ -207,6 +207,8 @@ class ThursdayCore:
             return self._finish(session_id, reply)
         if intent.kind is IntentKind.STATUS and intent.entities.get("subject") == "device":
             return self._finish(session_id, self._device_status_reply(intent, context, language))
+        if intent.kind is IntentKind.STATUS and intent.entities.get("subject") == "last_task":
+            return self._finish(session_id, self._last_task_reply(intent, context, language))
 
         # 6. Plan.
         plan = self.c.planner.plan(intent, context)
@@ -295,6 +297,7 @@ class ThursdayCore:
                 intent=intent,
                 citations=_citations(outcome),
                 people_present=people,
+                on_device=_inherited_device(outcome),
             )
 
         failure = outcome.first_failure()
@@ -356,10 +359,23 @@ class ThursdayCore:
         )
 
     def _device_status_reply(self, intent, context: ContextPackage, language: str) -> ThursdayReply:
+        """Answer "is the home PC on?" — and remember that we are now talking about it.
+
+        Asking after a machine by name is the clearest statement there is of what the next
+        sentence will be about. Without recording it, "เปิด Chrome ให้หน่อย" lands on the
+        phone in the owner's hand (§22, V8).
+        """
         hint = intent.entities.get("device_name") or intent.target_device
         resolution = self.c.device_router.resolve(
             hint, world=context.world, origin_device_id=context.turn.device_id
         )
+        if resolution.device is not None and hint:
+            self.c.device_focus.remember(
+                context.turn.session_id,
+                device_id=resolution.device.id,
+                device_name=resolution.device.name,
+                reason=f"you asked about {resolution.device.name}",
+            )
         if resolution.device is None:
             known = self.c.hub.find_by_name(str(hint or ""))
             if known is not None:
@@ -380,6 +396,71 @@ class ThursdayCore:
         if telemetry and telemetry.active_window:
             bits.append(f"active window: {telemetry.active_window}")
         return self.c.composer.answer(" · ".join(bits), language=language, confidence=0.95)
+
+    def _last_task_reply(self, intent, context: ContextPackage, language: str) -> ThursdayReply:
+        """ "ผลเมื่อกี้เป็นยังไง" — asked, as often as not, from a different machine (V8).
+
+        The lookup is deliberately not scoped to this conversation. The owner ran something
+        on the PC, walked away, and is now asking on their phone: a new device, a new
+        session, the same question. Tasks live in the core precisely so that this works —
+        a task scoped to the session that started it would be invisible the moment the owner
+        picked up a different device, which would make the core's ownership of tasks
+        pointless.
+        """
+        task = next(
+            (t for t in self.c.tasks.list(limit=20) if t.status.is_terminal),
+            None,
+        )
+        if task is None:
+            text = (
+                "ยังไม่มีงานที่เสร็จไปก่อนหน้านี้ครับ"
+                if language == "th"
+                else "There is no finished task to report on yet."
+            )
+            return self.c.composer.answer(text, language=language, confidence=0.9)
+
+        where = self.c.hub.summary(task.origin_device_id) if task.origin_device_id else None
+        device = where.name if where else None
+        # Naming the machine is the point of the answer, not decoration: the owner is
+        # asking from somewhere else, and "it worked" without "on the PC" is ambiguous
+        # in exactly the situation this reply exists for.
+        result = (task.result or {}).get("summary") or task.title
+
+        if intent.entities.get("continue"):
+            if where is not None:
+                self.c.device_focus.remember(
+                    context.turn.session_id,
+                    device_id=where.id,
+                    device_name=where.name,
+                    reason=f"you asked to continue on {where.name}",
+                )
+            text = (
+                f"งานล่าสุดคือ “{task.title}” บน {device or 'เครื่องที่ไม่ทราบชื่อ'} — "
+                f"{self._outcome_word(task, language)} สั่งต่อได้เลยครับ ผมจะทำบนเครื่องนั้น"
+                if language == "th"
+                else f"The last task was “{task.title}” on {device or 'an unknown device'} — "
+                f"{self._outcome_word(task, language)}. Say what to do next and I'll run it there."
+            )
+            return self.c.composer.answer(text, language=language, confidence=0.9)
+
+        text = (
+            f"งานล่าสุด “{task.title}” {self._outcome_word(task, language)}"
+            + (f" บน {device}" if device else "")
+            + (f" — {result}" if result and result != task.title else "")
+            if language == "th"
+            else f"The last task, “{task.title}”, {self._outcome_word(task, language)}"
+            + (f" on {device}" if device else "")
+            + (f" — {result}" if result and result != task.title else "")
+        )
+        return self.c.composer.answer(text, language=language, confidence=0.92)
+
+    @staticmethod
+    def _outcome_word(task, language: str) -> str:
+        if task.status is TaskState.COMPLETED:
+            return "เสร็จแล้ว" if language == "th" else "completed"
+        if task.status is TaskState.CANCELLED:
+            return "ถูกยกเลิก" if language == "th" else "was cancelled"
+        return "ล้มเหลว" if language == "th" else "failed"
 
     def _status_text(self, context: ContextPackage, language: str) -> str:
         running = self.c.tasks.list(status=TaskState.RUNNING)
@@ -628,6 +709,19 @@ def _explain_failure(failure) -> str:
     if failure.verification is not None and failure.verification.critique:
         return failure.verification.critique
     return f"step {failure.step.name!r} did not complete"
+
+
+def _inherited_device(outcome) -> str | None:
+    """The machine a step ran on, when the conversation rather than the owner chose it.
+
+    None in the ordinary case — naming the device on every reply would be noise, and noise
+    is what stops people reading the one reply where it mattered.
+    """
+    for step_outcome in outcome.outcomes:
+        step = step_outcome.step
+        if step.device_announced and step.resolved_device:
+            return step.resolved_device
+    return None
 
 
 def _citations(outcome) -> list[Citation]:

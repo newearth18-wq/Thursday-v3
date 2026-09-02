@@ -49,6 +49,7 @@ class DeviceActionTool:
                 task_id=call.task_id,
                 step_id=call.step_id,
                 reason=call.reason,
+                origin_device_id=call.origin_device_id,
             ),
         )
         return ToolResult(

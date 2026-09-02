@@ -13,8 +13,12 @@ from typing import Any
 from uuid import UUID
 
 from thursday_core.logging import get_logger
-from thursday_shared.enums import DeviceStatus
-from thursday_shared.errors import DeviceActionFailed, DeviceUnavailable
+from thursday_shared.enums import DeviceStatus, TrustLevel
+from thursday_shared.errors import (
+    DeviceActionFailed,
+    DeviceActionRefused,
+    DeviceUnavailable,
+)
 from thursday_shared.ids import new_id
 from thursday_shared.models import (
     DeviceAction,
@@ -45,6 +49,9 @@ class LoopbackDeviceSession:
     """
 
     transport = "loopback"
+    #: Nothing crosses a wire, so there is no wire to read. True by construction rather
+    #: than by configuration.
+    encrypted = True
 
     def __init__(self, *, device_id: UUID, name: str, executor: Any, kind: str = "desktop") -> None:
         self.device_id = device_id
@@ -68,6 +75,30 @@ class LoopbackDeviceSession:
         return None
 
 
+#: Peers whose traffic never reaches a network segment anyone else can be on.
+_LOOPBACK_HOSTS = frozenset({"127.0.0.1", "::1", "localhost", "::ffff:127.0.0.1"})
+
+
+def _link_is_protected(websocket: Any) -> bool:
+    """Whether this connection can be read or altered by a third party in transit.
+
+    Read from the connection itself, never from the node's own claim about itself: a node
+    asserting "I am encrypted" over plaintext is precisely the case being guarded against.
+
+    TLS qualifies. So does a plaintext socket from the loopback interface, and that is a
+    deliberate exception rather than an oversight — traffic that never leaves the machine
+    has no segment for anyone to sit on, and a node co-located with the core is the ordinary
+    development and single-machine setup. Refusing it would mean either provisioning
+    certificates to try multi-device flows locally, or turning the check off; the second is
+    what people would actually do, and a check that gets turned off protects nothing.
+    """
+    scheme = str(getattr(getattr(websocket, "url", None), "scheme", "") or "").lower()
+    if scheme in ("wss", "https"):
+        return True
+    host = str(getattr(getattr(websocket, "client", None), "host", "") or "").lower()
+    return host in _LOOPBACK_HOSTS
+
+
 class WebSocketDeviceSession:
     """A remote node. Actions are correlated by ``action_id`` so results can arrive late."""
 
@@ -75,6 +106,7 @@ class WebSocketDeviceSession:
 
     def __init__(self, websocket: Any, hello: Hello) -> None:
         self._ws = websocket
+        self.encrypted = _link_is_protected(websocket)
         self.device_id = hello.device_id
         self.name = hello.name
         self.kind = hello.kind
@@ -142,15 +174,33 @@ class WebSocketDeviceSession:
 
 
 class DeviceHub:
-    def __init__(self, bus: object | None = None) -> None:
+    def __init__(self, bus: object | None = None, remote_gate: object | None = None) -> None:
         self._sessions: dict[UUID, Any] = {}
         self._known: dict[UUID, DeviceSummary] = {}
         self._bus = bus
+        #: Gates instructions that cross from one machine to another. Injected rather than
+        #: constructed here so the security package stays out of the device layer's imports,
+        #: and duck-typed for the same reason the bus is.
+        self._remote_gate = remote_gate
 
     # ------------------------------------------------------------------ registry
 
-    async def register(self, session: Any, *, location_context: str | None = None) -> DeviceSummary:
+    async def register(
+        self,
+        session: Any,
+        *,
+        location_context: str | None = None,
+        trust_level: TrustLevel | None = None,
+    ) -> DeviceSummary:
+        """Take a connected node into the registry.
+
+        ``trust_level`` defaults to whatever the device was last enrolled with, and to
+        `TrustLevel.LIMITED` for one that has never been seen. It is deliberately not read
+        from the node's own HELLO: a device asserting its own trust level is a device
+        granting itself permission, which is not a trust model (§9.4).
+        """
         self._sessions[session.device_id] = session
+        previous = self._known.get(session.device_id)
         summary = DeviceSummary(
             id=session.device_id,
             name=session.name,
@@ -159,7 +209,13 @@ class DeviceHub:
             status=DeviceStatus.ONLINE,
             capabilities=session.capabilities,
             last_seen_at=session.last_seen_at,
-            location_context=location_context,
+            location_context=location_context or (previous.location_context if previous else None),
+            trust_level=(
+                trust_level
+                if trust_level is not None
+                else (previous.trust_level if previous else TrustLevel.LIMITED)
+            ),
+            encrypted=bool(getattr(session, "encrypted", True)),
         )
         self._known[session.device_id] = summary
         log.info(
@@ -191,6 +247,28 @@ class DeviceHub:
     def summary(self, device_id: UUID) -> DeviceSummary | None:
         return self._known.get(device_id)
 
+    def set_trust(self, device_id: UUID, level: TrustLevel) -> DeviceSummary | None:
+        """Change how far a device is trusted to drive others. The owner's call, only."""
+        summary = self._known.get(device_id)
+        if summary is None:
+            return None
+        before = summary.trust_level
+        summary.trust_level = level
+        log.info("device_trust_changed", device=summary.name, before=str(before), after=str(level))
+        return summary
+
+    def note_activity(
+        self, device_id: UUID, *, app: str | None = None, task_id: UUID | None = None
+    ) -> None:
+        """Record what Thursday is doing on a machine — the presence half of §9 identity."""
+        summary = self._known.get(device_id)
+        if summary is None:
+            return
+        if app is not None:
+            summary.current_app = app
+        summary.current_task_id = task_id
+        summary.last_seen_at = datetime.now(UTC)
+
     def find_by_name(self, name: str) -> DeviceSummary | None:
         lowered = name.strip().lower()
         for summary in self._known.values():
@@ -220,11 +298,26 @@ class DeviceHub:
                 capability=spec.capability,
             )
 
+        verdict = self._check_remote(action, device_id)
+        if verdict is not None and not verdict.allowed:
+            # Refused before dispatch, like an unsupported capability: nothing has happened
+            # on the target machine, and the caller learns why rather than seeing a failure.
+            raise DeviceActionRefused(
+                verdict.reason,
+                device=session.name,
+                action=action.action,
+            )
+
         started = time.perf_counter()
         result = await session.invoke(action)
+        origin = self._known.get(action.origin_device_id) if action.origin_device_id else None
         log.info(
             "device_action",
             device=session.name,
+            # Both ends, always. "Who told my PC to do that, and from where" is not
+            # answerable afterwards from a log line that records only the target.
+            origin=origin.name if origin else None,
+            remote=bool(origin and origin.id != device_id),
             action=action.action,
             ok=result.ok,
             verified=result.verified,
@@ -233,10 +326,37 @@ class DeviceHub:
         await self._emit(
             "device.action_completed",
             device_id,
-            {"action": action.action, "ok": result.ok, "verified": result.verified},
+            {
+                "action": action.action,
+                "ok": result.ok,
+                "verified": result.verified,
+                "origin_device_id": str(action.origin_device_id)
+                if action.origin_device_id
+                else None,
+            },
             task_id=action.task_id,
         )
         return result
+
+    def _check_remote(self, action: DeviceAction, device_id: UUID) -> Any:
+        """Ask the remote gate whether this instruction may cross machines.
+
+        Only refusals come back from here. Whether an allowed remote action *also* needs
+        the owner's approval was already decided upstream by the permission engine, which
+        saw the same `origin_device_id` on the `ActionRequest`.
+        """
+        if self._remote_gate is None:
+            return None
+        target = self._known.get(device_id)
+        if target is None:
+            return None
+        origin = self._known.get(action.origin_device_id) if action.origin_device_id else None
+        return self._remote_gate.check(  # type: ignore[attr-defined]
+            action=action.action,
+            origin=origin,
+            target=target,
+            origin_device_id=action.origin_device_id,
+        )
 
     async def enrol(
         self,

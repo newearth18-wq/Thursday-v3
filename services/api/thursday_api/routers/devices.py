@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisco
 from thursday_core.container import Container
 from thursday_core.logging import get_logger
 from thursday_devices.hub import WebSocketDeviceSession
-from thursday_shared.enums import PolicyDecision
+from thursday_shared.enums import PolicyDecision, TrustLevel
 from thursday_shared.errors import ThursdayError
 from thursday_shared.models import ActionRequest, DeviceAction, DeviceCapabilities
 from thursday_shared.protocol import (
@@ -39,6 +39,45 @@ async def get_device(device_id: UUID, c: Container = Depends(get_container)) -> 
     if summary is None:
         raise HTTPException(status_code=404, detail="unknown device")
     return summary.model_dump(mode="json")
+
+
+@router.post("/devices/{device_id}/trust")
+async def set_device_trust(
+    device_id: UUID, level: int, c: Container = Depends(get_container)
+) -> dict:
+    """Set how far a device is trusted to drive *other* devices (§9.4, V8).
+
+    The owner's decision and nobody else's. A node cannot set this for itself — it is not
+    sent at HELLO and is not read from one — because a device asserting its own trust level
+    is a device granting itself permission.
+    """
+    try:
+        trust = TrustLevel(level)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail=f"trust level must be one of {[int(t) for t in TrustLevel]}",
+        ) from exc
+    summary = c.hub.set_trust(device_id, trust)
+    if summary is None:
+        raise HTTPException(status_code=404, detail="unknown device")
+    return summary.model_dump(mode="json")
+
+
+@router.get("/devices/output/follow-me")
+async def follow_me(c: Container = Depends(get_container)) -> dict:
+    """Which device an answer would be spoken on right now (§9 follow-me).
+
+    Exposed because "why did that come out of the kitchen speaker" is otherwise
+    unanswerable, and a routing heuristic nobody can inspect is a routing heuristic nobody
+    can correct.
+    """
+    world = c.world.snapshot()
+    device = c.device_router.follow_me(world=world, origin_device_id=world.active_device_id)
+    return {
+        "device": device.model_dump(mode="json") if device else None,
+        "reason": "the machine the owner most recently used that can play audio",
+    }
 
 
 @router.post("/devices/register")

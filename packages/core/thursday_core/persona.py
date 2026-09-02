@@ -38,6 +38,13 @@ PHRASES: dict[str, dict[str, str]] = {
         "th": "{result} เรียบร้อย (ยืนยันแล้ว)",
         "en": "{result}. Verified.",
     },
+    # Used when the machine was inherited from the conversation rather than named in the
+    # sentence. Naming it is not politeness: it is the owner's only way to find out where
+    # their command actually landed (V8, `thursday_core.focus`).
+    "verified_success_on_device": {
+        "th": "{result} บน {device} เรียบร้อย (ยืนยันแล้ว)",
+        "en": "{result} on {device}. Verified.",
+    },
     "unverified": {
         "th": "คำสั่ง{action}ถูกส่งแล้ว แต่ผมยังยืนยันผลไม่ได้ — {detail}",
         "en": "The {action} command was sent, but I could not verify the result — {detail}",

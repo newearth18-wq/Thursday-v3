@@ -84,6 +84,7 @@ class ToolExecutor:
             action=call.tool,
             resource=resource,
             device_id=call.device_id,
+            origin_device_id=call.origin_device_id,
             agent=agent,
             level=spec.permission,
             risk=spec.risk,
@@ -105,6 +106,8 @@ class ToolExecutor:
                     action=call.tool,
                     resource=resource,
                     task_id=call.task_id,
+                    device_id=call.device_id,
+                    origin_device_id=call.origin_device_id,
                     input_summary=redact_dict(call.args),
                     result="blocked",
                     permission_decision=verdict.decision.value,
@@ -170,6 +173,8 @@ class ToolExecutor:
                     action=call.tool,
                     resource=resource,
                     task_id=call.task_id,
+                    device_id=call.device_id,
+                    origin_device_id=call.origin_device_id,
                     input_summary=redact_dict(call.args),
                     result="failed",
                     permission_decision=verdict.decision.value,
@@ -205,6 +210,7 @@ class ToolExecutor:
                 resource=resource,
                 task_id=call.task_id,
                 device_id=call.device_id,
+                origin_device_id=call.origin_device_id,
                 input_summary=redact_dict(call.args),
                 output_summary=redact_dict({"evidence": result.evidence}),
                 result="ok"
@@ -271,6 +277,10 @@ class AgentContext:
             call = call.model_copy(update={"device_id": self.device_id})
         if call.task_id is None:
             call = call.model_copy(update={"task_id": self.task_id})
+        if call.origin_device_id is None and self.context is not None:
+            # Stamped once, here, from the turn that started this work — an agent cannot
+            # choose its own origin, which is the only way the remote gate means anything.
+            call = call.model_copy(update={"origin_device_id": self.context.turn.device_id})
         result = await self._executor.execute(
             call,
             permissions=self.permissions,

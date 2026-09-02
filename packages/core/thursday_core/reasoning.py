@@ -112,10 +112,23 @@ class ReasoningEngine:
     # ------------------------------------------------------------------ helpers
 
     def _anchor(self, intent: Intent, context: ContextPackage) -> Intent:
-        """Resolve deixis against world state — "that file", "this machine", "continue"."""
+        """Resolve deixis against world state — "that file", "continue".
+
+        Deliberately *not* "this machine". An utterance that names no device used to have
+        ``target_device`` filled in with ``"this"`` here, on the reasoning that the owner
+        must mean the machine in front of them. Two things were wrong with that.
+
+        It is a word the owner did not say. Downstream, "no device was named" and "the owner
+        said *this machine*" are different facts and the router treats them differently: the
+        second is an explicit instruction that overrides the device the conversation is
+        already about (`thursday_core.focus`). Manufacturing it here meant a command
+        following "is the home PC on?" was routed as though the owner had insisted on the
+        phone in their hand.
+
+        And it was unnecessary. `DeviceRouter.resolve` already falls back to the originating
+        device when no hint is given; the default added nothing except the ambiguity.
+        """
         world = context.world
-        if intent.target_device is None and world.active_device_name:
-            intent.target_device = "this"
         entities = dict(intent.entities)
         if (
             entities.get("path") in ("that file", "ไฟล์นั้น", "the file", "")

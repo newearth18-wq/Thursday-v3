@@ -31,6 +31,7 @@ from thursday_shared.enums import (
     RiskLevel,
     StepKind,
     TaskState,
+    TrustLevel,
     VoiceMode,
 )
 from thursday_shared.ids import current_trace_id, new_id
@@ -182,6 +183,8 @@ class DeviceTelemetry(Base):
 
 
 class DeviceSummary(Base):
+    """One machine, as the core sees it (§9 device identity, V8)."""
+
     id: UUID
     name: str
     kind: str
@@ -191,6 +194,21 @@ class DeviceSummary(Base):
     telemetry: DeviceTelemetry | None = None
     last_seen_at: datetime | None = None
     location_context: str | None = None
+    #: How far this device is trusted to drive *other* devices. Not how far Thursday is
+    #: trusted to act on it — see `TrustLevel`.
+    trust_level: TrustLevel = TrustLevel.LIMITED
+    #: True when the link to this node cannot be read in transit: TLS, or a node running
+    #: inside this process. A remote command over a readable link is refused.
+    encrypted: bool = True
+    #: What the machine is doing, for routing and for "what is the PC up to?". Distinct
+    #: from telemetry's `active_app`: this is the last thing *Thursday* did there, which is
+    #: the half the owner is asking about when they ask Thursday.
+    current_app: str | None = None
+    current_task_id: UUID | None = None
+
+    @property
+    def may_command_others(self) -> bool:
+        return self.trust_level >= TrustLevel.TRUSTED
 
 
 class DeviceAction(Base):
@@ -203,6 +221,10 @@ class DeviceAction(Base):
     task_id: UUID | None = None
     step_id: UUID | None = None
     reason: str = ""
+    #: The machine the instruction came *from*. When it differs from the machine the action
+    #: is being sent to, this is a remote command and the hub gates it (V8). None means the
+    #: origin is unknown, which is itself a reason to refuse a cross-device action.
+    origin_device_id: UUID | None = None
     trace_id: str = Field(default_factory=current_trace_id)
 
 
@@ -481,6 +503,12 @@ class PlanStep(Base):
     args: dict[str, Any] = Field(default_factory=dict)
     depends_on: list[UUID] = Field(default_factory=list)
     device_hint: str | None = None
+    #: The machine this step actually ran on, filled in by the orchestrator once the router
+    #: has decided. The hint is what the owner said; this is what happened.
+    resolved_device: str | None = None
+    #: True when the device was inherited from the conversation rather than named in the
+    #: sentence — the reply then has to say where the work went (see `thursday_core.focus`).
+    device_announced: bool = False
     success_criteria: list[str] = Field(default_factory=list)
     max_attempts: int = 2
     status: TaskState = TaskState.NEW
@@ -574,6 +602,9 @@ class ToolCall(Base):
     task_id: UUID | None = None
     step_id: UUID | None = None
     device_id: UUID | None = None
+    #: Where the instruction came from, as opposed to ``device_id``, which is where it is
+    #: going. When they differ this is a remote command (V8) and the hub gates it.
+    origin_device_id: UUID | None = None
     reason: str = ""
 
 
@@ -746,6 +777,8 @@ class ActionRequest(Base):
     action: str
     resource: str = ""
     device_id: UUID | None = None
+    #: The machine the instruction came from, when it is not the one it will run on.
+    origin_device_id: UUID | None = None
     agent: str | None = None
     level: PermissionLevel = PermissionLevel.READ
     risk: RiskLevel = RiskLevel.LOW
@@ -755,6 +788,15 @@ class ActionRequest(Base):
     task_id: UUID | None = None
     step_id: UUID | None = None
     expected_outcome: str = ""
+
+    @property
+    def is_remote(self) -> bool:
+        """True when this instruction crosses from one machine to another (V8)."""
+        return (
+            self.origin_device_id is not None
+            and self.device_id is not None
+            and self.origin_device_id != self.device_id
+        )
 
 
 class PermissionVerdict(Base):

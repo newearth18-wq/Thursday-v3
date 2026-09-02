@@ -12,9 +12,23 @@ from abc import ABC, abstractmethod
 from typing import Any
 
 from thursday_core.logging import get_logger
+from thursday_shared.errors import ThursdayError
 from thursday_shared.models import AgentResult, AgentSpec, Event, JobContract
 
 log = get_logger(__name__)
+
+
+def _describe(exc: Exception) -> str:
+    """Turn an exception into something the owner can be shown.
+
+    A `ThursdayError` already carries a sentence written for a person — "Pixel is not
+    trusted to control other machines" — and prefixing it with the class name turns a clear
+    refusal into a stack trace. Anything else keeps the type, because for a genuine crash
+    the type is most of the information there is.
+    """
+    if isinstance(exc, ThursdayError):
+        return exc.message
+    return f"{type(exc).__name__}: {exc}"
 
 
 class BaseAgent(ABC):
@@ -33,7 +47,7 @@ class BaseAgent(ABC):
             return AgentResult(
                 agent=self.spec.name,
                 ok=False,
-                error=f"{type(exc).__name__}: {exc}",
+                error=_describe(exc),
                 duration_ms=(time.perf_counter() - started) * 1000,
                 spend=ctx.spend,
             )

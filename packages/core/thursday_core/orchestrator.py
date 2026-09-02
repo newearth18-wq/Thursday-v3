@@ -91,6 +91,7 @@ class AgentOrchestrator:
         bus: object,
         device_router: object,
         hub: object,
+        device_focus: object | None = None,
         max_attempts: int = 2,
     ) -> None:
         self._agents = agents
@@ -102,6 +103,7 @@ class AgentOrchestrator:
         self._models = models
         self._bus = bus
         self._device_router = device_router
+        self._device_focus = device_focus
         self._hub = hub
         self._max_attempts = max_attempts
 
@@ -297,13 +299,21 @@ class AgentOrchestrator:
     ) -> tuple[UUID | None, str | None]:
         if step.kind is not StepKind.AGENT or not step.args.get("action"):
             return context.world.active_device_id, context.world.active_device_name
+        focus = None
+        if self._device_focus is not None:
+            focus = self._device_focus.current(context.turn.session_id)  # type: ignore[attr-defined]
         resolution = self._device_router.resolve(  # type: ignore[attr-defined]
             step.device_hint,
             world=context.world,
             origin_device_id=context.turn.device_id,
+            focus=focus,
         )
         if resolution.device is None:
             raise DeviceUnavailable(resolution.reason, question=resolution.question())
+        # Recorded on the step so the reply can say where the work landed. An action that
+        # ran on a machine the owner never named must not be reported as if it ran here.
+        step.resolved_device = resolution.device.name
+        step.device_announced = resolution.announce
         return resolution.device.id, resolution.device.name
 
     def _permissions_for(self, agent: object, task: Task, device_id: UUID | None) -> PermissionSet:
