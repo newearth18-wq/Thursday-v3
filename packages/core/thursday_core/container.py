@@ -40,7 +40,10 @@ from thursday_security.vault import ChainVault, EnvVault, InMemoryVault
 from thursday_shared.enums import ModelTier
 from thursday_tools.builtin import register_builtin_tools
 from thursday_tools.registry import ToolRegistry, ToolRouter
+from thursday_vision.camera import CameraManager
 from thursday_vision.gestures import GestureMode
+from thursday_vision.providers import RuleBasedSceneAnalyzer
+from thursday_vision.service import VisionService
 from thursday_vision.spatial import SpatialMemory
 from thursday_voice.routing import AudioRouter
 from thursday_voice.service import VoiceService
@@ -127,6 +130,8 @@ class Container:
     routines: Any = None
     skills: Any = None
     spatial: Any = None
+    camera: Any = None
+    vision: Any = None
     gesture_mode: Any = None
 
     # voice
@@ -336,6 +341,19 @@ def build_container(settings: Settings | None = None, *, configure_logs: bool = 
     # for it (PART 44).
     c.projects = ProjectManager(tasks=c.tasks, memory=c.memory, skills=c.skills)
     c.spatial = SpatialMemory()
+    # Vision. The camera is constructed OFF with no source attached: a checkout that has
+    # never been given a camera cannot accidentally have one opened (§51). Attaching real
+    # hardware is a deliberate act, and `camera.grant_access` is still required after it.
+    c.camera = CameraManager(None)
+    c.vision = VisionService(
+        camera=c.camera,
+        detector=None,
+        ocr=None,
+        barcodes=None,
+        analyzer=RuleBasedSceneAnalyzer(),
+        spatial=c.spatial,
+        bus=c.bus,
+    )
     c.gesture_mode = GestureMode()
 
     # -- voice ----------------------------------------------------------------

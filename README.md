@@ -16,7 +16,7 @@ USER → THURSDAY → Understand → Plan → Delegate → Act → Verify → Re
 ## Status
 
 **Phase 1 is implemented and runnable**: the vertical slice from
-[docs/15-vertical-slice.md](docs/15-vertical-slice.md) works end to end, with 443 tests that
+[docs/15-vertical-slice.md](docs/15-vertical-slice.md) works end to end, with 489 tests that
 need no database, no network and no model credentials.
 
 ```
@@ -190,7 +190,7 @@ nothing completes without passing Verify.** Both are single choke points rather 
 conventions, so neither can be forgotten by a new caller.
 
 Full design in [`docs/`](docs/) — the fifteen deliverables, written before the code, plus
-the [V2 review](docs/architecture/00-v2-review.md) and nineteen
+the [V2 review](docs/architecture/00-v2-review.md) and twenty-one
 [architecture decisions](docs/architecture/decisions/) recording what was chosen and what
 each choice cost:
 
@@ -200,7 +200,7 @@ each choice cost:
 | [Interfaces](docs/05-core-interfaces.md) | [Agents](docs/06-agent-architecture.md) | [Memory](docs/07-memory-architecture.md) | [Permissions](docs/08-permission-model.md) |
 | [Device protocol](docs/09-device-protocol.md) | [Events](docs/10-event-architecture.md) | [API](docs/11-api-spec.md) | [MVP scope](docs/12-mvp-scope.md) |
 | [Roadmap](docs/13-roadmap.md) | [Threat model](docs/14-threat-model.md) | [Vertical slice](docs/15-vertical-slice.md) | [Persona](docs/16-persona.md) |
-| [Voice](docs/17-voice.md) | | | |
+| [Voice](docs/17-voice.md) | [Vision](docs/18-vision.md) | | |
 
 ---
 
@@ -222,7 +222,9 @@ each choice cost:
 - Dynamic agents with intersected permissions, depth and count caps, destroyed with the task
 - Automation engine, proactivity gate with rate limits, routine learning that **proposes**
 - Skills: capture → sandbox test → approval → activate → rollback, with risky steps gated
-- Spatial memory that answers as a *sighting*, and gesture mode that expires when idle
+- Vision: camera consent that is provable rather than promised, frame sampling that
+  never lets a stream leave the machine, screen reading, "what is this?" resolution,
+  and spatial memory that answers as a *sighting* with its age said out loud
 - Model router with tiers, cost/privacy routing and a local fallback
 - Realtime voice: wake word → VAD → STT → core → verification → TTS, with a
   state machine, working barge-in, per-mode prosody, audio routing and provider
@@ -236,9 +238,10 @@ each choice cost:
 - SQL-backed repositories behind the memory/task/audit ports (they run in-process today;
   the schema and migrations are in place). This is the largest gap.
 - Redis event bus and worker queue (the in-process bus implements the same port)
-- Camera capture, OCR and object detection — the *interpretation* layers (spatial memory,
-  gesture classification from landmarks) are built and tested; the model that produces the
-  landmarks arrives in Phase 3
+- Real camera capture, a local object detector, OCR and barcode decoding. The vision
+  pipeline above them — consent, sampling, reading, reference resolution, spatial memory —
+  is built and tested end to end against synthetic frames; the adapters for opencv,
+  ultralytics, tesseract and zbar are written but unexercised without the packages
 - Real microphone and speaker capture. The voice loop, its state machine, barge-in,
   routing and fallback are built and tested end to end against synthetic audio; what is
   missing is the hardware layer (`sounddevice`) and a cloud provider at the head of the
@@ -258,7 +261,7 @@ the verification loop, the audit chain and the device round-trip are all real.
 
 ```bash
 ./scripts/check.sh           # everything CI runs: lint, format, types, tests, migrations
-pytest                       # 443 tests, no infrastructure
+pytest                       # 489 tests, no infrastructure
 ruff check . && ruff format .
 mypy packages services
 alembic upgrade head && alembic revision --autogenerate -m "what changed"

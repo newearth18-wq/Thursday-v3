@@ -38,6 +38,7 @@ from thursday_shared.models import (
     Event,
     GestureContext,
     MemoryCandidate,
+    MemoryQuery,
     MemoryWrite,
     ScreenContext,
     SelectionContext,
@@ -47,6 +48,7 @@ from thursday_shared.models import (
 )
 
 from thursday_core.logging import get_logger
+from thursday_core.persona import phrase
 
 log = get_logger(__name__)
 
@@ -174,6 +176,8 @@ class ThursdayCore:
 
         if intent.kind is IntentKind.STOP:
             return self._finish(session_id, await self._handle_stop(language))
+        if intent.kind is IntentKind.VISION:
+            return self._finish(session_id, await self._handle_vision(intent, language))
         if intent.kind is IntentKind.MEMORY_FORGET:
             # Ahead of everything else in the memory pipeline: the owner asking is the
             # strongest signal the write policy has, in both directions (§7).
@@ -396,6 +400,74 @@ class ThursdayCore:
         return "\n".join(lines)
 
     # ------------------------------------------------------------------ side paths
+
+    async def _handle_vision(self, intent, language: str) -> ThursdayReply:
+        """Looking at something (§25, §51).
+
+        The camera is not opened here. A grant is checked and, when it is missing, the
+        owner is *asked* — a component that turns on a camera to answer a question it was
+        asked has no consent model, only a habit of asking forgiveness.
+        """
+        vision = getattr(self.c, "vision", None)
+        if vision is None:
+            return self.c.composer.blocked(
+                reason="no camera or screen is configured on this device", language=language
+            )
+
+        action = str(intent.entities.get("action", ""))
+
+        if action == "vision.where":
+            thing = str(intent.entities.get("thing", "")).strip()
+            sighting = vision.spatial.last_seen(thing)
+            if sighting is None:
+                # Never seen it. Before giving up, ask memory — the owner may have *told*
+                # Thursday where it is, and answering "I have never seen it" while holding
+                # a note that says "the spare keys live in the drawer" would be absurd.
+                remembered = await self.c.memory.recall(
+                    MemoryQuery(text=thing, k=3, min_confidence=0.4)
+                )
+                if remembered:
+                    return self.c.composer.answer(
+                        remembered[0].content,
+                        language=language,
+                        confidence=remembered[0].confidence,
+                    )
+                return self.c.composer.answer(
+                    phrase("never_seen", language, thing=thing), language=language
+                )
+            # Phrased as a sighting by the model itself, never as a claim about now (§25).
+            return self.c.composer.answer(
+                sighting.describe(language), language=language, confidence=sighting.confidence
+            )
+
+        if action == "vision.screen":
+            reading = await vision.read_screen(question=intent.objective)
+            if reading.uncertain:
+                return self.c.composer.clarify(
+                    "ผมอ่านหน้าจอไม่ออก ช่วยบอกได้ไหมว่าดูตรงไหน"
+                    if language == "th"
+                    else "I could not read the screen — which part did you mean?",
+                    language=language,
+                )
+            return self.c.composer.answer(reading.summary, language=language)
+
+        # Camera identification.
+        allowed, why = (
+            vision.camera.may_capture() if vision.camera else (False, "no camera is configured")
+        )
+        if not allowed:
+            reply = self.c.composer.clarify(
+                phrase("camera_needs_permission", language), language=language
+            )
+            reply.detail = why
+            return reply
+
+        answer = await vision.identify(intent.objective)
+        if not answer.ok:
+            return self.c.composer.blocked(reason=answer.refused or "", language=language)
+        if answer.uncertain:
+            return self.c.composer.clarify(answer.text, language=language)
+        return self.c.composer.answer(answer.text, language=language)
 
     async def _handle_forget(self, intent, session_id: UUID, language: str) -> ThursdayReply:
         """ "ลืมเรื่อง X" and "อย่าจำเรื่องนี้" are two different instructions.

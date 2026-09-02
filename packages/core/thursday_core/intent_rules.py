@@ -186,6 +186,35 @@ _SUPPRESS = re.compile(
 )
 _SUPPRESS_TH = re.compile(r"^\s*(?:อย่า|ห้าม|ไม่ต้อง)\s*(?:จำ|เก็บ|บันทึก)")
 
+#: "What is this?" while holding something up, or "what's on my screen". The word "this"
+#: carries no information — the meaning is entirely in what the camera or screen can see,
+#: which is why these route to vision rather than to the model.
+_IDENTIFY = re.compile(
+    r"(?i)^\s*(?:"
+    r"นี่คืออะไร|นี่อะไร|อันนี้คืออะไร|นี่เรียกว่าอะไร|ดูให้หน่อยว่านี่คืออะไร|"
+    r"what(?:'s| is) this|what am i (?:holding|looking at)|identify this"
+    r")\s*[?？]?\s*$"
+)
+_LOOK_AT = re.compile(
+    r"(?i)(ดูหน่อย|ดูให้หน่อย|มองดู|ช่วยดู|"
+    r"\blook at (?:this|that|my screen)\b|\btake a look\b|\bcan you see\b)"
+)
+_SCREEN_QUESTION = re.compile(
+    r"(?i)(บนหน้าจอ|ในหน้าจอ|หน้าจอนี้|ตรงนี้ผิดอะไร|ตรงนี้คืออะไร|"
+    r"\bon (?:my |the )?screen\b|\bwhat'?s wrong here\b)"
+)
+#: "Where did I leave X" — answered from sightings, never from stored video (§25).
+_WHERE_IS = re.compile(
+    r"(?i)(?:"
+    r"(?:ผม|ฉัน|เรา)?\s*(?:วาง|ทิ้ง|ลืม)\s*(?P<thing_th>[\w฀-๿ ]{2,30}?)\s*(?:ไว้ที่ไหน|ไว้ไหน|ที่ไหน)|"
+    r"(?P<thing_th2>[\w฀-๿ ]{2,30}?)\s*อยู่ไหน|"
+    r"where (?:is|are|did i (?:leave|put)) (?:my |the )?(?P<thing_en>[\w ]{2,30}?)\s*[?？]?$"
+    r")"
+)
+
+#: Explicitly asking what Thursday *remembers*, as opposed to where a thing is.
+_RECALL_FRAMING = re.compile(r"(?i)(จำได้ไหม|จำได้|do you remember|can you recall)")
+
 _SEARCH_FILES = re.compile(
     r"(?i)(?:\b(?:find|search for|look for|show me)\b|ค้นหา|หา|ขอ)\s*"
     r"(?:the\s+|a\s+)?(?P<latest>latest|newest|most recent|ล่าสุด|ใหม่สุด)?\s*"
@@ -356,6 +385,36 @@ def parse(text: str, *, wake_word: str = "thursday") -> RuleMatch | None:
                 rationale="a request to find files of a named type in a named folder",
             )
         )
+    if _IDENTIFY.match(body):
+        return RuleMatch(
+            Intent(
+                kind=IntentKind.VISION,
+                objective=body,
+                entities={"action": "vision.identify", "surface": "camera"},
+                confidence=0.9,
+                rationale="an identification question about something in view",
+            )
+        )
+    if _SCREEN_QUESTION.search(body):
+        return RuleMatch(
+            Intent(
+                kind=IntentKind.VISION,
+                objective=body,
+                entities={"action": "vision.screen", "surface": "screen"},
+                confidence=0.82,
+                rationale="a question about what is on screen",
+            )
+        )
+    if (thing := _match_where_is(body)) is not None:
+        return RuleMatch(
+            Intent(
+                kind=IntentKind.VISION,
+                objective=body,
+                entities={"action": "vision.where", "thing": thing},
+                confidence=0.84,
+                rationale="a question about where something was last seen",
+            )
+        )
     if _SUPPRESS.match(body) or _SUPPRESS_TH.match(body):
         # Nothing to search and nothing to delete — the instruction is to not write. It is
         # its own intent rather than a flag on the turn, because the owner deserves to be
@@ -487,6 +546,30 @@ def _match_forget(body: str) -> str | None:
 
 #: Words that follow "forget" without naming anything to forget.
 _NOT_A_SUBJECT = frozenset({"it", "that", "this", "them", "มัน", "นี่", "นั่น"})
+
+
+def _match_where_is(body: str) -> str | None:
+    """The object in a "where did I leave X" question.
+
+    Returns ``None`` for a bare "where is it" — a spatial answer names the thing it is
+    about, and searching for the word "it" would return whatever happened to be seen last.
+    """
+    # "จำได้ไหมว่าห้องทำงานผมอยู่ไหน" contains "อยู่ไหน" and is not a spatial question — it
+    # asks what Thursday *remembers*. The framing wins over the location words inside it.
+    # Narrow on purpose: a bare "แว่นอยู่ไหน" names a physical object and is exactly what
+    # spatial memory is for, so only an explicit remembering-frame is excluded here.
+    if _RECALL_FRAMING.search(body):
+        return None
+
+    match = _WHERE_IS.search(body)
+    if match is None:
+        return None
+    thing = (
+        match.group("thing_th") or match.group("thing_th2") or match.group("thing_en") or ""
+    ).strip(" \t:,.!?")
+    if len(thing) < 2 or thing.lower() in _NOT_A_SUBJECT:
+        return None
+    return thing
 
 
 def _match_remember(body: str) -> tuple[str, str] | None:

@@ -284,3 +284,75 @@ async def voice_output(
         except KeyError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
     return c.audio_router.snapshot()
+
+
+# ------------------------------------------------------------------ vision (V6)
+
+
+@router.get("/vision")
+async def vision_state(c: Container = Depends(get_container)) -> dict:
+    """What the camera is doing, and what has been seen.
+
+    ``indicator_on`` is the field a UI must draw its camera light from: it is derived from
+    the same state the capture path checks, so it cannot disagree with reality.
+    """
+    return c.vision.snapshot()
+
+
+@router.get("/vision/camera/log")
+async def camera_log(limit: int = 20, c: Container = Depends(get_container)) -> dict:
+    """ "When was my camera on?" — answerable by the owner, not by a support ticket."""
+    return {"entries": c.camera.recent_log(limit)}
+
+
+@router.post("/vision/camera/grant")
+async def grant_camera(
+    reason: str,
+    seconds: float | None = None,
+    max_captures: int | None = None,
+    c: Container = Depends(get_container),
+) -> dict:
+    """Permit the camera, for a stated reason and a bounded window (§51).
+
+    A reason is required. A grant nobody can describe later is a grant nobody can audit,
+    and the owner reading their own camera log deserves to see why rather than a timestamp.
+    """
+    try:
+        c.camera.grant_access(reason, seconds=seconds, max_captures=max_captures)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return c.camera.snapshot()
+
+
+@router.post("/vision/camera/off")
+async def camera_off(c: Container = Depends(get_container)) -> dict:
+    """ "ปิดกล้อง". Plain and model-free, like every other emergency control (§69)."""
+    await c.camera.revoke(why="the owner turned it off")
+    return c.camera.snapshot()
+
+
+@router.get("/vision/objects")
+async def seen_objects(c: Container = Depends(get_container)) -> dict:
+    """What has been seen, as sightings — never as claims about where things are now."""
+    return {
+        "objects": [
+            {
+                "label": o.label,
+                "object_type": o.object_type,
+                "camera_id": o.camera_id,
+                "location_context": o.location_context,
+                "confidence": round(o.confidence, 3),
+                "first_seen": o.first_seen.isoformat(),
+                "last_seen": o.last_seen.isoformat(),
+                "sightings": o.sightings,
+                "description": o.describe("en"),
+            }
+            for o in c.spatial.objects()
+        ]
+    }
+
+
+@router.delete("/vision/objects")
+async def forget_sightings(c: Container = Depends(get_container)) -> dict:
+    """Wipe what was seen. Part of the privacy controls (§68)."""
+    return {"forgotten": c.spatial.forget_all()}

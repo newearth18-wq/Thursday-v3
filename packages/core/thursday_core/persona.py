@@ -78,6 +78,14 @@ PHRASES: dict[str, dict[str, str]] = {
         "th": "รับทราบ ผมจะไม่เก็บเรื่องนี้ไว้",
         "en": "Understood — I won't keep this.",
     },
+    "camera_needs_permission": {
+        "th": "ผมต้องขอเปิดกล้องก่อน — ยืนยันไหมครับ",
+        "en": "I need to turn the camera on first — is that alright?",
+    },
+    "never_seen": {
+        "th": "ผมไม่เคยเห็น{thing} เลยครับ",
+        "en": "I have never seen {thing}.",
+    },
     "stopped": {
         "th": "หยุดแล้ว",
         "en": "Stopped.",

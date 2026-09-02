@@ -353,3 +353,56 @@ async def test_follow_me_is_off_until_it_is_turned_on(client):
     assert (await client.get("/api/v1/voice")).json()["audio"]["follow_me"] is False
     body = (await client.post("/api/v1/voice/output", params={"follow_me": True})).json()
     assert body["follow_me"] is True
+
+
+# ------------------------------------------------------------------ vision (V6)
+
+
+async def test_the_camera_reports_itself_off(client):
+    body = (await client.get("/api/v1/vision")).json()
+    assert body["camera"]["state"] == "OFF"
+    # The field a UI draws its camera light from.
+    assert body["camera"]["indicator_on"] is False
+    assert body["camera"]["may_capture"] is False
+
+
+async def test_a_camera_grant_needs_a_reason(client):
+    refused = await client.post("/api/v1/vision/camera/grant", params={"reason": "  "})
+    assert refused.status_code == 400
+
+
+async def test_granting_arms_the_camera_without_opening_it(client):
+    body = (
+        await client.post(
+            "/api/v1/vision/camera/grant",
+            params={"reason": "identify what I am holding", "max_captures": 1},
+        )
+    ).json()
+    assert body["state"] == "ARMED"
+    # Granted is not open: the light stays off until something actually captures.
+    assert body["indicator_on"] is False
+    assert body["may_capture"] is True
+
+
+async def test_the_owner_can_turn_the_camera_off(client):
+    await client.post("/api/v1/vision/camera/grant", params={"reason": "a look"})
+    body = (await client.post("/api/v1/vision/camera/off")).json()
+    assert body["state"] == "OFF"
+    assert body["grant"] is None
+
+
+async def test_the_camera_log_is_readable_by_the_owner(client):
+    await client.post("/api/v1/vision/camera/grant", params={"reason": "identify a book"})
+    entries = (await client.get("/api/v1/vision/camera/log")).json()["entries"]
+    assert any("identify a book" in e["why"] for e in entries)
+
+
+async def test_sightings_are_listed_and_can_be_wiped(client, container):
+    container.spatial.record("keys", confidence=0.8, location_context="the desk")
+    listed = (await client.get("/api/v1/vision/objects")).json()["objects"]
+    assert listed[0]["label"] == "keys"
+    assert "not a guarantee" in listed[0]["description"]
+
+    wiped = (await client.delete("/api/v1/vision/objects")).json()
+    assert wiped["forgotten"] == 1
+    assert (await client.get("/api/v1/vision/objects")).json()["objects"] == []
