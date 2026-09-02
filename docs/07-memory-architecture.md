@@ -143,3 +143,46 @@ None of these override §35: being told to remember an API key still does not st
 A later explicit "remember X" after a suppression is honoured; suppression was about what
 had just been said, not a standing gag. See
 [ADR 0019](architecture/decisions/0019-forgetting-is-a-first-class-operation.md).
+
+### The vault mirror
+
+Postgres is where Thursday remembers; Obsidian is where the *owner* does — plain Markdown
+they can read, edit, search and take with them if Thursday is ever switched off. Mirroring
+everything from one into the other would ruin the second: a vault with a note for every
+episodic trace is a vault nobody opens.
+
+So `VaultMirror` is selective, and the rule is a question about the reader rather than about
+the data: *would a person, six months from now, be glad this was written down?* That means
+the durable layers (semantic, procedural, preference, project, knowledge) above an
+importance floor, or anything the owner pinned. Working scratch and episodic traces stay in
+the database.
+
+It subscribes to `memory.created` rather than being called inside the write path, so the
+memory manager does not need to know the vault exists, and switching the vault off (§68)
+removes a subscriber instead of leaving a dead branch. It reads the record back by id: the
+event carries an id and a layer, and putting memory *content* on the bus would hand every
+subscriber the text of every memory for no gain.
+
+### Vault operations
+
+| Call | Folder | Notes |
+|---|---|---|
+| `inbox` | 00 Inbox | Something with no home yet |
+| `project_page` | 01 Projects | Goal, status, sections |
+| `memory_note` | 03 Knowledge | What the mirror writes |
+| `person_note` | 04 People | |
+| `meeting_note` | 05 Meetings | Attendees and notes |
+| `decision_log` | 06 Decisions | Decision, reason, alternatives, impact (§55) |
+| `skill_note` | 07 Skills | Numbered steps |
+| `daily_note` | 08 Daily | Appends by time rather than overwriting |
+| `archive` | 09 Archive | Moves, never deletes |
+| `update_note` | any | Merges frontmatter, so `thursday_id` survives |
+| `link_notes` | any | One direction, idempotent — Obsidian shows the backlink |
+| `tag_note` | any | Tags are a set |
+
+Every one of them goes through the same write path, so the credential refusal applies to all
+of them, and every one is a no-op when the vault is disabled rather than an error.
+
+Archiving is not forgetting. The vault is the owner's notebook, and Thursday removing pages
+from it is not its call — memory deletion is handled by the memory manager, where "forget
+this" means gone.

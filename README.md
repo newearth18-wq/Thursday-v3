@@ -16,7 +16,7 @@ USER → THURSDAY → Understand → Plan → Delegate → Act → Verify → Re
 ## Status
 
 **Phase 1 is implemented and runnable**: the vertical slice from
-[docs/15-vertical-slice.md](docs/15-vertical-slice.md) works end to end, with 421 tests that
+[docs/15-vertical-slice.md](docs/15-vertical-slice.md) works end to end, with 443 tests that
 need no database, no network and no model credentials.
 
 ```
@@ -216,7 +216,8 @@ each choice cost:
 - Layered memory with an explicit write policy, conflict recording and decay — and
   remembered instructions that are *applied* to later work rather than only recalled,
   with "forget about X" and "don't remember this" as first-class commands
-- Obsidian vault that *refuses* credential material rather than redacting it
+- Obsidian vault that *refuses* credential material rather than redacting it, with
+  durable knowledge mirrored into it automatically and passing detail left out
 - Agent orchestrator, capability-based selection, and a read-only Supervisor
 - Dynamic agents with intersected permissions, depth and count caps, destroyed with the task
 - Automation engine, proactivity gate with rate limits, routine learning that **proposes**
@@ -257,7 +258,7 @@ the verification loop, the audit chain and the device round-trip are all real.
 
 ```bash
 ./scripts/check.sh           # everything CI runs: lint, format, types, tests, migrations
-pytest                       # 421 tests, no infrastructure
+pytest                       # 443 tests, no infrastructure
 ruff check . && ruff format .
 mypy packages services
 alembic upgrade head && alembic revision --autogenerate -m "what changed"

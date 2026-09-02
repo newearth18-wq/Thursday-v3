@@ -177,6 +177,150 @@ class ObsidianVault:
             overwrite=False,
         )
 
+    def update_note(
+        self, relative: str, *, body: str | None = None, frontmatter: dict[str, Any] | None = None
+    ) -> Path | None:
+        """Rewrite an existing note, keeping the frontmatter it already had.
+
+        Merging rather than replacing the metadata is the point: a note carries `type`,
+        `thursday_id` and whatever the owner added by hand, and an update that dropped those
+        would quietly sever the link between the note and the thing it describes.
+        """
+        if not self.enabled:
+            return None
+        path = self.root / relative
+        if not path.exists():
+            return None
+
+        existing_meta, existing_body = _parse(path.read_text(encoding="utf-8"))
+        new_body = existing_body if body is None else body
+        self._redactor.assert_clean(new_body, where="the Obsidian vault")
+
+        meta = {
+            **existing_meta,
+            **(frontmatter or {}),
+            "updated": datetime.now(UTC).isoformat(timespec="seconds"),
+        }
+        path.write_text(_render(meta, new_body), encoding="utf-8")
+        log.info("obsidian_note_updated", path=str(path))
+        return path
+
+    def link_notes(self, source: str, target: str, *, relation: str = "related") -> Path | None:
+        """Add a wiki-link from one note to another, under a "Links" section.
+
+        One direction only, and idempotent. Writing both ends would double every edge on the
+        second call and leave the vault fighting whatever the owner did by hand; Obsidian's
+        own backlinks pane already shows the reverse.
+        """
+        if not self.enabled:
+            return None
+        path = self.root / source
+        target_path = self.root / target
+        if not path.exists() or not target_path.exists():
+            return None
+
+        meta, body = _parse(path.read_text(encoding="utf-8"))
+        link = f"- {relation}: [[{target_path.stem}]]"
+        if link in body:
+            return path
+
+        if "## Links" in body:
+            body = body.replace("## Links", f"## Links\n{link}", 1)
+        else:
+            body = f"{body.rstrip()}\n\n## Links\n{link}\n"
+        path.write_text(_render(meta, body), encoding="utf-8")
+        log.debug("obsidian_notes_linked", source=source, target=target, relation=relation)
+        return path
+
+    def tag_note(self, relative: str, *tags: str) -> Path | None:
+        """Add tags, as a set. Obsidian treats a repeated tag as one, and so does this."""
+        if not self.enabled:
+            return None
+        path = self.root / relative
+        if not path.exists():
+            return None
+
+        meta, body = _parse(path.read_text(encoding="utf-8"))
+        existing = _as_list(meta.get("tags"))
+        merged = sorted({*existing, *(t.strip().lstrip("#") for t in tags if t.strip())})
+        meta["tags"] = merged
+        path.write_text(_render(meta, body), encoding="utf-8")
+        return path
+
+    def meeting_note(
+        self, *, title: str, attendees: list[str], notes: str, when: datetime | None = None
+    ) -> Path | None:
+        when = when or datetime.now(UTC)
+        body = "\n".join(
+            [
+                f"**When** — {when:%Y-%m-%d %H:%M} UTC",
+                "",
+                "**Attendees**",
+                *([f"- {a}" for a in attendees] or ["- (not recorded)"]),
+                "",
+                "## Notes",
+                "",
+                notes,
+            ]
+        )
+        return self.write_note(
+            folder="05 Meetings",
+            title=f"{when:%Y-%m-%d} {title}",
+            body=body,
+            frontmatter={"type": "meeting", "date": f"{when:%Y-%m-%d}", "attendees": attendees},
+            overwrite=False,
+        )
+
+    def person_note(self, *, name: str, notes: str, role: str = "") -> Path | None:
+        return self.write_note(
+            folder="04 People",
+            title=name,
+            body=(f"**Role** — {role}\n\n" if role else "") + notes,
+            frontmatter={"type": "person", "role": role or None},
+        )
+
+    def skill_note(self, *, name: str, description: str, steps: list[str]) -> Path | None:
+        body = f"{description}\n\n## Steps\n\n" + "\n".join(
+            f"{i}. {step}" for i, step in enumerate(steps, start=1)
+        )
+        return self.write_note(
+            folder="07 Skills",
+            title=name,
+            body=body,
+            frontmatter={"type": "skill", "steps": len(steps)},
+        )
+
+    def archive(self, relative: str) -> Path | None:
+        """Move a note to 09 Archive rather than deleting it.
+
+        Archiving is not forgetting. Memory deletion is handled by the memory manager, where
+        "forget this" means gone; the vault is the owner's own notebook, and Thursday
+        removing pages from it is not its call.
+        """
+        if not self.enabled:
+            return None
+        path = self.root / relative
+        if not path.exists():
+            return None
+        destination = self.root / "09 Archive" / path.name
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        if destination.exists():
+            destination = destination.with_stem(f"{path.stem} {datetime.now(UTC):%Y%m%d%H%M%S}")
+        path.rename(destination)
+        log.info("obsidian_note_archived", path=str(destination))
+        return destination
+
+    def inbox(self, text: str, *, title: str | None = None) -> Path | None:
+        """Somewhere for something that has no home yet — the point of 00 Inbox."""
+        when = datetime.now(UTC)
+        return self.write_note(
+            folder="00 Inbox",
+            title=title or f"{when:%Y-%m-%d %H%M} note",
+            body=text,
+            frontmatter={"type": "inbox", "captured": when.isoformat(timespec="seconds")},
+            overwrite=False,
+        )
+
     # ------------------------------------------------------------------ reading
 
     def search(self, query: str, *, limit: int = 20) -> list[tuple[Path, str]]:
@@ -215,6 +359,15 @@ def _render(frontmatter: dict[str, Any], body: str) -> str:
             lines.append(f"{key}: {value}")
     lines.append("---")
     return "\n".join(lines) + "\n\n" + body.rstrip() + "\n"
+
+
+def _as_list(value: Any) -> list[str]:
+    """Frontmatter round-trips lists as `[a, b]`; read either form back."""
+    if isinstance(value, list):
+        return [str(v).strip() for v in value if str(v).strip()]
+    if isinstance(value, str):
+        return [v.strip() for v in value.strip("[]").split(",") if v.strip()]
+    return []
 
 
 def _parse(text: str) -> tuple[dict[str, Any], str]:

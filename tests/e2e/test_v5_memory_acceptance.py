@@ -233,3 +233,70 @@ async def test_the_brain_lists_only_skills_thursday_can_actually_run(container):
     project = container.projects.create(name="Anything", goal="x")
     brain = await container.projects.brain(project.id)
     assert brain["skills"] == []
+
+
+# ------------------------------------------------------------------ the vault mirror (§8)
+
+
+async def test_durable_knowledge_reaches_the_owner_s_own_notebook(container):
+    """Postgres is where Thursday remembers; Obsidian is where the *owner* does — plain
+    Markdown they can read, edit and take with them if Thursday is ever switched off."""
+    await container.memory.write(
+        MemoryWrite(
+            layer=MemoryLayer.PROCEDURAL,
+            content="reports open with a summary table, then the chart",
+            source=MemorySource.USER,
+            importance=0.8,
+        ),
+        force=True,
+    )
+
+    notes = list((container.obsidian.root / "03 Knowledge").glob("*.md"))
+    assert notes, "a durable memory left no trace in the vault"
+    text = notes[0].read_text(encoding="utf-8")
+    assert "summary table" in text
+    assert "layer: procedural" in text
+
+
+async def test_passing_detail_does_not_flood_the_vault(container):
+    """A vault with a note for every episodic trace is a vault nobody opens."""
+    for index in range(5):
+        await container.memory.write(
+            MemoryWrite(
+                layer=MemoryLayer.EPISODIC,
+                content=f"opened chrome, attempt {index}",
+                source=MemorySource.AGENT,
+                importance=0.55,
+            ),
+            force=True,
+        )
+    assert list((container.obsidian.root / "03 Knowledge").glob("*.md")) == []
+    assert container.vault_mirror.skipped >= 5
+
+
+async def test_a_secret_never_reaches_the_vault_through_the_mirror(container):
+    """Two defences, and the first one holds.
+
+    The memory manager redacts on the write path, so the record is already clean by the
+    time the mirror sees it — the vault's own refusal is the second line, not the first.
+    What matters is the outcome: the token is in neither store, and the memory write itself
+    still succeeded rather than failing because of a downstream subscriber.
+    """
+    token = "ghp_0123456789abcdefghijklmnopqrstuvwxyzAB"
+    record = await container.memory.write(
+        MemoryWrite(
+            layer=MemoryLayer.SEMANTIC,
+            content=f"the deploy token is {token}",
+            source=MemorySource.USER,
+            importance=0.9,
+        ),
+        force=True,
+    )
+
+    assert record is not None, "a subscriber's problem must not fail the write"
+    assert token not in record.content
+
+    vault_text = "".join(
+        path.read_text(encoding="utf-8") for path in (container.obsidian.root).rglob("*.md")
+    )
+    assert token not in vault_text

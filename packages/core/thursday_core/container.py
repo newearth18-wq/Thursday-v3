@@ -25,6 +25,7 @@ from thursday_devices.hub import DeviceHub
 from thursday_memory.embeddings import HashEmbeddingProvider, OllamaEmbeddingProvider
 from thursday_memory.graph import KnowledgeGraph
 from thursday_memory.manager import MemoryManager
+from thursday_memory.mirror import VaultMirror
 from thursday_memory.obsidian import ObsidianVault
 from thursday_memory.vector import InMemoryVectorStore
 from thursday_models.llm import AnthropicLLM, OllamaLLM, RuleBasedLLM
@@ -97,6 +98,7 @@ class Container:
     vectors: Any = None
     memory: Any = None
     obsidian: Any = None
+    vault_mirror: Any = None
     graph: Any = None
 
     # models
@@ -296,6 +298,10 @@ def build_container(settings: Settings | None = None, *, configure_logs: bool = 
     # -- execution ------------------------------------------------------------
     c.tools = ToolRegistry()
     register_builtin_tools(c.tools, hub=c.hub, memory=c.memory, vault=c.obsidian)
+    # Durable knowledge also lands in the owner's own notebook (§8). A subscriber rather
+    # than a call inside the write path: switching the vault off removes it, instead of
+    # leaving a dead branch in the memory manager.
+    c.vault_mirror = VaultMirror(c.obsidian, c.memory).attach(c.bus)
     # Browser tools need Playwright and a browser binary. Absent them, the agent stays
     # registered but unroutable — the registry's tool-gap term drops its score to zero,
     # so Thursday says "I can't do that" rather than failing halfway through a form.

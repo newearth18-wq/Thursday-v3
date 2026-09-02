@@ -100,6 +100,133 @@ def test_a_disabled_vault_is_a_no_op_not_an_error(tmp_path):
 # ------------------------------------------------------------------ knowledge graph
 
 
+# ------------------------------------------------------------------ the rest of the vault (V5)
+
+
+def test_a_note_can_be_updated_without_losing_what_it_already_carried(vault):
+    """An update that dropped `thursday_id` would sever the note from the thing it
+    describes, which is the one piece of metadata nothing else can reconstruct."""
+    path = vault.write_note(
+        folder="03 Knowledge",
+        title="Grading policy",
+        body="original",
+        frontmatter={"type": "memory", "thursday_id": "abc-123"},
+    )
+    relative = str(path.relative_to(vault.root))
+
+    vault.update_note(relative, body="revised")
+    meta, body = vault.read_note(relative)
+
+    assert body.strip() == "revised"
+    assert meta["thursday_id"] == "abc-123"
+    assert meta["type"] == "memory"
+
+
+def test_updating_a_missing_note_reports_rather_than_creating_one(vault):
+    assert vault.update_note("03 Knowledge/nothing here.md", body="x") is None
+
+
+def test_an_update_is_refused_if_it_would_carry_a_credential(vault):
+    path = vault.write_note(folder="00 Inbox", title="Notes", body="fine")
+    relative = str(path.relative_to(vault.root))
+    with pytest.raises(SecretLeakBlocked):
+        vault.update_note(relative, body="the token is ghp_0123456789abcdefghijklmnopqrstuvwxyzAB")
+
+
+def test_notes_can_be_linked_and_linking_twice_changes_nothing(vault):
+    a = vault.write_note(folder="01 Projects", title="Grade Report", body="the project")
+    b = vault.write_note(folder="06 Decisions", title="Use a table", body="the decision")
+    left, right = str(a.relative_to(vault.root)), str(b.relative_to(vault.root))
+
+    vault.link_notes(left, right, relation="decided")
+    vault.link_notes(left, right, relation="decided")
+
+    _, body = vault.read_note(left)
+    assert body.count("[[Use a table]]") == 1
+    assert "## Links" in body
+
+
+def test_linking_to_a_note_that_does_not_exist_is_refused(vault):
+    a = vault.write_note(folder="01 Projects", title="Solo", body="x")
+    assert vault.link_notes(str(a.relative_to(vault.root)), "01 Projects/ghost.md") is None
+
+
+def test_tags_are_a_set(vault):
+    path = vault.write_note(folder="03 Knowledge", title="Tagged", body="x")
+    relative = str(path.relative_to(vault.root))
+
+    vault.tag_note(relative, "grading", "#reports")
+    vault.tag_note(relative, "reports", "policy")
+
+    meta, _ = vault.read_note(relative)
+    assert meta["tags"] == "[grading, policy, reports]"
+
+
+def test_a_meeting_note_records_who_was_there(vault):
+    path = vault.meeting_note(
+        title="Term review", attendees=["Supakit", "the dean"], notes="agreed the format"
+    )
+    _, body = vault.read_note(str(path.relative_to(vault.root)))
+    assert "the dean" in body
+    assert "agreed the format" in body
+
+
+def test_a_skill_note_numbers_its_steps(vault):
+    path = vault.skill_note(
+        name="Grade report", description="how these are made", steps=["find the file", "total it"]
+    )
+    _, body = vault.read_note(str(path.relative_to(vault.root)))
+    assert "1. find the file" in body
+    assert "2. total it" in body
+
+
+def test_archiving_moves_a_note_rather_than_deleting_it(vault):
+    """Archiving is not forgetting. The vault is the owner's notebook, and removing pages
+    from it is not Thursday's call — memory deletion is handled where "forget" means gone."""
+    path = vault.write_note(folder="00 Inbox", title="Old thought", body="keep me")
+    moved = vault.archive(str(path.relative_to(vault.root)))
+
+    assert moved is not None
+    assert moved.parent.name == "09 Archive"
+    assert not path.exists()
+    assert "keep me" in moved.read_text(encoding="utf-8")
+
+
+def test_archiving_twice_does_not_overwrite_the_first_copy(vault):
+    first = vault.write_note(folder="00 Inbox", title="Duplicate", body="one")
+    vault.archive(str(first.relative_to(vault.root)))
+    second = vault.write_note(folder="00 Inbox", title="Duplicate", body="two")
+    vault.archive(str(second.relative_to(vault.root)))
+
+    archived = sorted((vault.root / "09 Archive").glob("*.md"))
+    assert len(archived) == 2
+
+
+def test_the_inbox_takes_something_with_no_home_yet(vault):
+    path = vault.inbox("look into the pgvector index later")
+    assert path is not None and path.parent.name == "00 Inbox"
+
+
+@pytest.mark.parametrize(
+    "call",
+    [
+        lambda v: v.update_note("x.md", body="y"),
+        lambda v: v.link_notes("a.md", "b.md"),
+        lambda v: v.tag_note("a.md", "t"),
+        lambda v: v.archive("a.md"),
+        lambda v: v.inbox("x"),
+        lambda v: v.meeting_note(title="t", attendees=[], notes="n"),
+        lambda v: v.skill_note(name="s", description="d", steps=[]),
+        lambda v: v.person_note(name="p", notes="n"),
+    ],
+)
+def test_every_new_call_is_a_no_op_when_the_vault_is_disabled(tmp_path, call):
+    """§8 — a privacy zone can switch the vault off, and nothing may then write to disk."""
+    disabled = ObsidianVault(tmp_path / "vault", enabled=False)
+    assert call(disabled) is None
+    assert not (tmp_path / "vault").exists()
+
+
 def test_the_graph_answers_a_two_hop_question():
     """'Which file did I use in the last meeting with this person?' (§10)."""
     graph = KnowledgeGraph()
