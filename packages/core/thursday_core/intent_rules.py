@@ -45,10 +45,15 @@ APP_ALIASES: dict[str, str] = {
 _STOP = re.compile(r"(?i)^\s*(thursday[,\s]*)?(stop|หยุด|ยกเลิก|cancel|abort|เงียบ)\b")
 # Thai is written without spaces, so the verb may sit flush against its object
 # ("เปิดโครม"); English always needs the separator. Hence the two-branch prefixes.
+# "run" is an app verb and a shell verb both. The lookahead keeps "run shell command whoami"
+# from becoming an application named "shell command whoami" — §96's rule that a broad
+# instruction must not be narrowed into the wrong action. It fires only on a *compound*
+# object, so "open terminal" and "run bash" still name applications, which they are.
+# Unrecognised here, the sentence falls through to the model, which is the honest outcome.
+_SHELL_OBJECT = r"(?!(?:shell|command|cmd|powershell|bash)\b\s+\S)"
 _OPEN_APP = re.compile(
     r"(?i)(?:\b(?:open|launch|start|run)\s+|(?:เปิด|เรียก|สั่งเปิด)\s*)"
-    r"(?:app\s+|โปรแกรม\s*|แอป\s*)?"
-    r"(?P<target>[\w฀-๿ .+-]{1,40}?)"
+    r"(?:app\s+|โปรแกรม\s*|แอป\s*)?" + _SHELL_OBJECT + r"(?P<target>[\w฀-๿ .+-]{1,40}?)"
     r"(?:\s*(?:\bon\b|บน|ที่|ใน)\s*(?P<device>[\w฀-๿-]{2,30}))?\s*$"
 )
 _CLOSE_APP = re.compile(
@@ -67,6 +72,32 @@ _DEVICE_STATUS_TH = re.compile(
     r"(?P<device>[\w฀-๿-]{2,30}?)\s*(?:ยัง|เปิด)\s*(?:[\w฀-๿]{0,8}?)"
     r"(?:เปิดอยู่|ออนไลน์|อยู่ไหม|ไหม|หรือเปล่า|มั้ย|รึเปล่า)"
 )
+# An instruction to remember, as opposed to a question about what was remembered. The
+# imperative anchor at the start is what keeps "do you remember the file?" out of this rule
+# and in _RECALL below, where it belongs.
+_REMEMBER = re.compile(
+    r"(?i)^\s*(?:please\s+)?(?:remember|note|keep in mind|don'?t forget)"
+    r"(?:\s+(?:that|this)\b)?\s*[:,]?\s*(?P<fact>.+)$"
+)
+#: "ไว้" is required, not optional: without it, "จำได้ไหม…" ("do you remember…") reads as an
+#: instruction to store the rest of the question.
+_REMEMBER_TH = re.compile(
+    r"^\s*(?:ช่วย)?จำ(?:เอา)?ไว้(?:นะ|ด้วย|หน่อย|ครับ|ค่ะ)*\s*(?:ว่า)?\s*[:,]?\s*(?P<fact>.+)$"
+)
+#: Wrapped form: "จำ <fact> ไว้".
+_REMEMBER_TH_WRAPPED = re.compile(r"^\s*(?:ช่วย)?จำ\s*(?P<fact>.+?)\s*(?:เอา)?ไว้(?:นะ|ด้วย)?\s*$")
+#: A statement about the owner rather than about the world goes to the preference layer,
+#: where it outranks anything an agent later infers (PART 76).
+#: Thai routinely drops the subject, so a bare "ชอบ…" is the speaker's own preference; in
+#: English the first person has to be explicit, or "the dean prefers PDF" — a fact about
+#: someone else — would be filed as something the owner wants.
+_PREFERENCE_MARKER = re.compile(
+    r"(?i)(ชอบ|ไม่ชอบ|ปกติ(?:ผม|ฉัน|เรา)?|เสมอ|ทุกครั้ง|"
+    r"\bi (?:like|prefer|hate|always|never|usually|want|need)\b|"
+    r"\bmy (?:preferred|usual|default)\b|\bi'?m (?:always|never)\b|"
+    r"\b(?:don'?t|do not) (?:like|want)\b)"
+)
+
 _RECALL = re.compile(
     r"(?i)(what did (?:we|i)|เมื่อ(?:อาทิตย์|สัปดาห์|เดือน|วาน)|จำได้ไหม|do you remember|"
     r"เคยทำ|ที่แล้วเรา|last time|ครั้งที่แล้ว|อยู่ไหน|where (?:is|did i put))"
@@ -225,6 +256,17 @@ def parse(text: str, *, wake_word: str = "thursday") -> RuleMatch | None:
                 )
             )
 
+    if (remember := _match_remember(body)) is not None:
+        fact, layer = remember
+        return RuleMatch(
+            Intent(
+                kind=IntentKind.MEMORY_WRITE,
+                objective=f"remember: {fact}",
+                entities={"fact": fact, "layer": layer},
+                confidence=0.92,
+                rationale="an explicit instruction to remember something",
+            )
+        )
     if _RECALL.search(body):
         return RuleMatch(
             Intent(
@@ -254,6 +296,24 @@ def parse(text: str, *, wake_word: str = "thursday") -> RuleMatch | None:
                 rationale="research request",
             )
         )
+    return None
+
+
+def _match_remember(body: str) -> tuple[str, str] | None:
+    """Pull the fact out of "remember that …" / "จำ … ไว้", and pick its layer.
+
+    Returns ``None`` rather than guessing when the sentence is only the verb — "remember?"
+    is a question, and answering it by storing the word "remember" would be worse than
+    admitting the rules did not understand.
+    """
+    for pattern in (_REMEMBER_TH_WRAPPED, _REMEMBER_TH, _REMEMBER):
+        match = pattern.match(body)
+        if match is None:
+            continue
+        fact = match.group("fact").strip(" \t:,.!?")
+        if len(fact) < 3:
+            return None
+        return fact, ("preference" if _PREFERENCE_MARKER.search(fact) else "semantic")
     return None
 
 

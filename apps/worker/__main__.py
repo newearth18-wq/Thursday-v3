@@ -56,10 +56,9 @@ def main() -> None:
     parser.add_argument("--log-level", default="INFO")
     args = parser.parse_args()
     configure_logging(level=args.log_level)
-    try:
+    # Ctrl-C is how an operator stops a worker; a traceback for it is noise, not news.
+    with contextlib.suppress(KeyboardInterrupt):
         asyncio.run(run(args))
-    except KeyboardInterrupt:
-        pass
 
 
 if __name__ == "__main__":

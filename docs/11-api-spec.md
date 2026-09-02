@@ -79,18 +79,38 @@ POST /decisions             §55 decision journal entry
 
 ```
 GET  /health         db, redis, models, devices, agents, queue, disk, cpu, ram  §59
+GET  /health/{database|redis|devices|models}   one dependency, for a probe      PART 91
 GET  /world          current world state snapshot                                §12
 POST /emergency/stop {scope: all|agents|camera|microphone|devices|tokens}         §69
+POST /emergency/release                                                           §69
 GET  /audit          ?from=&to=&actor=&tool=                                      §39
 POST /undo/{action_id}                                                            §40
+GET  /agents         registered agents with their measured success rate
+GET  /tools          the tool catalogue, with dry-run and undo support flags
+GET  /autonomy       {autonomy, proactivity} — acting and speaking, separately  PART 97
+POST /autonomy       ?autonomy=MODERATE&proactivity=LOW
+GET  /policies       every action, its effective decision, and whether it can   PART 70
+                     be relaxed at all
+POST /policies/{action}?decision=ASK_ALWAYS
 ```
+
+`GET /autonomy` reports level *names*, and `POST /autonomy` accepts them (as well as the
+numbers behind them), so a value this API hands out is a value it takes back.
+
+`GET /policies` reports the decision **after** the current autonomy level is applied, not
+the shipped default — a panel that shows one while the other is in force is lying to the
+owner. `can_relax` says in advance whether a change to `AUTO` would take effect;
+`POST /policies/{action}` refuses a change the table would silently ignore (400) rather
+than accepting a setting that then reverts, and refuses anything hard-blocked outright.
 
 ## 11.9 `WS /realtime`
 
 Client→server: `turn`, `audio_chunk`, `interrupt`, `approve`, `context_update`
 (active app/screen/selection), `gesture`, `ping`.
-Server→client: `token` (streamed text), `voice_mode`, `state` (avatar state), `task_update`,
-`agent_update`, `approval_request`, `notification`, `world_update`, `error`.
+Server→client (PART 72's vocabulary): `ready`, `assistant.delta`, `assistant.audio`,
+`task.updated`, `agent.updated`, `approval.required`, `approval.resolved`,
+`device.updated`, `notification`, `error`. Internal event kinds are translated at the
+gateway, so a rename inside the core is not a breaking change to every client.
 
 ## 11.10 Conventions
 

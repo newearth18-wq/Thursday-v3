@@ -37,6 +37,7 @@ from thursday_shared.models import (
     ConversationTurn,
     Event,
     GestureContext,
+    MemoryCandidate,
     MemoryWrite,
     ScreenContext,
     SelectionContext,
@@ -161,6 +162,11 @@ class ThursdayCore:
 
         if intent.kind is IntentKind.STOP:
             return self._finish(session_id, await self._handle_stop(language))
+        if intent.kind is IntentKind.MEMORY_WRITE:
+            # A control intent: it never reaches the planner, because there is nothing to
+            # plan. The write policy still applies — being told to remember something is
+            # not a licence to store a credential (§35).
+            return self._finish(session_id, await self._handle_remember(intent, language))
         if intent.kind is IntentKind.CLARIFY or intent.confidence < 0.35:
             # A conversational answer is harmless even when the classifier was unsure;
             # only a low-confidence *action* has to become a question.
@@ -198,39 +204,42 @@ class ThursdayCore:
         )
         await self.c.tasks.transition(task.id, TaskState.PLANNING)
 
+        def answered(reply: ThursdayReply) -> ThursdayReply:
+            """Every reply from here on belongs to this task, however it turned out.
+
+            The caller uses this to look the task up — for its state, its steps, or to
+            cancel it — so a reply that omits it leaves them holding a message about work
+            they cannot find. Attaching it in one place is the only way it stays true for
+            the failure paths as well as the happy one.
+            """
+            reply.task_id = task.id
+            return self._finish(session_id, reply)
+
         try:
             outcome = await self.c.orchestrator.run(
                 task, plan, context, wait_for_approval=wait_for_approval
             )
         except ApprovalRequired as exc:
             approval = self.c.approvals.get(UUID(exc.details["approval_id"]))
-            return self._finish(
-                session_id, self.c.composer.needs_approval(approval, language=language)
-            )
+            return answered(self.c.composer.needs_approval(approval, language=language))
         except PermissionDenied as exc:
             await self.c.tasks.fail(task.id, exc.message)
-            return self._finish(
-                session_id, self.c.composer.blocked(reason=exc.message, language=language)
-            )
+            return answered(self.c.composer.blocked(reason=exc.message, language=language))
         except DeviceUnavailable as exc:
             await self.c.tasks.fail(task.id, exc.message)
             question = exc.details.get("question") or exc.message
-            return self._finish(session_id, self.c.composer.clarify(question, language=language))
+            return answered(self.c.composer.clarify(question, language=language))
         except BudgetExceeded as exc:
             await self.c.tasks.fail(task.id, exc.message)
-            return self._finish(
-                session_id, self.c.composer.failure(reason=exc.message, language=language)
-            )
+            return answered(self.c.composer.failure(reason=exc.message, language=language))
 
         if outcome.approval_required is not None:
             approval = self.c.approvals.get(UUID(outcome.approval_required.details["approval_id"]))
-            return self._finish(
-                session_id, self.c.composer.needs_approval(approval, language=language)
-            )
+            return answered(self.c.composer.needs_approval(approval, language=language))
 
         reply = await self._report(task, outcome, context, intent, language)
         await self._remember(turn, intent, context, reply, outcome=outcome)
-        return self._finish(session_id, reply)
+        return answered(reply)
 
     # ------------------------------------------------------------------ reporting
 
@@ -369,6 +378,33 @@ class ThursdayCore:
         return "\n".join(lines)
 
     # ------------------------------------------------------------------ side paths
+
+    async def _handle_remember(self, intent, language: str) -> ThursdayReply:
+        """PART 39's write path, driven by the owner saying so out loud.
+
+        The owner asking is the strongest signal the write policy has, so this goes in as
+        ``MemorySource.USER`` — but it goes through ``propose`` rather than around it, so
+        the credential and privacy refusals still hold.
+        """
+        fact = str(intent.entities.get("fact") or intent.objective).strip()
+        layer = (
+            MemoryLayer.PREFERENCE
+            if str(intent.entities.get("layer", "")).lower() == "preference"
+            else MemoryLayer.SEMANTIC
+        )
+        judgement, record = await self.c.memory.propose(
+            MemoryCandidate(
+                layer=layer,
+                content=fact,
+                source=MemorySource.USER,
+                confidence=0.95,
+                # The owner said it deliberately; that is what importance is measuring.
+                importance=0.8,
+            )
+        )
+        if record is None:
+            return self.c.composer.not_remembered(judgement.reason, language=language)
+        return self.c.composer.remembered(fact, language=language)
 
     async def _handle_stop(self, language: str) -> ThursdayReply:
         """§44 — stop speaking, pause agents, cancel what is safe to cancel."""

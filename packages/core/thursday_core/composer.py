@@ -33,6 +33,30 @@ class ResponseComposer:
             avatar_state=AvatarState.WORKING,
         )
 
+    def remembered(self, fact: str, *, language: str) -> ThursdayReply:
+        """Confirm a write, quoting it back.
+
+        Quoting the stored text is the point: the owner finds out now if Thursday kept the
+        wrong half of the sentence, rather than a fortnight later when it acts on it.
+        """
+        return ThursdayReply(
+            text=phrase("remembered", language, fact=fact),
+            voice_mode=VoiceMode.SUCCESS,
+            avatar_state=AvatarState.IDLE,
+        )
+
+    def not_remembered(self, reason: str, *, language: str) -> ThursdayReply:
+        """A refusal to store, with the write policy's own reason (PART 39).
+
+        Silence here would look identical to success, and the owner would go on believing
+        Thursday knows something it does not.
+        """
+        return ThursdayReply(
+            text=phrase("not_remembered", language, reason=reason),
+            voice_mode=VoiceMode.WARNING,
+            avatar_state=AvatarState.IDLE,
+        )
+
     def success(
         self,
         *,

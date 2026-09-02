@@ -244,3 +244,77 @@ async def test_routine_suggestions_are_accepted_but_stay_disabled(client, contai
 
     enabled = (await client.post(f"/api/v1/automations/{UUID(accepted['id'])}/enable")).json()
     assert enabled["enabled"] is True
+
+
+# ------------------------------------------------------------------ policy panel (PART 70)
+
+
+async def test_the_policy_table_is_readable_by_the_permission_panel(client):
+    """PART 70 — the owner can see every action and what Thursday will do when asked."""
+    body = (await client.get("/api/v1/policies")).json()
+    rows = {row["action"]: row for row in body["policies"]}
+
+    assert rows["file.read"]["decision"] == "AUTO"
+    assert rows["file.delete"]["decision"] == "ASK_ALWAYS"
+    assert rows["file.delete"]["can_relax"] is False
+    assert "security.disable" in body["hard_blocked"]
+
+
+async def test_the_reported_decision_already_accounts_for_autonomy(client):
+    """A panel that shows the shipped default while a stricter level is in force is lying."""
+    await client.post("/api/v1/autonomy", params={"autonomy": "SUGGEST_ONLY"})
+    rows = {r["action"]: r for r in (await client.get("/api/v1/policies")).json()["policies"]}
+    assert rows["app.open"]["decision"] == "ASK_ONCE"
+
+    await client.post("/api/v1/autonomy", params={"autonomy": "HIGH"})
+    rows = {r["action"]: r for r in (await client.get("/api/v1/policies")).json()["policies"]}
+    assert rows["app.open"]["decision"] == "AUTO"
+
+
+async def test_an_approval_mode_can_be_tightened_from_the_panel(client):
+    response = await client.post(
+        "/api/v1/policies/app.open", params={"decision": PolicyDecision.ASK_ALWAYS.value}
+    )
+    assert response.status_code == 200
+    assert response.json()["decision"] == "ASK_ALWAYS"
+
+    rows = {r["action"]: r for r in (await client.get("/api/v1/policies")).json()["policies"]}
+    assert rows["app.open"]["decision"] == "ASK_ALWAYS"
+
+
+async def test_a_setting_that_would_not_stick_is_refused_rather_than_silently_dropped(client):
+    """A control that saves and then reverts teaches the owner something false about their
+    own machine: they would believe deleting files no longer asks, and it still would."""
+    refused = await client.post(
+        "/api/v1/policies/file.delete", params={"decision": PolicyDecision.AUTO.value}
+    )
+    assert refused.status_code == 400
+    assert "ask-every-time" in refused.json()["detail"]
+
+    rows = {r["action"]: r for r in (await client.get("/api/v1/policies")).json()["policies"]}
+    assert rows["file.delete"]["decision"] == "ASK_ALWAYS"
+
+
+async def test_a_hard_blocked_action_has_no_setting_at_all(client):
+    refused = await client.post(
+        "/api/v1/policies/security.disable", params={"decision": PolicyDecision.AUTO.value}
+    )
+    assert refused.status_code == 400
+    assert "hard-blocked" in refused.json()["detail"]
+
+
+async def test_the_autonomy_value_this_api_prints_is_one_it_accepts(client):
+    """A round trip: whatever GET reports must be sendable straight back to POST."""
+    reported = (await client.get("/api/v1/autonomy")).json()["autonomy"]
+    echoed = await client.post("/api/v1/autonomy", params={"autonomy": reported})
+    assert echoed.status_code == 200
+    assert echoed.json()["autonomy"] == reported
+
+    # The numeric form still works, for anything driving this from the enum's value.
+    assert (await client.post("/api/v1/autonomy", params={"autonomy": "3"})).json()[
+        "autonomy"
+    ] == "HIGH"
+
+    nonsense = await client.post("/api/v1/autonomy", params={"autonomy": "TOTAL"})
+    assert nonsense.status_code == 400
+    assert "SUGGEST_ONLY" in nonsense.json()["detail"]

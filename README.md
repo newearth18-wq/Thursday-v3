@@ -16,7 +16,7 @@ USER → THURSDAY → Understand → Plan → Delegate → Act → Verify → Re
 ## Status
 
 **Phase 1 is implemented and runnable**: the vertical slice from
-[docs/15-vertical-slice.md](docs/15-vertical-slice.md) works end to end, with 179 tests that
+[docs/15-vertical-slice.md](docs/15-vertical-slice.md) works end to end, with 298 tests that
 need no database, no network and no model credentials.
 
 ```
@@ -52,6 +52,15 @@ Three-process setup (how it runs for real):
 python -m apps.server                                  # core API on :8000
 python -m apps.node --name Office-PC --allow-root ~    # one per machine
 python -m apps.cli --remote                            # or the desktop app
+
+cd apps/desktop && npm install && npm run tauri dev    # the window
+```
+
+With Postgres, Redis and a separate worker:
+
+```bash
+docker compose up -d          # postgres+pgvector, redis, api, worker
+./scripts/dev.sh              # or run the pieces locally
 ```
 
 Nothing above reaches for the cloud. The default model backend is a deterministic offline
@@ -65,25 +74,28 @@ See [.env.example](.env.example).
 
 ---
 
-## The seven rules the code enforces
+## The nine rules the code enforces
 
 These are the design, and they are tested rather than documented and hoped for.
+
+Paths below are relative to `packages/<name>/thursday_<name>/`.
 
 | # | Rule | Where it lives |
 |---|---|---|
 | 1 | **Verify before reporting success.** Dispatch is not success. | `devices/node/executor.py`, `core/supervisor.py`, `core/tasks.py::complete` |
 | 2 | **Least privilege, explicit permission.** Every action passes the engine; the BLOCK set has no override path — not by config, not by grant, not by an agent's own reasoning. | `security/permissions.py`, `security/policy.py` |
 | 3 | **Secrets never enter a prompt, a note, a log or a vector store.** | `security/vault.py`, `security/redaction.py` |
-| 4 | **Privacy decides where inference runs.** `SECRET` never leaves the machine. | `security/privacy.py`, `core/model_router.py` |
-| 5 | **Memory is curated, not a transcript.** Conflicts are recorded, never merged. | `memory/manager.py` |
+| 4 | **Privacy decides where inference runs.** `SECRET` never leaves the machine, and an agent that could reach the cloud is excluded rather than penalised. | `security/privacy.py`, `core/model_router.py`, `agents/registry.py` |
+| 5 | **Memory is curated, not a transcript.** Conflicts are recorded, never merged, and an agent cannot write the owner's preferences. | `memory/manager.py` |
 | 6 | **Everything is audited and, where possible, reversible.** | `security/audit.py`, `core/undo.py` |
 | 7 | **Providers are swappable.** Every port has a real adapter and an offline one. | `shared/interfaces.py`, `core/container.py` |
-| 8 | **Thursday proposes; the owner decides.** Learned routines arrive disabled; risky skills cannot self-activate. | `automation/routines.py`, `skills/registry.py` |
+| 8 | **Thursday proposes; the owner decides.** Learned routines arrive disabled; risky skills cannot self-activate. | `automation/routines.py`, `automation/skills/registry.py` |
+| 9 | **Untrusted content is data, never instruction.** A page or a file cannot widen what Thursday may do. | `agents/browser.py`, [ADR 0010](docs/architecture/decisions/0010-untrusted-content-is-data.md) |
 
 Rule 1, concretely:
 
 ```python
-# thursday/core/tasks.py
+# packages/core/thursday_core/tasks.py
 if not verification.passed:
     raise ThursdayError("refusing to complete a task whose verification did not pass")
 ```
@@ -104,7 +116,10 @@ if not verification.passed:
    data · document · coding · …       browser · Obsidian · APIs · IoT
 ```
 
-Full design in [`docs/`](docs/) — the fifteen deliverables, written before the code:
+Full design in [`docs/`](docs/) — the fifteen deliverables, written before the code, plus
+the [V2 review](docs/architecture/00-v2-review.md) and ten
+[architecture decisions](docs/architecture/decisions/) recording what was chosen and what
+each choice cost:
 
 | | | | |
 |---|---|---|---|
@@ -133,7 +148,7 @@ Full design in [`docs/`](docs/) — the fifteen deliverables, written before the
 - Spatial memory that answers as a *sighting*, and gesture mode that expires when idle
 - Model router with tiers, cost/privacy routing and a local fallback
 - Background worker: memory decay, health, device liveness, approval expiry
-- 40 REST endpoints, two WebSockets, 25-table schema with a working migration
+- 64 REST operations, two WebSockets, 29-table schema with working migrations and seeds
 
 **Designed, ported, not yet implemented** — every one has an interface and a Phase in
 [the roadmap](docs/13-roadmap.md):
@@ -146,7 +161,9 @@ Full design in [`docs/`](docs/) — the fifteen deliverables, written before the
   landmarks arrives in Phase 3
 - Real STT/TTS models — the ports and offline stubs are in place; faster-whisper and Piper
   adapters are written but unexercised without the model files
-- Desktop and mobile clients (scaffolds in `apps/desktop`, `apps/mobile`)
+- Mobile client (scaffold in `apps/mobile`). The desktop app is built — conversation,
+  approvals, tasks, devices, memory and permissions — but has no voice capture and no
+  embedded device node yet
 - Ed25519 device signature verification is scaffolded in the protocol and enforced only in
   `production`; the keypair generation and pairing flow land in Phase 2
 
@@ -158,24 +175,31 @@ the verification loop, the audit chain and the device round-trip are all real.
 ## Development
 
 ```bash
-pytest                       # 179 tests, no infrastructure
-pytest --cov=thursday
+./scripts/check.sh           # everything CI runs: lint, format, types, tests, migrations
+pytest                       # 298 tests, no infrastructure
 ruff check . && ruff format .
-mypy thursday
-alembic revision --autogenerate -m "what changed"
+mypy packages services
+alembic upgrade head && alembic revision --autogenerate -m "what changed"
+python -m database.seeds     # idempotent: one owner, six agents, the tool catalogue
 ```
 
-`tests/conftest.py` ships a `FakeAdapter` whose `fail_launch=True` mode makes a command
-appear to succeed while nothing actually starts — the case rule 1 exists for.
+`thursday_devices.fake` ships a `FakeDeviceNode` whose `fail_launch=True` mode makes a
+command appear to succeed while nothing actually starts — the case rule 1 exists for. It is
+a shipped artifact rather than a fixture, because the CLI's `--fake-device` mode and anyone
+extending the node protocol need the same misbehaving node the tests use.
 
 ## Layout
 
 ```
-apps/      server · node · cli · desktop (scaffold) · mobile (planned)
-thursday/  shared · core · agents · tools · memory · devices · security
-           voice · vision · automation · skills · providers · api · db
-docs/      the fifteen design deliverables
-tests/     unit · integration
+apps/        server · node · cli · worker · desktop (Tauri) · mobile (planned)
+packages/    shared · core · agents · tools · memory · devices · security
+             voice · vision · automation · models
+services/    api · realtime · worker
+database/    migrations · seeds
+docker/      api and node images; docker-compose.yml at the root
+docs/        the fifteen design deliverables + architecture/decisions (ADRs)
+tests/       unit · integration · e2e
+scripts/     dev.sh · check.sh · check_no_secrets.py
 ```
 
 ## Licence

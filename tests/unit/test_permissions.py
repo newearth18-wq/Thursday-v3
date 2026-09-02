@@ -292,3 +292,21 @@ def test_lockdown_permits_only_reading(engine):
     assert engine.decide(ActionRequest(action="app.open")).decision is PolicyDecision.BLOCK
     engine.set_lockdown(False)
     assert engine.decide(ActionRequest(action="app.open")).decision is PolicyDecision.AUTO
+
+
+def test_the_table_says_in_advance_whether_a_relaxation_would_take():
+    """PART 70's panel asks this before it offers a control, rather than after."""
+    policy = PolicyTable()
+    assert policy.can_relax("system.process.stop") is True
+    assert policy.can_relax("file.delete") is False
+    assert policy.can_relax("shell.admin") is False
+    assert policy.can_relax("security.disable") is False
+
+
+def test_an_override_can_be_taken_back():
+    policy = PolicyTable()
+    policy.override("app.open", PolicyDecision.ASK_ALWAYS)
+    assert policy.get("app.open").default is PolicyDecision.ASK_ALWAYS
+
+    policy.clear_override("app.open")
+    assert policy.get("app.open").default is PolicyDecision.AUTO

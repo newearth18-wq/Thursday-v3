@@ -1,56 +1,111 @@
-# Thursday Desktop (scaffold)
+# Thursday Desktop
 
-Tauri 2 + React + TypeScript. ~10 MB binary with real OS access, so the desktop app can
-**embed its own device node** rather than shipping a second process.
+Tauri 2 + React 18 + TypeScript + Vite + Tailwind. The window is a client of the local
+API like any other; nothing here decides anything (PART 64).
 
-## What the UI must be
+## What it is
 
-Per §62–64: a conversation and an orb, not a dashboard. The machinery is Thursday's business;
-the owner sees one assistant.
+A conversation and an orb — not a dashboard. The machinery is Thursday's business; the
+owner sees one assistant.
 
 ```
-┌──────────────────────────────────────────┐
-│                  ◍                       │   Avatar / orb
-│         (IDLE · LISTENING ·              │   §63 states drive one animation
-│      THINKING · WORKING · SPEAKING ·     │
-│              WARNING)                    │
-├──────────────────────────────────────────┤
-│  you>  Thursday เปิดไฟล์คะแนนล่าสุด        │
-│  Thursday> รับทราบ กำลังตรวจไฟล์…          │   streamed over WS /realtime
-│  Thursday> เสร็จแล้ว — 42 คน (ยืนยันแล้ว)  │
-├──────────────────────────────────────────┤
-│  Data · working    Writer · waiting      │   §64: collapsed agent strip,
-│  Supervisor · checking                   │   expandable, never the main view
-├──────────────────────────────────────────┤
-│  ⚠ approval: send email to dean@…        │   §38: action · device · resource ·
-│    [approve] [once] [always] [reject]    │   risk · outcome · cost of refusing
-└──────────────────────────────────────────┘
+┌──────────────────────────────────┬──────────────┐
+│                ◍                 │ tasks        │  Orb: one state field, one animation
+│             thinking             │ devices      │
+├──────────────────────────────────┤ memory       │
+│  you>  Thursday เปิด chrome       │ permissions  │  Drawers, closed by default
+│  Thursday> เปิด chrome เรียบร้อย   │              │
+│            (ยืนยันแล้ว)           │              │
+├──────────────────────────────────┤              │
+│  computer · done                 │              │  Agent strip, collapsed
+├──────────────────────────────────┤              │
+│  ⚠ delete thesis.docx?           │              │  Full context above the buttons
+│    what happens · what if not    │              │
+│    [delete] [no]                 │              │
+├──────────────────────────────────┴──────────────┤
+│  Say what you need…                    [send]   │  esc stops whatever is running
+└─────────────────────────────────────────────────┘
 ```
 
-Rules the UI must not break:
+## Rules this UI does not break
 
-- Sub-agents never address the owner. One voice (§96).
-- An unverified result is visually distinct from a verified one (§76) — the `verified`
-  field on every reply exists for this.
-- Approvals show the full context before the buttons, never after.
-- The agent strip is collapsed by default. If the owner has to watch it, the design failed.
+- **One voice.** Sub-agents never address the owner (§96). The agent strip is a status
+  line, not a second conversation, and it is collapsed by default. If the owner has to
+  watch it to understand what is happening, the design has failed.
+- **Unverified looks different from done.** Every reply carries `verified`; a dispatched
+  action whose effect could not be observed is rendered with its own banner, never as a
+  success (§76, PART 5.1).
+- **Context before buttons.** An approval shows what will happen, to what, on which
+  machine, and what refusing costs — above the choices, never behind a disclosure.
+- **"Always allow" is only offered when it exists.** `scopes_offered` decides; for the
+  ASK_ALWAYS set the dialog shows one-time answers only, because a standing grant is not
+  something the engine would honour (ADR 0008).
+- **A permission control that would not stick is not shown.** `can_relax` decides. A
+  setting that saves and silently reverts teaches the owner something false about their
+  own machine.
+- **Stop is never buried.** Escape interrupts the turn; the tray's *Stop everything* posts
+  to the API from Rust, so it works when the webview does not.
+
+## Layout
+
+```
+src/
+  App.tsx                  one window: conversation + drawers
+  main.tsx                 entry point
+  index.css                Tailwind layers
+  hooks/useRealtime.ts     the single WebSocket, with reconnect backoff
+  lib/api.ts               the REST surface, typed
+  lib/origin.ts            where the API lives (dev proxy vs. packaged app)
+  lib/types.ts             the contracts this UI renders
+  components/
+    Orb.tsx                PART 63/65 — avatar state as colour and motion
+    Conversation.tsx       PART 64 — the interface
+    AgentStrip.tsx         PART 66 — collapsed status line
+    ApprovalDialog.tsx     PART 38/70 — context, then buttons
+    TaskPanel.tsx          PART 67 — progress, pause, cancel
+    DevicePanel.tsx        PART 68 — machines and what each will allow
+    MemoryPanel.tsx        PART 69 — search, inspect, confirm, forget
+    PermissionPanel.tsx    PART 70 — approval modes, standing grants, autonomy
+src-tauri/
+  src/main.rs              window, tray, and the emergency stop
+  tauri.conf.json          window and CSP
+```
 
 ## Wiring
 
 | Concern | Where |
 |---|---|
-| Conversation, streaming, state | `WS /api/v1/realtime` |
-| Approvals | `approval_request` events in, `approve` messages out |
-| Screen context (§30) | `context_update` messages with the active window and selection |
-| Device actions | the embedded node speaks TNP/1 to `WS /api/v1/device` |
+| Conversation, streaming, avatar state | `WS /api/v1/realtime` |
+| Approvals | `approval.required` in, `POST /approvals/{id}/approve` out |
+| Tasks, devices, memory, policies | `GET /api/v1/…`, polled while a drawer is open |
 | Emergency stop (§69) | `POST /api/v1/emergency/stop` — a plain call, bypassing the model |
 
-## Getting started
+`lib/origin.ts` is the one place that knows the difference between development and a
+packaged build: in dev, Vite proxies `/api` (so a relative URL is correct and there is no
+CORS); packaged, the page is served from `tauri://localhost`, where a relative URL would
+resolve to the bundle. Override with `VITE_THURSDAY_API` or `THURSDAY_API_URL`.
+
+## Running it
+
+The API must be up first — this app renders it, it does not host it.
 
 ```bash
-npm create tauri-app@latest -- --template react-ts
-npm install && npm run tauri dev
+# terminal 1
+./scripts/dev.sh
+
+# terminal 2
+cd apps/desktop
+npm install
+npm run dev          # browser, against the dev proxy on :1420
+npm run tauri dev    # the real window
 ```
 
-The Rust side hosts the node runtime; the React side is presentation only. Business logic
-stays in the core (§3 of the repository structure rules).
+`npm run typecheck` and `npm run build` are what CI runs. Both are worth running before a
+commit: `tsc` and the bundler resolve paths independently, so one can pass while the other
+fails.
+
+## Not built yet
+
+Voice capture, the embedded device node, and the screen-context channel. The window speaks
+to the API over HTTP and WebSocket only; when the node moves in-process, it will speak
+TNP/1 from the Rust side without changing anything in `src/`.

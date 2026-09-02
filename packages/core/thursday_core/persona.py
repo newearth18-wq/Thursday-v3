@@ -58,6 +58,14 @@ PHRASES: dict[str, dict[str, str]] = {
         "th": "ขอความชัดเจนก่อน — {question}",
         "en": "One thing before I proceed — {question}",
     },
+    "remembered": {
+        "th": "จำไว้แล้ว — {fact}",
+        "en": "Noted — {fact}",
+    },
+    "not_remembered": {
+        "th": "ผมไม่ได้เก็บเรื่องนี้ไว้ — {reason}",
+        "en": "I did not store that — {reason}",
+    },
     "stopped": {
         "th": "หยุดแล้ว",
         "en": "Stopped.",

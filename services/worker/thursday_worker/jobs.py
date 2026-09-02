@@ -11,6 +11,7 @@ import asyncio
 import contextlib
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from typing import Any
 
 from thursday_core.logging import get_logger
 from thursday_shared.enums import NotificationPriority, TaskState

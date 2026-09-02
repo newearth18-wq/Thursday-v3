@@ -280,5 +280,35 @@ Ordered per PART 100. ✅ marks what exists and is being *aligned* rather than w
 | 12 | `FakeDeviceNode` | promoted from test fixture to shipped artifact |
 | 13 | Supervisor | ✅ → `SupervisorResult`, mandatory-supervision rules |
 | 14 | WebSocket | ✅ → V2 event names |
-| 15 | `apps/desktop/` | real Tauri + React + Tailwind app |
-| 16 | tests | ✅ → `tests/e2e/`, slices 2–5 |
+| 15 | `apps/desktop/` | ✅ Tauri 2 + React 18 + Tailwind: conversation, orb, approvals, tasks, devices, memory, permissions |
+| 16 | tests | ✅ `tests/e2e/`: the PART 77/78 acceptance test and slices 2–5 |
+
+---
+
+## L. What the V2 work found
+
+Five defects the design review surfaced, each fixed with a test that fails without the fix.
+They are recorded here because each one is a case of the code disagreeing with the design,
+which is the only kind of finding a review like this is for.
+
+| Where | What was wrong | Why it mattered |
+|---|---|---|
+| `security/permissions.py` | `decide()` did not honour a namespace-level `BLOCK`, so an unknown verb under a blocked namespace (`audit.truncate`) fell through to the weaker fail-closed `ASK` | The BLOCK set is supposed to have no path around it; asking is a path around it |
+| `agents/registry.py` | An agent with **none** of its tools available still scored above the selection floor | Thursday would delegate to an agent that cannot act, then fail halfway through instead of saying so up front |
+| `agents/registry.py` | SECRET content merely *penalised* cloud-capable agents | A low score still wins an election it is the only entrant in — which is how a password reaches a web search |
+| `core/bus.py` | A synchronous subscriber raised out of `publish` before **any** handler ran | The class promises one failing subscriber cannot break the publisher; the most natural subscriber anyone writes broke every task that published an event |
+| `core/engine.py` | No reply carried a `task_id`, so `ThursdayResponse.status` was always `None` | Callers were handed a message about work they could not then look up, pause or cancel |
+
+And two gaps where a declared capability had no implementation behind it:
+
+- `IntentKind.MEMORY_WRITE` was declared and never produced: "จำไว้นะ …" / "remember that …"
+  fell through to *I did not understand*. It now parses deterministically, routes as a
+  control intent, and still passes the write policy — being told to remember something is
+  not a licence to store a credential.
+- `POST /autonomy` accepted only the integers behind the enum while `GET /autonomy`
+  returned the names, so the value the API handed out could not be sent back to it.
+
+One misparse worth naming on its own: `run shell command whoami` matched the open-an-app
+rule and became an application named *"shell command whoami"*. Harmless in practice — no
+such executable — but it is §96's failure exactly: a broad instruction narrowed into the
+wrong action. It now falls through to the model rather than being confidently wrong.

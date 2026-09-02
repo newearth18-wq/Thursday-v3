@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+from enum import IntEnum
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
 from thursday_core.container import Container
-from thursday_shared.enums import AutonomyLevel, ProactivityLevel
+from thursday_security.policy import HARD_BLOCKED
+from thursday_shared.enums import AutonomyLevel, PolicyDecision, ProactivityLevel
 from thursday_shared.errors import ThursdayError
 
 from thursday_api.deps import get_container
@@ -76,16 +78,31 @@ async def get_autonomy(c: Container = Depends(get_container)) -> dict:
     }
 
 
+def _level[T: IntEnum](enum: type[T], value: str) -> T:
+    """Accept the name this API prints as well as the number behind it.
+
+    ``GET /autonomy`` reports ``"MODERATE"``. Requiring ``2`` on the way back in would mean
+    the value you are handed is not a value you can send.
+    """
+    try:
+        return enum[value.upper()] if not value.lstrip("-").isdigit() else enum(int(value))
+    except (KeyError, ValueError) as exc:
+        allowed = ", ".join(member.name for member in enum)
+        raise HTTPException(
+            status_code=400, detail=f"unknown level {value!r}; try {allowed}"
+        ) from exc
+
+
 @router.post("/autonomy")
 async def set_autonomy(
-    autonomy: AutonomyLevel | None = None,
-    proactivity: ProactivityLevel | None = None,
+    autonomy: str | None = None,
+    proactivity: str | None = None,
     c: Container = Depends(get_container),
 ) -> dict:
     if autonomy is not None:
-        c.permissions.set_autonomy(autonomy)
+        c.permissions.set_autonomy(_level(AutonomyLevel, autonomy))
     if proactivity is not None:
-        c.automations.gate.level = proactivity
+        c.automations.gate.level = _level(ProactivityLevel, proactivity)
     return await get_autonomy(c)
 
 
@@ -105,6 +122,67 @@ async def agents(c: Container = Depends(get_container)) -> dict:
 @router.get("/tools")
 async def tools(c: Container = Depends(get_container)) -> dict:
     return {"tools": [spec.model_dump(mode="json") for spec in c.tools.specs()]}
+
+
+@router.get("/policies")
+async def policies(c: Container = Depends(get_container)) -> dict:
+    """PART 70. Every action Thursday knows, and what it will do when asked to take it.
+
+    The decision reported here is the *effective* one: the table's default with the current
+    autonomy level already applied, so what the panel shows is what will actually happen.
+    """
+    autonomy = c.permissions.autonomy
+    table = c.permissions.policy
+    rows = []
+    for action in table.known_actions():
+        policy = table.get(action, autonomy=autonomy)
+        rows.append(
+            {
+                "action": action,
+                "namespace": action.split(".")[0],
+                "decision": policy.default.value,
+                "level": policy.level.name,
+                "risk": policy.risk.value,
+                "reversible": policy.reversible,
+                "requires_backup": policy.requires_backup,
+                "bulk_threshold": policy.bulk_threshold,
+                "blocked": table.is_blocked(action),
+                # An ASK_ALWAYS action can be tightened but never loosened (ADR 0008), so the
+                # panel greys out the control instead of offering a choice that would not stick.
+                "can_relax": table.can_relax(action),
+            }
+        )
+    return {"autonomy": autonomy.name, "policies": rows, "hard_blocked": sorted(HARD_BLOCKED)}
+
+
+@router.post("/policies/{action}")
+async def set_policy(
+    action: str, decision: PolicyDecision, c: Container = Depends(get_container)
+) -> dict:
+    """Change one action's approval mode.
+
+    A request the table would silently ignore is refused instead. A setting that appears to
+    save and then does nothing is worse than an error: the owner would believe deleting files
+    now happens without asking, and it would not.
+    """
+    table = c.permissions.policy
+    try:
+        table.override(action, decision)
+    except PermissionError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    effective = table.get(action, autonomy=c.permissions.autonomy)
+    if effective.default is not decision:
+        table.clear_override(action)
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"{action!r} cannot be set to {decision.value}: it stays "
+                f"{effective.default.value} because it is a system-level or "
+                "ask-every-time action"
+            ),
+        )
+    return {"action": action, "decision": effective.default.value}
 
 
 @router.get("/audit")

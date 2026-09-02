@@ -286,6 +286,19 @@ class PolicyTable:
             raise PermissionError(f"{name!r} is hard-blocked and cannot be overridden")
         self._overrides[name] = decision
 
+    def can_relax(self, action: str) -> bool:
+        """Whether a user override to AUTO would actually take effect.
+
+        The panel asks this before offering the choice: a control that saves a setting the
+        table then ignores teaches the owner that deleting files no longer asks, when it does.
+        """
+        name = canonical(action)
+        return self._may_override(self.get(name), PolicyDecision.AUTO, name)
+
+    def clear_override(self, action: str) -> None:
+        """Drop a user override, returning the action to its shipped default."""
+        self._overrides.pop(canonical(action), None)
+
     def is_blocked(self, action: str) -> bool:
         name = canonical(action)
         return any(prefix in HARD_BLOCKED for prefix in prefixes(name))
