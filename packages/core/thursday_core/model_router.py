@@ -1,22 +1,48 @@
-"""Model Router (§33) with the privacy hard stop from §34.
+"""Model Router (§33) with the privacy hard stop from §34 and the spending ceiling (§61).
 
 Selection is complexity × privacy × latency × cost × availability. The privacy rule is not
 a preference: a SECRET payload cannot reach a non-local provider, and the router raises
 rather than degrading quietly.
+
+Two things live here because this is the single point every model call passes through, and a
+rule enforced anywhere else is a rule with a way around it:
+
+**Metering.** Every completion is recorded — provider, tier, tokens, cost — by the router
+rather than by its callers. Reporting your own spend is optional in practice, and the two
+calls that turned out not to be reporting were the two every turn makes.
+
+**The ceiling.** A cap is checked *before* a paid call and degrades to the local model, which
+is free. It does not refuse the work: a spending limit that stops Thursday working is worse
+than the overspend it prevents, and an outage the owner cannot tell from a broken assistant
+is one they fix by deleting the limit.
 """
 
 from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
+from datetime import UTC, datetime, timedelta
+from uuid import UUID
 
 from thursday_shared.enums import DataSensitivity, ModelTier
-from thursday_shared.errors import PrivacyViolation, ProviderError
+from thursday_shared.errors import BudgetExceeded, PrivacyViolation, ProviderError
 from thursday_shared.models import HealthStatus, LLMRequest, LLMResponse
 
+from thursday_core.cost import CostMeter
 from thursday_core.logging import get_logger
 
 log = get_logger(__name__)
+
+#: Consecutive failures that park a provider. Three, because one is noise and two is a bad
+#: minute; a provider that has failed three times in a row is not having a bad minute.
+BREAKER_TRIP = 3
+
+#: How long a parked provider stays parked before it is tried once more. Without this the
+#: breaker never opens again: a parked provider is never chosen, so it never succeeds, so the
+#: counter that only resets on success never resets — three transient failures would disable
+#: a good provider until somebody restarted the process. The same reasoning as ADR 0028's
+#: attempt window, which this originally failed to apply.
+BREAKER_COOLDOWN = timedelta(minutes=5)
 
 _COMPLEX_MARKERS = re.compile(
     r"(?i)(analy[sz]e|วิเคราะห์|compare|เปรียบเทียบ|why|ทำไม|explain|อธิบาย|design|ออกแบบ|"
@@ -42,7 +68,11 @@ class ModelRouter:
 
     providers: dict[ModelTier, object] = field(default_factory=dict)
     allow_cloud: bool = True
+    #: The spend ledger and its ceiling. Optional so a router built for a test is not
+    #: obliged to have one; the container always wires it.
+    meter: CostMeter | None = None
     _breaker: dict[str, int] = field(default_factory=dict)
+    _tripped_at: dict[str, datetime] = field(default_factory=dict)
 
     def register(self, tier: ModelTier, provider: object) -> None:
         self.providers[tier] = provider
@@ -104,19 +134,43 @@ class ModelRouter:
             tier=tier, provider_name=getattr(provider, "name", "?"), reasons=tuple(reasons)
         )
 
-    def _resolve(self, tier: ModelTier) -> object | None:
+    def _resolve(self, tier: ModelTier, *, now: datetime | None = None) -> object | None:
         provider = self.providers.get(tier)
         if provider is None:
             return None
-        # Circuit breaker: three consecutive failures parks a provider for this process.
-        if self._breaker.get(getattr(provider, "name", ""), 0) >= 3:
+        if self.parked(getattr(provider, "name", ""), now=now):
             return None
         return provider
+
+    def parked(self, name: str, *, now: datetime | None = None) -> bool:
+        """Whether the breaker is currently holding this provider out of selection.
+
+        Holding, not banning. After the cooldown the provider is offered again and one call
+        decides: succeed and the counter clears, fail and it is parked for another cooldown.
+        """
+        if self._breaker.get(name, 0) < BREAKER_TRIP:
+            return False
+        tripped = self._tripped_at.get(name)
+        now = now or datetime.now(UTC)
+        if tripped is not None and now - tripped >= BREAKER_COOLDOWN:
+            # Cooldown served. Offer it one attempt rather than declaring it healthy — the
+            # attempt is the only evidence either way.
+            self._breaker[name] = BREAKER_TRIP - 1
+            self._tripped_at.pop(name, None)
+            log.info("model_breaker_half_open", provider=name)
+            return False
+        return True
 
     # ------------------------------------------------------------------ execution
 
     async def complete(
-        self, request: LLMRequest, *, offline: bool = False, prefer: ModelTier | None = None
+        self,
+        request: LLMRequest,
+        *,
+        offline: bool = False,
+        prefer: ModelTier | None = None,
+        task_id: UUID | None = None,
+        agent: str = "",
     ) -> tuple[LLMResponse, RouteDecision]:
         text = " ".join(m.content for m in request.messages if m.role == "user")
         decision = self.choose(
@@ -125,25 +179,97 @@ class ModelRouter:
             offline=offline,
             prefer=prefer or request.tier,
         )
+        decision = self._within_cap(decision)
         provider = self.providers[decision.tier]
         name = getattr(provider, "name", "?")
         try:
             response = await provider.complete(request)  # type: ignore[attr-defined]
             self._breaker[name] = 0
+            self._tripped_at.pop(name, None)
+            self._meter(response, decision, task_id=task_id, agent=agent)
             return response, decision
         except Exception as exc:
-            self._breaker[name] = self._breaker.get(name, 0) + 1
-            log.warning("model_failed", provider=name, error=str(exc), failures=self._breaker[name])
+            self._trip(name, exc)
             local = self.providers.get(ModelTier.LOCAL)
             if local is None or local is provider:
                 raise
             response = await local.complete(request)  # type: ignore[attr-defined]
-            return response, RouteDecision(
+            degraded = RouteDecision(
                 tier=ModelTier.LOCAL,
                 provider_name=getattr(local, "name", "?"),
                 reasons=(*decision.reasons, f"{name} failed, degraded to local"),
                 fallback_from=name,
             )
+            self._meter(response, degraded, task_id=task_id, agent=agent)
+            return response, degraded
+
+    # ------------------------------------------------------------------ money
+
+    def _within_cap(self, decision: RouteDecision) -> RouteDecision:
+        """Send a paid call to the local model once the ceiling is reached.
+
+        Degrade rather than refuse. A cap that stops Thursday working is worse than the
+        overspend it prevents, and the owner cannot tell that kind of outage from a broken
+        assistant — so they fix it by removing the cap, which is the opposite of the point.
+
+        Refusing is the last resort, for a deployment with no local model to fall back to.
+        Then it says so as a budget problem rather than failing as a model error, because
+        "the daily cap is reached" and "the provider is down" want different responses.
+        """
+        if self.meter is None or decision.tier is ModelTier.LOCAL:
+            return decision
+        verdict = self.meter.check()
+        if verdict.allowed:
+            return decision
+
+        local = self.providers.get(ModelTier.LOCAL)
+        if local is None:
+            raise BudgetExceeded(
+                verdict.reason + ", and there is no local model to fall back to",
+                period=verdict.period,
+                spent=round(verdict.spent, 4),
+                cap=verdict.cap,
+            )
+        log.warning("model_cost_capped", period=verdict.period, spent=round(verdict.spent, 2))
+        return RouteDecision(
+            tier=ModelTier.LOCAL,
+            provider_name=getattr(local, "name", "?"),
+            reasons=(*decision.reasons, verdict.reason + "; using the local model"),
+            fallback_from=decision.provider_name,
+        )
+
+    def _meter(
+        self,
+        response: LLMResponse,
+        decision: RouteDecision,
+        *,
+        task_id: UUID | None,
+        agent: str,
+    ) -> None:
+        """Record what the call cost. Here, not at the call sites.
+
+        The call sites were the problem: spend was counted where an agent chose to count it,
+        which missed the reasoning pass and the supervision pass — the two calls every single
+        turn makes. Metering something a caller opts into measures the callers who opted in.
+        """
+        if self.meter is None:
+            return
+        self.meter.record(
+            provider=decision.provider_name,
+            tier=str(decision.tier),
+            tokens_in=response.tokens_in,
+            tokens_out=response.tokens_out,
+            usd=response.cost_usd,
+            task_id=task_id,
+            agent=agent,
+        )
+
+    def _trip(self, name: str, exc: Exception) -> None:
+        self._breaker[name] = self._breaker.get(name, 0) + 1
+        if self._breaker[name] >= BREAKER_TRIP and name not in self._tripped_at:
+            self._tripped_at[name] = datetime.now(UTC)
+            log.warning("model_breaker_open", provider=name, cooldown_s=BREAKER_COOLDOWN.seconds)
+        log.warning("model_failed", provider=name, error=str(exc), failures=self._breaker[name])
 
     async def health(self) -> list[HealthStatus]:
         out: list[HealthStatus] = []

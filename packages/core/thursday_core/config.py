@@ -89,6 +89,8 @@ _YAML_MAP: dict[str, dict[str, str]] = {
         "max_agent_depth": "max_agent_depth",
         "default_task_budget_usd": "default_task_budget_usd",
         "default_task_budget_seconds": "default_task_budget_seconds",
+        "daily_cost_cap_usd": "daily_cost_cap_usd",
+        "monthly_cost_cap_usd": "monthly_cost_cap_usd",
     },
     "logging": {"level": "log_level", "json": "log_json"},
 }
@@ -216,6 +218,11 @@ class Settings(BaseSettings):
     max_agent_depth: int = 2
     default_task_budget_usd: float = 0.50
     default_task_budget_seconds: float = 300.0
+    #: Ceilings above any single task (§61, Sprint 45). A per-task budget stops one runaway
+    #: task and does nothing about five hundred small ones. None means no ceiling — stated
+    #: rather than defaulted to a number that would look like a decision somebody made.
+    daily_cost_cap_usd: float | None = 5.0
+    monthly_cost_cap_usd: float | None = 50.0
     approval_ttl_seconds: float = 300.0
 
     # security ------------------------------------------------------------------

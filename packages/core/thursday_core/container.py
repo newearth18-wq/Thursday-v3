@@ -70,6 +70,7 @@ from thursday_core.bus import InProcessEventBus
 from thursday_core.composer import ResponseComposer
 from thursday_core.config import Settings, get_settings
 from thursday_core.context import ContextEngine
+from thursday_core.cost import CostMeter
 from thursday_core.device_router import DeviceRouter
 from thursday_core.execution import ToolExecutor
 from thursday_core.focus import DeviceFocus
@@ -128,6 +129,7 @@ class Container:
 
     # models
     models: Any = None
+    costs: Any = None
 
     # devices
     hub: Any = None
@@ -331,7 +333,11 @@ def build_container(settings: Settings | None = None, *, configure_logs: bool = 
     c.graph = KnowledgeGraph()
 
     # -- models ---------------------------------------------------------------
-    c.models = _build_models(settings, c.vault)
+    c.costs = CostMeter(
+        daily_usd=settings.daily_cost_cap_usd,
+        monthly_usd=settings.monthly_cost_cap_usd,
+    )
+    c.models = _build_models(settings, c.vault, c.costs)
 
     # -- devices --------------------------------------------------------------
     c.remote_gate = RemoteCommandGate()
@@ -478,6 +484,7 @@ def build_container(settings: Settings | None = None, *, configure_logs: bool = 
         journal=c.journal,
         memory=c.memory,
         skills=c.skill_observer,
+        costs=c.costs,
     )
 
     # Registered here rather than beside the others because they hold references to
@@ -605,8 +612,8 @@ def _build_embedder(settings: Settings) -> Any:
     return HashEmbeddingProvider(settings.embedding_dimensions)
 
 
-def _build_models(settings: Settings, vault: Any) -> ModelRouter:
-    router = ModelRouter(allow_cloud=settings.allow_cloud)
+def _build_models(settings: Settings, vault: Any, meter: CostMeter | None = None) -> ModelRouter:
+    router = ModelRouter(allow_cloud=settings.allow_cloud, meter=meter)
     local = RuleBasedLLM()
 
     if settings.llm_backend == "ollama":

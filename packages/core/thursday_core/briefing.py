@@ -190,6 +190,7 @@ class Briefer:
         journal: DecisionJournal | None = None,
         memory: Any = None,
         skills: Any = None,
+        costs: Any = None,
     ) -> None:
         self._tasks = tasks
         self._approvals = approvals
@@ -199,6 +200,7 @@ class Briefer:
         self._journal = journal
         self._memory = memory
         self._skills = skills
+        self._costs = costs
 
     async def morning(self, *, now: datetime | None = None) -> Brief:
         """What is coming, and what is waiting on the owner."""
@@ -216,6 +218,11 @@ class Briefer:
             if t.deadline and not t.status.is_terminal and t.deadline <= horizon
         ]
         brief.approvals = [a.action for a in self._approvals.pending()]
+        if self._costs is not None:
+            # In `issues` rather than `suggestions`: approaching a spending cap is something
+            # about to constrain Thursday, not something being offered. It belongs where the
+            # owner looks for what is going to get in the way.
+            brief.issues += self._costs.warnings(now=now)
         if self._offers is not None:
             brief.suggestions = [o.text for o in self._offers.pending(now=now)]
         if self._health is not None:

@@ -78,7 +78,10 @@ class RuleBasedLLM:
                 "direct_answer": self._chat(user_text),
             }
         if title == "Verification":
-            # Never fabricate a pass: an offline verifier escalates instead.
+            # Never fabricate a pass: an offline verifier escalates instead. A verifier that
+            # says yes when it does not know is a verifier that says yes, and §76 makes a
+            # passed verification the definition of success — so "I could not judge this"
+            # has to read as not-verified, not as approval.
             return {
                 "verdict": "ESCALATE",
                 "checks": [],

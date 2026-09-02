@@ -383,3 +383,40 @@ async def close_gestures(c: Container = Depends(get_container)) -> dict:
     c.gesture_mode.close()
     c.gesture_tracker.reset()
     return c.gesture_mode.snapshot()
+
+
+# ------------------------------------------------------------------ cost (§61, §133)
+
+
+@router.get("/costs")
+async def costs(c: Container = Depends(get_container)) -> dict:
+    """What Thursday has spent, and how close it is to the ceiling.
+
+    Exposed because a limit the owner cannot watch approaching is one they only learn about
+    when it binds — and the useful moment is before that, while they can still decide
+    whether the work is worth raising it for.
+    """
+    return c.costs.summary()
+
+
+@router.get("/costs/detail")
+async def cost_detail(days: int = 30, c: Container = Depends(get_container)) -> dict:
+    """Spend broken out by day, provider and recent call. For the dashboard (§133)."""
+    return {
+        **c.costs.summary(),
+        "by_day": {
+            str(day): round(usd, 4) for day, usd in sorted(c.costs.by_day(days=days).items())
+        },
+        "recent": [
+            {
+                "at": charge.at.isoformat(),
+                "provider": charge.provider,
+                "tier": charge.tier,
+                "tokens": charge.tokens,
+                "usd": round(charge.usd, 6),
+                "agent": charge.agent,
+                "task_id": str(charge.task_id) if charge.task_id else None,
+            }
+            for charge in reversed(c.costs.charges(limit=50))
+        ],
+    }

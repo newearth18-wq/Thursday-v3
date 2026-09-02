@@ -53,6 +53,20 @@ Still outstanding, and named rather than implied: the private key lives in a 060
 than the OS keychain; TLS certificate pinning is not implemented; session tokens are not yet
 short-lived and rotated (Sprint 41's key-rotation work).
 
+### T7 as built (Sprint 45 · ADR 0030)
+
+Per-task budgets were already enforced. Added: metering at the model router, so every
+completion is counted rather than only the ones an agent chose to report — the reasoning and
+supervision passes every turn makes were previously invisible; a daily and monthly ceiling
+above any single task, checked before a paid call; and a circuit breaker that re-opens after
+a cooldown instead of parking a provider until the process restarts.
+
+Reaching a cap routes to the local model rather than refusing. A limit that becomes an outage
+is a limit the owner deletes. It never lowers the bar for "done": a turn that cannot be
+verified under the cap reports unverified.
+
+Still outstanding: the ledger is in memory, so a restart resets the period totals.
+
 ## 14.4 Controls always on
 
 Least privilege · explicit permission · encryption at rest (DB + vault) and in transit ·

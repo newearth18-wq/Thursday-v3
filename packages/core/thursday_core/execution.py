@@ -309,7 +309,13 @@ class AgentContext:
         request = request.model_copy(
             update={"sensitivity": max(request.sensitivity, self.sensitivity)}
         )
-        response, decision = await self._models.complete(request, offline=self.offline)  # type: ignore[attr-defined]
+        response, decision = await self._models.complete(  # type: ignore[attr-defined]
+            request, offline=self.offline, task_id=self.task_id, agent=self.agent
+        )
+        # Two ledgers, and they are not redundant. This one bounds *this task* and raises
+        # when it runs over; the router's meter is the ceiling across every task, which a
+        # per-task budget cannot see. The router records its own — passing task and agent
+        # here is attribution, not accounting.
         self.spend.tokens += response.tokens_in + response.tokens_out
         self.spend.usd += response.cost_usd
         log.debug(
