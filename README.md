@@ -16,7 +16,7 @@ USER → THURSDAY → Understand → Plan → Delegate → Act → Verify → Re
 ## Status
 
 **Phase 1 is implemented and runnable**: the vertical slice from
-[docs/15-vertical-slice.md](docs/15-vertical-slice.md) works end to end, with 762 tests that
+[docs/15-vertical-slice.md](docs/15-vertical-slice.md) works end to end, with 814 tests that
 need no database, no network and no model credentials.
 
 ```
@@ -56,6 +56,12 @@ export THURSDAY_SECRET_DEVICE_ENROLLMENT_SECRET=$(python -c "import secrets;prin
 
 python -m apps.server                                  # core API on :8000
 python -m apps.node --name Office-PC --allow-root ~    # one per machine
+
+# 2. Then pair each node, which gives it its own key and closes the shared token
+#    for that machine permanently (ADR 0029). The node prints a code and its key
+#    fingerprint; confirm both in Thursday. Afterwards the node no longer needs
+#    THURSDAY_SECRET_DEVICE_ENROLLMENT_SECRET set at all.
+python -m apps.node --pair --name Office-PC
 python -m apps.cli --remote                            # or the desktop app
 
 cd apps/desktop && npm install && npm run tauri dev    # the window
@@ -189,8 +195,8 @@ The one path worth tracing: **nothing reaches a device without passing Authorize
 nothing completes without passing Verify.** Both are single choke points rather than
 conventions, so neither can be forgotten by a new caller.
 
-Full design in [`docs/`](docs/) — the fifteen deliverables, written before the code, plus
-the [V2 review](docs/architecture/00-v2-review.md) and twenty-one
+Full design in [`docs/`](docs/) — the twenty-three deliverables, written before the code,
+plus the [V2 review](docs/architecture/00-v2-review.md) and twenty-nine
 [architecture decisions](docs/architecture/decisions/) recording what was chosen and what
 each choice cost:
 
@@ -285,11 +291,11 @@ each choice cost:
 - Mobile client (scaffold in `apps/mobile`). The desktop app is built — conversation,
   approvals, tasks, devices, memory and permissions — but has no voice capture and no
   embedded device node yet
-- Per-device Ed25519 keys. HELLO signatures are really verified today — HMAC-SHA256 over
-  the identifying fields, constant-time compare, clock-skew window and nonce replay
-  cache, enforced in every environment — but on one shared enrolment token, which
-  authenticates *a* node rather than *this* node (ADR 0013). `device_credentials` already
-  holds the per-device public key; the keypair generation and pairing flow land in Phase 2
+- Key storage in the OS keychain. Per-device Ed25519 keys are built and enforced
+  (ADR 0029) — a node generates its own keypair, pairs with proof of possession plus a
+  code a person confirms, and from then on the shared token is closed for that machine —
+  but the private key lives in a 0600 file rather than in Keychain, DPAPI or the Secret
+  Service, and the pairing registry is in memory rather than in `device_credentials`
 - The MediaPipe hand-landmark source. Gesture classification, the mode machine, the safety
   gate and speech+gesture fusion are built and tested against landmarks constructed
   directly; nothing has yet read a real hand, and this container has no camera to read one
@@ -303,7 +309,7 @@ the verification loop, the audit chain and the device round-trip are all real.
 
 ```bash
 ./scripts/check.sh           # everything CI runs: lint, format, types, tests, migrations
-pytest                       # 762 tests, no infrastructure
+pytest                       # 814 tests, no infrastructure
 ruff check . && ruff format .
 mypy packages services
 alembic upgrade head && alembic revision --autogenerate -m "what changed"
@@ -324,7 +330,7 @@ packages/    shared · core · agents · tools · memory · devices · security
 services/    api · realtime · worker
 database/    migrations · seeds
 docker/      api and node images; docker-compose.yml at the root
-docs/        the fifteen design deliverables + architecture/decisions (ADRs)
+docs/        the twenty-three design deliverables + architecture/decisions (ADRs)
 tests/       unit · integration · e2e
 scripts/     dev.sh · check.sh · check_no_secrets.py
 ```

@@ -406,3 +406,124 @@ async def test_sightings_are_listed_and_can_be_wiped(client, container):
     wiped = (await client.delete("/api/v1/vision/objects")).json()
     assert wiped["forgotten"] == 1
     assert (await client.get("/api/v1/vision/objects")).json()["objects"] == []
+
+
+# --------------------------------------------------------------------------- pairing (§80)
+
+
+async def _start_pairing(client, key, *, name="Laptop", os_name="Windows"):
+    from thursday_security.keys import pairing_payload
+    from thursday_shared.models import utcnow
+
+    fields = {
+        "public_key": key.public.encoded,
+        "name": name,
+        "os": os_name,
+        "hostname": "laptop.local",
+        "nonce": "n-" + name,
+        "issued_at": utcnow(),
+    }
+    body = {
+        **fields,
+        "issued_at": fields["issued_at"].isoformat(),
+        "signature": key.sign(pairing_payload(**fields)),
+    }
+    return await client.post("/api/v1/devices/pair/start", json=body)
+
+
+async def test_pairing_a_device_registers_its_key_and_lists_it(client):
+    from thursday_security.keys import generate_keypair
+
+    key, public = generate_keypair()
+    started = await _start_pairing(client, key)
+    assert started.status_code == 200
+    code = started.json()["pairing_code"]
+
+    completed = await client.post(
+        "/api/v1/devices/pair/complete", json={"code": code, "device_type": "laptop"}
+    )
+    assert completed.status_code == 200
+    assert completed.json()["fingerprint"] == public.fingerprint
+
+    listed = await client.get("/api/v1/devices/credentials")
+    fingerprints = {c["fingerprint"] for c in listed.json()["credentials"]}
+    assert public.fingerprint in fingerprints
+
+
+async def test_a_pairing_request_that_does_not_hold_its_key_is_refused(client):
+    from thursday_security.keys import generate_keypair
+
+    impostor, _ = generate_keypair()
+    _, offered = generate_keypair()
+    started = await _start_pairing(client, impostor)
+    body = started.json()
+
+    forged = await client.post(
+        "/api/v1/devices/pair/start",
+        json={
+            "public_key": offered.encoded,
+            "name": "Laptop",
+            "os": "Windows",
+            "hostname": "laptop.local",
+            "nonce": "forged",
+            "issued_at": body["expires_at"],
+            "signature": "not-a-signature",
+        },
+    )
+    assert forged.status_code == 400
+
+
+async def test_a_paired_device_starts_limited_not_trusted(client):
+    """Pairing a laptop and authorising it to drive other machines are separate decisions
+    (ADR 0024), and the endpoint must not quietly collapse them."""
+    from thursday_security.keys import generate_keypair
+    from thursday_shared.enums import TrustLevel
+
+    key, _ = generate_keypair()
+    code = (await _start_pairing(client, key, name="Kitchen")).json()["pairing_code"]
+    completed = await client.post("/api/v1/devices/pair/complete", json={"code": code})
+    assert completed.json()["trust_level"] == int(TrustLevel.LIMITED)
+
+
+async def test_revoking_a_device_removes_its_credential_and_its_registration(client):
+    from thursday_security.keys import generate_keypair
+
+    key, _ = generate_keypair()
+    code = (await _start_pairing(client, key, name="Spare")).json()["pairing_code"]
+    device_id = (await client.post("/api/v1/devices/pair/complete", json={"code": code})).json()[
+        "device_id"
+    ]
+
+    revoked = await client.post(f"/api/v1/devices/{device_id}/revoke")
+    assert revoked.status_code == 200
+    assert revoked.json()["revoked_at"]
+
+    active = await client.get("/api/v1/devices/credentials")
+    assert device_id not in {c["device_id"] for c in active.json()["credentials"]}
+
+    kept = await client.get("/api/v1/devices/credentials?include_revoked=true")
+    assert device_id in {c["device_id"] for c in kept.json()["credentials"]}
+    assert (await client.get(f"/api/v1/devices/{device_id}")).status_code == 404
+
+
+async def test_revoking_a_device_nobody_paired_is_a_404_not_a_new_record(client):
+    from thursday_shared.ids import new_id
+
+    response = await client.post(f"/api/v1/devices/{new_id()}/revoke")
+    assert response.status_code == 404
+
+
+async def test_no_pairing_response_ever_carries_private_key_material(client):
+    """The core stores public keys. There is no code path that accepts a private one, and
+    this is the test that notices if one is ever added."""
+    from thursday_security.keys import generate_keypair
+
+    key, _ = generate_keypair()
+    started = await _start_pairing(client, key, name="Audit")
+    code = started.json()["pairing_code"]
+    completed = await client.post("/api/v1/devices/pair/complete", json={"code": code})
+    listed = await client.get("/api/v1/devices/credentials")
+
+    for response in (started, completed, listed):
+        assert "PRIVATE KEY" not in response.text
+        assert key.to_pem() not in response.text

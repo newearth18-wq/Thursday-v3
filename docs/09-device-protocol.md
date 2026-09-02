@@ -30,6 +30,40 @@ Enrollment is a one-time out-of-band pairing code that binds the node's freshly 
 Ed25519 keypair to a `devices` row. The private key never leaves the machine. A revoked
 device is rejected at `HELLO` and its session is killed.
 
+### 9.1.1 Pairing, as built (Sprint 36 · ADR 0029)
+
+```
+node                                   core                          owner
+ │ generate keypair (first run, 0600)    │                              │
+ │ POST /devices/pair/start ────────────►│  verify the request is        │
+ │   {public_key, name, os, hostname,    │  signed by the key it offers  │
+ │    nonce, issued_at, signature}       │  (proof of possession)        │
+ │◄──────────── {pairing_code, device_id, expires_at}                    │
+ │ display the code + key fingerprint ───┼─────────────────────────────► │
+ │                                       │◄─ POST /devices/pair/complete │
+ │                                       │     {code}  (proof of presence)
+ │                                       │  register the public key,     │
+ │                                       │  trust = LIMITED              │
+ │ HELLO signed with its own key ───────►│  verified against that key    │
+```
+
+* The **code is not a credential**: five minutes, one enrolment, and what is stored is the
+  public key. Guesses are bounded across all codes, not per code — the codes an attacker
+  guesses do not exist, so a per-code counter never sees them.
+* **A paired device is judged only by its key.** The shared enrolment token
+  (ADR 0013) stays open for devices with no key on file and is closed permanently for every
+  device that pairs. The node enforces the same rule and never retries with the token.
+* **Revocation is sticky** and is checked before the token fallback. The credential record
+  is kept; the device is removed from the hub rather than marked offline, because it
+  re-pairs under a new identity.
+* The registry is written to `<data_dir>/device_credentials.json`, 0600, public material
+  only. Without persistence a core restart would lock out every paired node.
+
+```bash
+python -m apps.node --pair --name Office-PC     # prints the code and the key fingerprint
+python -m apps.node --forget-pairing            # after the owner revokes it
+```
+
 ## 9.2 Frames
 
 `HELLO · WELCOME · HEARTBEAT · ACTION · ACTION_RESULT · EVENT · CANCEL · SHUTDOWN · ERROR`

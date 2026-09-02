@@ -19,6 +19,10 @@ dependencies = [
     "structlog>=24.1",
     "psutil>=6.0",
     "python-multipart>=0.0.9",
+    # Device identity is Ed25519 (Sprint 36). A core dependency rather than an extra: a
+    # deployment that could not verify which node it is talking to is not a deployment that
+    # should start.
+    "cryptography>=43.0",
 ]
 
 [project.optional-dependencies]

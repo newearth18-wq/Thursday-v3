@@ -41,6 +41,18 @@ device control · calendar/email · the audit log · Thursday's own permission t
 | T15 | **Confused deputy across devices** | A device may only act on tasks scoped to it; the action carries a permission token bound to `(task, action, device, expiry)`. |
 | T16 | **False confidence** | Confidence is reported, not implied (§73); provenance is attached to important claims (§74); "success" requires a passed verification (§76). |
 
+### T3/T4 as built (Sprint 36 · ADR 0029)
+
+Per-device Ed25519 keys are in force. A node generates its own keypair on first run, pairs
+with proof of possession plus a code a person confirms, and from then on the shared enrolment
+token (ADR 0013) is closed for that machine permanently — on both sides. Revocation is
+sticky, is checked before the token fallback, and removes the device from the hub. The
+registry survives a restart.
+
+Still outstanding, and named rather than implied: the private key lives in a 0600 file rather
+than the OS keychain; TLS certificate pinning is not implemented; session tokens are not yet
+short-lived and rotated (Sprint 41's key-rotation work).
+
 ## 14.4 Controls always on
 
 Least privilege · explicit permission · encryption at rest (DB + vault) and in transit ·

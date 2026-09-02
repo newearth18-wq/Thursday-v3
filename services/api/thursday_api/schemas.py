@@ -146,3 +146,22 @@ class DeviceHeartbeat(BaseModel):
     nonce: str
     issued_at: datetime
     signature: str
+
+
+class PairingStart(BaseModel):
+    """A node asking to pair. Everything here is signed by the key it offers."""
+
+    public_key: str
+    name: str
+    os: str
+    hostname: str = ""
+    nonce: str
+    issued_at: datetime
+    signature: str
+
+
+class PairingComplete(BaseModel):
+    """The owner confirming the code the device displayed."""
+
+    code: str
+    device_type: str = "desktop"

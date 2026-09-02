@@ -9,6 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisco
 from thursday_core.container import Container
 from thursday_core.logging import get_logger
 from thursday_devices.hub import WebSocketDeviceSession
+from thursday_security.pairing import PairingError, initial_trust
 from thursday_shared.enums import PolicyDecision, TrustLevel
 from thursday_shared.errors import ThursdayError
 from thursday_shared.models import ActionRequest, DeviceAction, DeviceCapabilities
@@ -22,7 +23,13 @@ from thursday_shared.protocol import (
 )
 
 from thursday_api.deps import get_container
-from thursday_api.schemas import DeviceActionRequest, DeviceHeartbeat, DeviceRegistration
+from thursday_api.schemas import (
+    DeviceActionRequest,
+    DeviceHeartbeat,
+    DeviceRegistration,
+    PairingComplete,
+    PairingStart,
+)
 
 log = get_logger(__name__)
 router = APIRouter(tags=["devices"])
@@ -33,12 +40,117 @@ async def list_devices(c: Container = Depends(get_container)) -> dict:
     return {"devices": [d.model_dump(mode="json") for d in c.hub.all()]}
 
 
+# Declared before `/devices/{device_id}`, and it has to stay there: FastAPI matches routes in
+# declaration order, so with the parameterised route first this one is never reached — the
+# literal "credentials" is taken as a device id and the request 422s. Appearing in the OpenAPI
+# schema is not the same as being reachable, which is how this went unnoticed once already.
+@router.get("/devices/credentials")
+async def list_credentials(
+    include_revoked: bool = False, c: Container = Depends(get_container)
+) -> dict:
+    """Which devices hold an identity, and which key. For the security dashboard (§133)."""
+    return {
+        "credentials": [
+            {
+                "device_id": str(cred.device_id),
+                "name": cred.name,
+                "os": cred.os,
+                "fingerprint": cred.fingerprint,
+                "algorithm": cred.algorithm,
+                "paired_at": cred.paired_at.isoformat(),
+                "revoked_at": cred.revoked_at.isoformat() if cred.revoked_at else None,
+            }
+            for cred in c.pairing.credentials(include_revoked=include_revoked)
+        ]
+    }
+
+
 @router.get("/devices/{device_id}")
 async def get_device(device_id: UUID, c: Container = Depends(get_container)) -> dict:
     summary = c.hub.summary(device_id)
     if summary is None:
         raise HTTPException(status_code=404, detail="unknown device")
     return summary.model_dump(mode="json")
+
+
+@router.post("/devices/pair/start")
+async def start_pairing(request: PairingStart, c: Container = Depends(get_container)) -> dict:
+    """A node asks to pair, proving it holds the key it offers (§80).
+
+    Returns a short-lived code for the node to display. The code is not a credential — it
+    authorises one enrolment briefly, and what actually gets stored is the public key.
+    """
+    try:
+        pending = c.pairing.start(
+            public_key=request.public_key,
+            name=request.name,
+            os=request.os,
+            hostname=request.hostname,
+            nonce=request.nonce,
+            issued_at=request.issued_at,
+            signature=request.signature,
+            caller=request.name,
+        )
+    except PairingError as exc:
+        # 400 rather than 401: nothing here is authenticated yet, and the caller needs to
+        # know their request was malformed rather than that they were rejected.
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {
+        "pairing_code": pending.code,
+        "device_id": str(pending.device_id),
+        "expires_at": pending.expires_at.isoformat(),
+    }
+
+
+@router.post("/devices/pair/complete")
+async def complete_pairing(request: PairingComplete, c: Container = Depends(get_container)) -> dict:
+    """The owner confirms the code shown on the device (§80).
+
+    This is the proof that a *person* wants this device paired. Proof of possession alone,
+    at `pair/start`, would mean any process that can reach the API can enrol itself.
+    """
+    try:
+        credential = c.pairing.complete(request.code)
+    except PairingError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    summary = await c.hub.enrol(
+        device_id=credential.device_id,
+        name=credential.name,
+        kind=request.device_type or "desktop",
+        os=credential.os,
+        capabilities=DeviceCapabilities(),
+    )
+    c.hub.set_trust(credential.device_id, initial_trust(credential))
+    return {
+        "device_id": str(credential.device_id),
+        "fingerprint": credential.fingerprint,
+        # LIMITED, not TRUSTED. Pairing a laptop and authorising it to drive the server are
+        # separate decisions (ADR 0024); the owner raises trust deliberately.
+        "trust_level": int(summary.trust_level),
+        "paired_at": credential.paired_at.isoformat(),
+    }
+
+
+@router.post("/devices/{device_id}/revoke")
+async def revoke_device(device_id: UUID, c: Container = Depends(get_container)) -> dict:
+    """Withdraw a device's identity, and disconnect it if it is currently attached.
+
+    The credential record is kept rather than deleted: "revoked on Tuesday" is a fact
+    somebody will need, and a deleted credential would let the device pair again as though
+    nothing had happened.
+    """
+    credential = c.pairing.revoke(device_id)
+    if credential is None:
+        raise HTTPException(status_code=404, detail="unknown device")
+    # `forget`, not `unregister`: a disconnected device is one that is coming back and the
+    # owner wants to see it listed as away. A revoked one is not — it re-pairs under a new
+    # identity — so leaving the summary behind would keep a trust level nobody re-granted.
+    await c.hub.forget(device_id)
+    return {
+        "device_id": str(device_id),
+        "revoked_at": credential.revoked_at.isoformat() if credential.revoked_at else None,
+    }
 
 
 @router.post("/devices/{device_id}/trust")

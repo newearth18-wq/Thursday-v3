@@ -1,6 +1,9 @@
 # ADR 0013 — The node's HELLO is signed, and the signature is checked
 
-**Status:** accepted · **Date:** 2026-09-02
+**Status:** accepted · **Date:** 2026-09-02 · **Superseded in part by:** [ADR 0029](0029-a-paired-device-leaves-the-shared-token-behind.md)
+
+> The shared token is now the *enrolment* path only. It authenticates devices with no
+> key on file, and is closed permanently for every device that pairs.
 
 ## Context
 

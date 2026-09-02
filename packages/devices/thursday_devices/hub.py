@@ -235,6 +235,19 @@ class DeviceHub:
         log.info("device_disconnected", device_id=str(device_id))
         await self._emit("device.disconnected", device_id, {})
 
+    async def forget(self, device_id: UUID) -> bool:
+        """Drop a device from the known set entirely, not merely mark it offline.
+
+        Distinct from :meth:`unregister`, which is what a disconnect does — an offline
+        device is one that is coming back, and keeping its summary is how the owner sees
+        that their laptop is asleep rather than gone. A **revoked** device is not coming
+        back: it re-pairs under a new identity, so leaving the old summary listed would
+        accumulate ghosts, keep a trust level nobody re-granted, and tell an operator
+        reading `GET /devices` that a machine they deliberately cut off is merely away.
+        """
+        await self.unregister(device_id)
+        return self._known.pop(device_id, None) is not None
+
     def get(self, device_id: UUID) -> Any | None:
         return self._sessions.get(device_id)
 

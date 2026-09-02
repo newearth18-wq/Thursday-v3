@@ -45,7 +45,9 @@ from thursday_memory.vector import InMemoryVectorStore
 from thursday_models.llm import AnthropicLLM, OllamaLLM, RuleBasedLLM
 from thursday_security.approvals import ApprovalService
 from thursday_security.audit import AuditLog
+from thursday_security.credentials import FileCredentialStore
 from thursday_security.device_auth import DeviceAuthenticator
+from thursday_security.pairing import PairingService
 from thursday_security.permissions import PermissionEngine
 from thursday_security.policy import PolicyTable
 from thursday_security.privacy import PrivacyClassifier, PrivacyZoneRegistry
@@ -133,6 +135,7 @@ class Container:
     device_focus: Any = None
     remote_gate: Any = None
     device_auth: Any = None
+    pairing: Any = None
 
     # execution
     tools: Any = None
@@ -335,7 +338,13 @@ def build_container(settings: Settings | None = None, *, configure_logs: bool = 
     c.hub = DeviceHub(c.bus, remote_gate=c.remote_gate)
     c.device_router = DeviceRouter(c.hub)
     c.device_focus = DeviceFocus()
-    c.device_auth = _build_device_auth(settings)
+    # Pairings outlive the process. An in-memory registry would mean a restart locks out
+    # every paired node — it signs with its key, the core no longer knows the key, and the
+    # node correctly refuses to fall back to the shared token (ADR 0029).
+    c.pairing = PairingService(
+        store=FileCredentialStore(settings.data_dir / "device_credentials.json")
+    )
+    c.device_auth = _build_device_auth(settings, c.pairing)
 
     # -- execution ------------------------------------------------------------
     c.tools = ToolRegistry()
@@ -519,7 +528,7 @@ def build_container(settings: Settings | None = None, *, configure_logs: bool = 
 # --------------------------------------------------------------------------- builders
 
 
-def _build_device_auth(settings: Settings) -> DeviceAuthenticator:
+def _build_device_auth(settings: Settings, pairing: Any = None) -> DeviceAuthenticator:
     """Resolve the node enrolment token once, from the environment, never from a file.
 
     Reading it here rather than per-HELLO keeps the secret out of the request path, and
@@ -533,7 +542,7 @@ def _build_device_auth(settings: Settings) -> DeviceAuthenticator:
         # open the socket. It becomes fatal at the first unsigned HELLO, which is where
         # refusing is actually useful.
         log.warning("device_token_not_configured", expected_env=key)
-    return DeviceAuthenticator(token, required=settings.require_device_signature)
+    return DeviceAuthenticator(token, required=settings.require_device_signature, pairing=pairing)
 
 
 def _build_vault(settings: Settings) -> Any:

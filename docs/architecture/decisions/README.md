@@ -36,3 +36,4 @@ done this way?" and have no answer.
 | [0026](0026-a-learned-skill-is-code-nobody-reviewed.md) | A learned skill is code nobody reviewed | Running it must not become a way around the rules everything else obeys |
 | [0027](0027-noticing-is-not-doing.md) | Noticing is not doing | Proactive must not become a system that does whatever it likes |
 | [0028](0028-one-correction-is-not-a-rule.md) | One correction is not a rule, and a repair is not a permission | Both let the system quietly change what it is |
+| [0029](0029-a-paired-device-leaves-the-shared-token-behind.md) | A paired device leaves the shared token behind | A secret that authenticates *a* node authenticates every impostor too |
