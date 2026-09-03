@@ -47,3 +47,4 @@ done this way?" and have no answer.
 | [0037](0037-a-missing-audit-entry-leaves-a-valid-chain.md) | A missing audit entry leaves a valid chain | The one failure the hash chain cannot detect, so it must never be silent |
 | [0038](0038-a-lost-charge-makes-the-cap-under-bind.md) | A lost charge makes the cap under-bind | A lost record is an accountability failure; a lost constraint spends money |
 | [0039](0039-an-interrupted-step-is-unknown-not-failed.md) | An interrupted step is unknown, not failed | Nobody watched it finish, so nobody can say it did — or that it did not |
+| [0040](0040-an-imagined-protection-is-worse-than-a-known-weakness.md) | An imagined protection is worse than a known weakness | A configured keychain that silently returned the environment vault |

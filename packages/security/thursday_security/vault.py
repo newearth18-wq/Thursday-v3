@@ -75,6 +75,47 @@ class EnvVault:
         os.environ.pop(self._key(handle), None)
 
 
+class KeychainVault:
+    """Secrets in the OS keychain (§35).
+
+    The production backend the `EnvVault` docstring has always pointed at. Values never touch
+    a file Thursday writes, and never appear in the process environment where any child
+    process inherits them.
+    """
+
+    name = "keychain"
+
+    def __init__(self, keychain: object | None = None) -> None:
+        from thursday_security.keychain import detect
+
+        self._keychain = keychain or detect()
+
+    @property
+    def available(self) -> bool:
+        return bool(getattr(self._keychain, "available", False))
+
+    async def put(self, handle: str, value: str) -> None:
+        self._keychain.put(handle, value)  # type: ignore[attr-defined]
+
+    async def has(self, handle: str) -> bool:
+        return self._keychain.get(handle) is not None  # type: ignore[attr-defined]
+
+    async def use(self, handle: str, fn: Callable[[str], Awaitable[T]]) -> T:
+        """Hand the value to one function and let it go out of scope.
+
+        The same shape as every other vault here: the caller gets a callback, never the
+        string, so a secret cannot be stashed on an object and read back later by something
+        that had no business asking for it.
+        """
+        value = self._keychain.get(handle)  # type: ignore[attr-defined]
+        if value is None:
+            raise ConfigurationError(f"no secret in the keychain for handle {handle!r}")
+        return await fn(value)
+
+    async def delete(self, handle: str) -> None:
+        self._keychain.delete(handle)  # type: ignore[attr-defined]
+
+
 class ChainVault:
     """Try each backend in order. Lets a keychain shadow the environment during migration."""
 

@@ -53,8 +53,9 @@ from thursday_security.policy import PolicyTable
 from thursday_security.privacy import PrivacyClassifier, PrivacyZoneRegistry
 from thursday_security.redaction import SecretRedactor
 from thursday_security.remote import RemoteCommandGate
-from thursday_security.vault import ChainVault, EnvVault, InMemoryVault
+from thursday_security.vault import ChainVault, EnvVault, InMemoryVault, KeychainVault
 from thursday_shared.enums import ModelTier
+from thursday_shared.errors import ConfigurationError
 from thursday_tools.builtin import register_builtin_tools
 from thursday_tools.registry import ToolRegistry, ToolRouter
 from thursday_vision.camera import CameraManager
@@ -636,9 +637,21 @@ def _build_vault(settings: Settings) -> Any:
     if settings.vault_backend == "memory":
         return InMemoryVault()
     if settings.vault_backend == "keychain":
-        # The OS keychain adapter lands in Phase 2; chain it ahead of the environment so
-        # the swap is a configuration change, not a code change.
-        return ChainVault(EnvVault())
+        keychain = KeychainVault()
+        if not keychain.available:
+            # Fail closed, exactly as `DeviceAuthenticator` does for a missing device token.
+            # This branch used to return `ChainVault(EnvVault())` and say nothing, so a
+            # deployment that configured `keychain` got the environment vault and believed
+            # its secrets were in the OS keychain. An imagined protection is worse than a
+            # known weakness: the known one gets compensated for.
+            raise ConfigurationError(
+                "vault_backend is 'keychain' and this machine has no keychain Thursday can "
+                "use. Install one (GNOME Keyring or KWallet on Linux), or set "
+                "vault_backend='env' to store secrets in the environment deliberately."
+            )
+        # Chained ahead of the environment so secrets not yet moved are still readable —
+        # migration, not a fallback for a missing keychain.
+        return ChainVault(keychain, EnvVault())
     return EnvVault()
 
 

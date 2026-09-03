@@ -53,6 +53,14 @@ log = get_logger("thursday.node")
 #: the same variable. One name, both sides.
 TOKEN_ENV = "THURSDAY_SECRET_DEVICE_ENROLLMENT_SECRET"  # noqa: S105
 
+#: What the node's key is called inside the keychain, so the owner can find and remove it.
+KEY_ACCOUNT = "node-identity"
+
+
+class KeyMigrationError(Exception):
+    """A key that could not be moved into the keychain. The file is left untouched."""
+
+
 RECONNECT_BASE_S = 2.0
 RECONNECT_MAX_S = 60.0
 
@@ -71,11 +79,14 @@ class NodeIdentity:
     the thief register a second machine as the owner's.
     """
 
-    def __init__(self, path: Path) -> None:
+    def __init__(self, path: Path, *, keychain: object | None = None) -> None:
         self.path = path
         self.key_path = path.with_suffix(".key")
         self.data = self._load()
         self._key: PrivateKey | None = None
+        from thursday_security.keychain import detect
+
+        self._keychain = keychain or detect()
 
     def _load(self) -> dict:
         if self.path.exists():
@@ -102,11 +113,66 @@ class NodeIdentity:
     def key(self) -> PrivateKey:
         """This node's private key, generated on first use and never sent anywhere.
 
-        Written 0600 before anything is put in it, not after: a key file that exists
-        world-readable for the duration of one write is a key file that leaked.
+        The OS keychain if this machine has one, and a 0600 file if it does not. The file is
+        a real fallback rather than a pretend one: it stops another user on the same machine
+        and stops nothing once a laptop is taken, and `storage` says which the node is using
+        so nobody has to guess.
         """
         if self._key is not None:
             return self._key
+
+        from thursday_security.keychain import KeychainError
+
+        if self._keychain.available:
+            try:
+                stored = self._keychain.get(KEY_ACCOUNT)
+                if stored is not None:
+                    self._key = PrivateKey.from_pem(stored)
+                    return self._key
+                self._key = self._adopt_or_generate()
+                return self._key
+            except KeychainError as exc:
+                # Refuse rather than quietly writing the key to a file. A node that silently
+                # downgraded its own key storage would leave the owner believing the keychain
+                # protects an identity it never held.
+                raise SystemExit(
+                    f"this machine has a keychain and Thursday could not use it: {exc}\n"
+                    "Fix the keychain, or run with --key-storage=file to accept a 0600 file."
+                ) from exc
+
+        return self._from_file()
+
+    def _adopt_or_generate(self) -> PrivateKey:
+        """Move an existing file key into the keychain, or make a new one there.
+
+        The order matters and is the whole of the migration: write to the keychain, read it
+        back, and only then remove the file. A delete that happened first would lose the
+        node's identity to a keychain write that failed — and a device that loses its key has
+        to be re-paired by a person standing at it.
+        """
+        key = PrivateKey.from_pem(self.key_path.read_text()) if self.key_path.exists() else None
+        moving = key is not None
+        key = key or PrivateKey.generate()
+
+        self._keychain.put(KEY_ACCOUNT, key.to_pem())
+        if self._keychain.get(KEY_ACCOUNT) != key.to_pem():
+            raise KeyMigrationError(
+                "the keychain accepted this node's key and did not hand it back; "
+                "leaving the existing key file alone"
+            )
+
+        if moving:
+            self.key_path.unlink(missing_ok=True)
+            log.info("node_key_moved_to_keychain", fingerprint=key.public.fingerprint)
+        else:
+            log.info(
+                "node_key_created", storage=self._keychain.name, fingerprint=key.public.fingerprint
+            )
+        return key
+
+    def _from_file(self) -> PrivateKey:
+        """The fallback. Written 0600 before anything is put in it, not after: a key file
+        that exists world-readable for the duration of one write is a key file that leaked."""
         if self.key_path.exists():
             self._key = PrivateKey.from_pem(self.key_path.read_text())
             return self._key
@@ -117,8 +183,20 @@ class NodeIdentity:
         key = PrivateKey.generate()
         self.key_path.write_text(key.to_pem())
         self._key = key
-        log.info("node_key_created", path=str(self.key_path), fingerprint=key.public.fingerprint)
+        log.info(
+            "node_key_created",
+            path=str(self.key_path),
+            storage="file",
+            fingerprint=key.public.fingerprint,
+        )
         return key
+
+    @property
+    def storage(self) -> str:
+        """Where this node's key actually lives. Reported, never inferred."""
+        if self._keychain.available:
+            return self._keychain.name
+        return "file"
 
     @property
     def fingerprint(self) -> str:

@@ -41,9 +41,14 @@ constructed landmarks, frames and audio. No camera, microphone or Windows machin
 run them. *To close:* run the existing acceptance tests on real hardware; the seams are
 already ports, so nothing needs redesigning first.
 
-**The node's private key is a 0600 file, not the OS keychain.** Pairing, revocation and
-signature checking are real (ADR 0029); the storage is the weak part. *To close:* a Keychain /
-DPAPI / Secret Service adapter behind the existing `PrivateKey` interface.
+**The OS keychain adapters have never run against a real keychain.** The port and all three
+adapters exist (ADR 0040) — macOS Keychain, Windows DPAPI, Linux Secret Service — and the
+node's key migrates into one when it is available, write-then-read-back-then-delete. A
+configured keychain that is *not* available now fails closed instead of silently returning the
+environment vault, which is what it did before. But this container is headless Linux with none
+of the three, so selection, availability detection and migration ordering are tested and the
+platform calls themselves are not. *To close:* one run on each of macOS, Windows and a Linux
+desktop.
 
 **No TLS certificate pinning, and no session-token rotation.** The device protocol
 authenticates the node; it does not defend against a compromised CA. *To close:* Sprint 41's
