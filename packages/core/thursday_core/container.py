@@ -79,6 +79,7 @@ from thursday_core.focus import DeviceFocus
 from thursday_core.goals import GoalManager, PriorityQueue
 from thursday_core.logging import configure_logging, get_logger
 from thursday_core.metrics import MetricsCollector, build_registry
+from thursday_core.model_registry import ModelRegistry
 from thursday_core.model_router import ModelRouter
 from thursday_core.orchestrator import AgentOrchestrator
 from thursday_core.persistence import NullRepository, SqlRepository
@@ -143,6 +144,9 @@ class Container:
     backups: Any = None
     updates: Any = None
     metrics: Any = None
+    #: Which model exists on which machine (ADDENDUM §5). Populated by nodes reporting their
+    #: inventory, corrected by the owner, consulted by the compute router.
+    model_registry: Any = None
     #: Whether state actually outlives this process (Sprint 51). False is a supported
     #: configuration and not a degraded one — but it must never be a silent assumption.
     persistent: bool = False
@@ -392,10 +396,11 @@ def build_container(settings: Settings | None = None, *, configure_logs: bool = 
         repository=_spend_repository(settings, c),
     )
     c.models = _build_models(settings, c.vault, c.costs, c.redactor, c.metrics)
+    c.model_registry = ModelRegistry(repository=_model_registry_repository(settings, c))
 
     # -- devices --------------------------------------------------------------
     c.remote_gate = RemoteCommandGate()
-    c.hub = DeviceHub(c.bus, remote_gate=c.remote_gate)
+    c.hub = DeviceHub(c.bus, remote_gate=c.remote_gate, model_registry=c.model_registry)
     c.device_router = DeviceRouter(c.hub)
     c.device_focus = DeviceFocus()
     # Pairings outlive the process. An in-memory registry would mean a restart locks out
@@ -860,6 +865,29 @@ def _task_repository(settings: Settings, container: Container) -> Any:
     )
 
 
+def _model_registry_repository(settings: Settings, container: Container) -> Any:
+    """Where the model registry is kept between runs (ADDENDUM §49).
+
+    The reason this one is worth persisting is not the inventory — nodes re-report that on
+    every reconnect — it is the *corrections*. An owner who tells Thursday that
+    `house-model-v3` is a vision model has made a decision, and losing it on restart would
+    mean discovering the same wrong guess again every time.
+    """
+    if not settings.persist_models:
+        return None
+
+    from thursday_shared.db.models import ModelRow
+    from thursday_shared.db.session import init_engine, session_scope
+
+    init_engine(settings)
+    container.persistent = True
+    return SqlRepository(
+        ModelRow,
+        session_scope=session_scope,
+        order_by="model_name",
+    )
+
+
 def _spend_repository(settings: Settings, container: Container) -> Any:
     """Where the spend ledger is kept between runs (§61).
 
@@ -956,9 +984,11 @@ async def start(container: Container) -> Container:
     entries = await container.audit.restore()
     charges = await container.costs.restore()
     tasks = await container.tasks.restore()
+    models = await container.model_registry.restore()
     log.info(
         "thursday_state_loaded",
         persistent=container.persistent,
+        models=models,
         memories=memories,
         audit_entries=entries,
         audit_chain_intact=container.audit.verify_chain(),

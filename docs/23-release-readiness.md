@@ -6,7 +6,7 @@ a multi-user or internet-exposed installation.**
 That sentence is the whole document in one line. What follows is the evidence for it, and —
 more usefully — the evidence against.
 
-Written at Sprint 50 and kept current since, against 1,151 tests that need no database, no
+Written at Sprint 50 and kept current since, against 1,171 tests that need no database, no
 network and no model credentials. `./scripts/check.sh` runs lint, format, types, the suite and the migrations.
 
 ---
@@ -32,6 +32,7 @@ container, not a unit test of the class in isolation.
 | Device key rotation, and a session that expires rather than a key that does | `tests/integration/test_rotation_v52.py` |
 | Rate limits keyed on something the caller cannot forge, and a kill switch exempt from them | `tests/integration/test_rate_limits_v53.py` |
 | Local AI discovered without scanning the network, and unable to download anything | `tests/integration/test_local_ai_discovery_v54.py` |
+| A registry where the owner's correction outlives the node that keeps re-guessing | `tests/integration/test_model_registry_v55.py` |
 | Metrics whose labels cannot carry a path or a secret | `tests/integration/test_metrics_v49.py` |
 
 ## 23.2 What is not ready, and what that would take

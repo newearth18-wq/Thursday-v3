@@ -15,6 +15,7 @@ from datetime import datetime
 from typing import Any
 
 from sqlalchemy import (
+    BigInteger,
     Boolean,
     DateTime,
     Float,
@@ -616,6 +617,92 @@ class ModelSpend(Base, IdMixin):
     #: Attribution, not accounting: the cap is a total, and this says where it went.
     task_id: Mapped[uuid.UUID | None] = mapped_column(GUID(), nullable=True, index=True)
     agent: Mapped[str] = mapped_column(String(64), default="")
+
+
+class ModelEndpoint(Base, IdMixin, TimestampMixin):
+    """One inference server (ADDENDUM §48).
+
+    ``base_url`` is here and no credential is: §8's rule for device credentials applies
+    unchanged to model endpoints, and a table row is exactly the place a key ends up being
+    read from by something that should not have it. An endpoint needing a secret carries a
+    reference the SecretProvider resolves.
+    """
+
+    __tablename__ = "model_endpoints"
+
+    #: Null for a provider that is not tied to a machine — a cloud API, or a runtime the
+    #: core itself talks to on loopback.
+    device_id: Mapped[uuid.UUID | None] = mapped_column(
+        GUID(), ForeignKey("devices.id"), nullable=True, index=True
+    )
+    provider: Mapped[str] = mapped_column(String(64), default="", index=True)
+    runtime: Mapped[str] = mapped_column(String(32), default="")
+    base_url: Mapped[str] = mapped_column(String(512), default="")
+    status: Mapped[str] = mapped_column(String(32), default="unknown", index=True)
+    capabilities: Mapped[dict[str, Any]] = mapped_column(JSONColumn, default=dict)
+    extra: Mapped[dict[str, Any]] = mapped_column(JSONColumn, default=dict)
+    last_seen_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, index=True
+    )
+
+
+class ModelRow(Base, IdMixin, TimestampMixin):
+    """One model on one runtime on one machine (ADDENDUM §49).
+
+    ``model_type`` is what discovery guessed; ``kind_override`` is what the owner said, and
+    they are separate columns for the reason the registry's docstring gives — a correction
+    that a reconnect overwrites is worse than no correction at all.
+    """
+
+    __tablename__ = "models"
+
+    endpoint_id: Mapped[uuid.UUID | None] = mapped_column(GUID(), nullable=True, index=True)
+    device_id: Mapped[uuid.UUID | None] = mapped_column(GUID(), nullable=True, index=True)
+    model_name: Mapped[str] = mapped_column(String(200), index=True)
+    display_name: Mapped[str] = mapped_column(String(200), default="")
+    runtime: Mapped[str] = mapped_column(String(32), default="")
+    model_type: Mapped[str] = mapped_column(String(32), default="llm", index=True)
+    kind_override: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    #: Tri-state, and nullable for that reason: None is "no opinion", False is the owner
+    #: switching a model off. Collapsing them to a boolean would make "never asked" and
+    #: "explicitly refused" the same fact.
+    enabled_override: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    context_length: Mapped[int] = mapped_column(Integer, default=0)
+    size_bytes: Mapped[int] = mapped_column(BigInteger, default=0)
+    required_ram: Mapped[int] = mapped_column(BigInteger, default=0)
+    required_vram: Mapped[int] = mapped_column(BigInteger, default=0)
+    tokens_per_second: Mapped[float] = mapped_column(Float, default=0.0)
+    online: Mapped[bool] = mapped_column(Boolean, default=False)
+    note: Mapped[str] = mapped_column(Text, default="")
+    first_seen: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_seen: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_benchmarked_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+
+class ModelRun(Base, IdMixin):
+    """One inference call, wherever it ran (ADDENDUM §50).
+
+    Distinct from ``model_spend``, which answers "what did this cost". This answers "where
+    did it run and how did it go", which is what the benchmark and routing-history sprints
+    read and what `model_spend` has no column for.
+    """
+
+    __tablename__ = "model_runs"
+
+    at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    task_id: Mapped[uuid.UUID | None] = mapped_column(GUID(), nullable=True, index=True)
+    agent_run_id: Mapped[uuid.UUID | None] = mapped_column(GUID(), nullable=True, index=True)
+    model_id: Mapped[uuid.UUID | None] = mapped_column(GUID(), nullable=True, index=True)
+    device_id: Mapped[uuid.UUID | None] = mapped_column(GUID(), nullable=True, index=True)
+    provider: Mapped[str] = mapped_column(String(64), default="")
+    input_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    output_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    latency_ms: Mapped[int] = mapped_column(Integer, default=0)
+    estimated_cost: Mapped[float] = mapped_column(Float, default=0.0)
+    status: Mapped[str] = mapped_column(String(32), default="ok", index=True)
+    error: Mapped[str] = mapped_column(Text, default="")
 
 
 class AuditLogRow(Base, IdMixin):

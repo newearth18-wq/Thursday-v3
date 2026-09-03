@@ -112,6 +112,86 @@ async def list_compute(c: Container = Depends(get_container)) -> dict:
     return {"devices": devices}
 
 
+@router.get("/models")
+async def list_models(
+    capability: str | None = None,
+    include_offline: bool = True,
+    c: Container = Depends(get_container),
+) -> dict:
+    """Which model exists on which machine (ADDENDUM §5) — the registry's acceptance test.
+
+    Distinct from `GET /devices/compute`, which reports what each machine says *right now*.
+    This is what Thursday remembers, including machines that are switched off and including
+    the owner's corrections to what discovery guessed.
+    """
+    registry = c.model_registry
+    rows = (
+        registry.for_capability(capability, usable_only=not include_offline)
+        if capability
+        else registry.all(include_offline=include_offline)
+    )
+    return {
+        "models": [
+            {
+                "id": str(m.id),
+                "device_id": str(m.device_id) if m.device_id else None,
+                "name": m.name,
+                "runtime": str(m.observed.runtime),
+                "kind": str(m.kind),
+                "guessed_kind": str(m.observed.kind),
+                "corrected": m.kind_override is not None,
+                "capability": m.capability,
+                "online": m.online,
+                "enabled": m.enabled,
+                "usable": m.usable,
+                "context_length": m.observed.context_length,
+                "required_vram": m.observed.required_vram_bytes,
+                "note": m.note,
+            }
+            for m in rows
+        ],
+        "health": registry.health(),
+    }
+
+
+@router.post("/models/{model_id}/kind")
+async def correct_model_kind(
+    model_id: UUID, kind: str | None = None, c: Container = Depends(get_container)
+) -> dict:
+    """Tell Thursday what a model is actually for, or clear the correction.
+
+    Discovery guesses from the name, and a private build called `house-model-v3` is
+    unreadable. The correction is stored separately from the observation and survives the
+    node reconnecting — a fix that the next reconnect undoes is worse than no fix, because
+    the owner watched it work.
+    """
+    from thursday_shared.compute import ModelKind
+
+    try:
+        entry = await c.model_registry.set_kind(model_id, ModelKind(kind) if kind else None)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=f"unknown model kind: {kind}") from exc
+    except ThursdayError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return {"id": str(entry.id), "kind": str(entry.kind), "guessed": str(entry.observed.kind)}
+
+
+@router.post("/models/{model_id}/enabled")
+async def set_model_enabled(
+    model_id: UUID, enabled: bool | None = None, c: Container = Depends(get_container)
+) -> dict:
+    """Switch a model off, on, or back to having no opinion.
+
+    Tri-state deliberately: "never asked" and "the owner said no" are different facts, and
+    collapsing them would make a default look like a decision.
+    """
+    try:
+        entry = await c.model_registry.set_enabled(model_id, enabled)
+    except ThursdayError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return {"id": str(entry.id), "enabled": entry.enabled, "usable": entry.usable}
+
+
 @router.get("/devices/{device_id}")
 async def get_device(device_id: UUID, c: Container = Depends(get_container)) -> dict:
     summary = c.hub.summary(device_id)

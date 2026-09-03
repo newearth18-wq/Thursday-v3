@@ -195,10 +195,19 @@ class WebSocketDeviceSession:
 
 
 class DeviceHub:
-    def __init__(self, bus: object | None = None, remote_gate: object | None = None) -> None:
+    def __init__(
+        self,
+        bus: object | None = None,
+        remote_gate: object | None = None,
+        model_registry: object | None = None,
+    ) -> None:
         self._sessions: dict[UUID, Any] = {}
         self._known: dict[UUID, DeviceSummary] = {}
         self._bus = bus
+        #: Told what each machine holds as it connects and disconnects (ADDENDUM §5).
+        #: Duck-typed and optional for the same reason the bus is: the device layer must not
+        #: import the core, and a hub built in a test is not obliged to have one.
+        self._model_registry = model_registry
         #: Gates instructions that cross from one machine to another. Injected rather than
         #: constructed here so the security package stays out of the device layer's imports,
         #: and duck-typed for the same reason the bus is.
@@ -245,6 +254,14 @@ class DeviceHub:
             models=list(getattr(session, "models", []) or []),
         )
         self._known[session.device_id] = summary
+        if self._model_registry is not None and summary.models:
+            # Recorded at registration rather than left for the router to ask for later: a
+            # machine's inventory is knowable exactly when it connects, and a registry that
+            # learned it lazily would be empty for the first request after a restart, which
+            # is the request most likely to be routed wrongly.
+            await self._model_registry.observe(  # type: ignore[attr-defined]
+                session.device_id, summary.models, online=True
+            )
         log.info(
             "device_connected", device=session.name, os=session.os, transport=session.transport
         )
@@ -257,6 +274,11 @@ class DeviceHub:
         session = self._sessions.pop(device_id, None)
         if session is not None:
             await session.close()
+        if self._model_registry is not None:
+            # Unreachable, not uninstalled. The models stay in the registry with their
+            # corrections; only `online` goes false, so the router stops choosing them
+            # without the owner losing what they told Thursday about them.
+            await self._model_registry.device_offline(device_id)  # type: ignore[attr-defined]
         if (summary := self._known.get(device_id)) is not None:
             summary.status = DeviceStatus.OFFLINE
         log.info("device_disconnected", device_id=str(device_id))
