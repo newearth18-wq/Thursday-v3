@@ -15,11 +15,18 @@ from thursday_shared.errors import (
     ApprovalRequired,
     PermissionDenied,
     PrivacyViolation,
+    RateLimited,
     ThursdayError,
 )
 from thursday_shared.ids import bind_trace_id, current_trace_id
 
 from thursday_api.deps import error_body
+from thursday_api.limits import (
+    Limit,
+    RateLimiter,
+    caller_of,
+    classify,
+)
 from thursday_api.routers import (
     approvals,
     conversation,
@@ -31,6 +38,20 @@ from thursday_api.routers import (
 )
 
 log = get_logger(__name__)
+
+API_PREFIX = "/api/v1"
+
+#: POST here can reach a model, an agent or a device, and therefore costs real money or
+#: real time. Prefixes rather than exact paths so a new route under one of them is
+#: limited by default — the safer direction for a list somebody will forget to update.
+EXPENSIVE_PREFIXES = (
+    f"{API_PREFIX}/conversations",
+    f"{API_PREFIX}/skills",
+    f"{API_PREFIX}/automations",
+    f"{API_PREFIX}/tasks",
+    f"{API_PREFIX}/memory",
+    f"{API_PREFIX}/devices",
+)
 
 _STATUS_BY_ERROR = {
     PermissionDenied: 403,
@@ -60,6 +81,57 @@ def create_app(settings: Settings | None = None, container: Container | None = N
         lifespan=lifespan,
     )
 
+    limiter = RateLimiter(
+        {
+            "default": Limit(settings.rate_limit_default_per_minute, 60.0),
+            "expensive": Limit(settings.rate_limit_expensive_per_minute, 60.0),
+            "approvals": Limit(settings.rate_limit_approvals_per_minute, 60.0),
+            "pairing": Limit(settings.rate_limit_pairing_per_minute, 60.0),
+        }
+    )
+    app.state.limiter = limiter
+    trusted = frozenset(settings.trusted_proxies)
+
+    # Registered *before* `trace_middleware`, which makes it the inner one: Starlette builds
+    # its stack so the last middleware registered ends up outermost. The first version of
+    # this had them the other way round on the strength of a comment saying the opposite, and
+    # the 429 came back with no `x-trace-id` and a freshly minted trace id in its body — an
+    # error response nobody could correlate with the request that caused it, which is most of
+    # what an error response is for.
+    @app.middleware("http")
+    async def rate_limit_middleware(request: Request, call_next):
+        klass = classify(
+            request.url.path,
+            request.method,
+            expensive=EXPENSIVE_PREFIXES,
+            approvals=f"{API_PREFIX}/approvals",
+        )
+        if klass is None:
+            return await call_next(request)
+
+        caller = caller_of(
+            getattr(request.client, "host", None),
+            request.headers.get("x-forwarded-for"),
+            trusted,
+        )
+        decision = limiter.check(caller, klass)
+        if decision.allowed:
+            return await call_next(request)
+
+        exc = RateLimited(
+            f"too many {klass} requests; slow down",
+            retry_after_s=decision.retry_after_s,
+            limit=klass,
+        )
+        log.warning("rate_limited", caller=caller, klass=klass, path=request.url.path)
+        return JSONResponse(
+            status_code=429,
+            content=error_body(exc, current_trace_id()),
+            # The number a well-behaved client needs. Without it a caller backs off by
+            # guessing, and the common guess — retry at once — keeps the limit tripped.
+            headers={"Retry-After": str(max(1, round(decision.retry_after_s)))},
+        )
+
     @app.middleware("http")
     async def trace_middleware(request: Request, call_next):
         trace_id = bind_trace_id(request.headers.get("x-trace-id"))
@@ -74,7 +146,7 @@ def create_app(settings: Settings | None = None, container: Container | None = N
         )
         return JSONResponse(status_code=status, content=error_body(exc, current_trace_id()))
 
-    api_prefix = "/api/v1"
+    api_prefix = API_PREFIX
     for router in (
         conversation.router,
         tasks_router(),

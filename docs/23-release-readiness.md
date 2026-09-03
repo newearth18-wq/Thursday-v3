@@ -6,7 +6,7 @@ a multi-user or internet-exposed installation.**
 That sentence is the whole document in one line. What follows is the evidence for it, and —
 more usefully — the evidence against.
 
-Written at Sprint 50 and kept current since, against 1,097 tests that need no database, no
+Written at Sprint 50 and kept current since, against 1,116 tests that need no database, no
 network and no model credentials. `./scripts/check.sh` runs lint, format, types, the suite and the migrations.
 
 ---
@@ -30,6 +30,7 @@ container, not a unit test of the class in isolation.
 | Backup and restore, with a real round trip through a real file | `tests/integration/test_backup_v47.py` |
 | Update verification with no parameter for a URL | `tests/integration/test_updates_v48.py` |
 | Device key rotation, and a session that expires rather than a key that does | `tests/integration/test_rotation_v52.py` |
+| Rate limits keyed on something the caller cannot forge, and a kill switch exempt from them | `tests/integration/test_rate_limits_v53.py` |
 | Metrics whose labels cannot carry a path or a secret | `tests/integration/test_metrics_v49.py` |
 
 ## 23.2 What is not ready, and what that would take
@@ -117,8 +118,18 @@ Every control assumes one person's machine and one person's data. *This is a des
 not an oversight* — but it means the API must not be exposed beyond localhost or a trusted
 network.
 
-**No rate limiting on the HTTP surface.** Consistent with the above: it assumes a local
-listener. *To close before any exposure.*
+**The HTTP surface is rate-limited** (ADR 0043), which closes the §128 gap this document
+used to list. Four classes — anything that can reach a model is limited an order of magnitude
+tighter than the rest — keyed on the peer address and never on `X-Forwarded-For`, which is a
+header the caller writes and therefore a bucket the caller picks. A deployment behind the
+reverse proxy §127 recommends must name that proxy in `trusted_proxies` before its header is
+believed; until it does, every request behind it shares one bucket, which is a visible
+degradation rather than a silent hole. §134's emergency stop is never limited, because a kill
+switch an attacker can hold shut by making requests is not a kill switch.
+
+This does not make the API safe to expose. It is single-process and in-memory, so it does not
+survive a restart or coordinate across workers, and it is a bound on *rate* rather than
+authentication — of which there is still none.
 
 **The mobile client is a scaffold.** The desktop app is built and works.
 

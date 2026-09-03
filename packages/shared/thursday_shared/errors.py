@@ -92,6 +92,23 @@ class SecretLeakBlocked(ThursdayError):
     code = "secret_leak_blocked"
 
 
+class RateLimited(ThursdayError):
+    """Too many requests to this surface, too quickly (§49, §128).
+
+    Retryable, and the only error in this taxonomy for which that is a statement about time
+    rather than about the request: nothing is wrong with it, there have merely been too many
+    like it. `retry_after_s` says how long the caller should wait, so a client does not have
+    to guess and then guess wrong in the direction that keeps the limit tripped.
+    """
+
+    code = "rate_limited"
+    retryable = True
+
+    def __init__(self, message: str, *, retry_after_s: float, **details: Any) -> None:
+        super().__init__(message, retry_after_s=round(retry_after_s, 3), **details)
+        self.retry_after_s = retry_after_s
+
+
 class PrivacyViolation(ThursdayError):
     """A SECRET-class payload was routed somewhere it may not go (§34)."""
 

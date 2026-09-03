@@ -85,6 +85,13 @@ _YAML_MAP: dict[str, dict[str, str]] = {
         "credential_max_age_days": "device_credential_max_age_days",
     },
     "permissions": {"approval_ttl_seconds": "approval_ttl_seconds"},
+    "limits": {
+        "default_per_minute": "rate_limit_default_per_minute",
+        "expensive_per_minute": "rate_limit_expensive_per_minute",
+        "approvals_per_minute": "rate_limit_approvals_per_minute",
+        "pairing_per_minute": "rate_limit_pairing_per_minute",
+        "trusted_proxies": "trusted_proxies",
+    },
     "execution": {
         "max_plan_steps": "max_plan_steps",
         "max_step_attempts": "max_step_attempts",
@@ -235,6 +242,25 @@ class Settings(BaseSettings):
     #: never enforced — see ADR 0042 for why an expiring device key is an outage rather
     #: than a control.
     device_credential_max_age_days: int = Field(default=180, ge=1)
+
+    # rate limits (§128) --------------------------------------------------------
+    #: Requests allowed per minute, per calling address, per class. Generous by design: this
+    #: exists to stop a runaway loop, not to ration the owner. A limit tight enough to
+    #: interrupt legitimate work is one somebody switches off, and then there is none.
+    rate_limit_default_per_minute: int = Field(default=240, ge=1)
+    #: Anything that can reach a model. The spend ledger caps the money after the fact; this
+    #: caps the rate before the call.
+    rate_limit_expensive_per_minute: int = Field(default=30, ge=1)
+    #: Approvals (§128). Low because a human is on the other end of every one of these, and
+    #: because a flood of approval traffic is either a bug or an attempt at approval fatigue.
+    rate_limit_approvals_per_minute: int = Field(default=60, ge=1)
+    #: The HTTP layer in front of `PairingService`'s own guess budget, which stays the real
+    #: control — this only stops the requests arriving that fast in the first place.
+    rate_limit_pairing_per_minute: int = Field(default=20, ge=1)
+    #: Addresses whose `X-Forwarded-For` may be believed. Empty by default: until a
+    #: deployment names its reverse proxy, every request behind one shares a single bucket,
+    #: which is a visible degradation rather than a header anybody can forge.
+    trusted_proxies: tuple[str, ...] = ()
 
     # execution -----------------------------------------------------------------
     max_plan_steps: int = 12

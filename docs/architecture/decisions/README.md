@@ -50,3 +50,4 @@ done this way?" and have no answer.
 | [0040](0040-an-imagined-protection-is-worse-than-a-known-weakness.md) | An imagined protection is worse than a known weakness | A configured keychain that silently returned the environment vault |
 | [0041](0041-the-node-authenticates-the-core-too.md) | The node authenticates the core, too | Pairing proved the node to the core and the core to nobody |
 | [0042](0042-a-device-key-that-expires-is-an-outage.md) | A device key that expires is an outage; a session that never does is a hole | Rotation without a person, ageing that is reported rather than enforced |
+| [0043](0043-a-limit-the-caller-cannot-choose.md) | A limit the caller cannot choose, and a kill switch it cannot reach | Rate limiting keyed on the peer, never on a header the caller writes |
