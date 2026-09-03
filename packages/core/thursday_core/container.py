@@ -101,6 +101,7 @@ from thursday_core.setup import SetupWizard
 from thursday_core.state import build_state_store
 from thursday_core.supervisor import Supervisor
 from thursday_core.tasks import TaskManager, TaskQueue
+from thursday_core.tips import TipEngine
 from thursday_core.undo import UndoRegistry
 from thursday_core.updates import (
     LocalReleaseSource,
@@ -171,6 +172,8 @@ class Container:
     lessons: Any = None
     #: Teaches Thursday. READ ceiling, no tools, `tutorial.*` only (ONBOARDING §46-§48).
     tutor: Any = None
+    #: Decides whether a teaching tip is worth the interruption (ONBOARDING §50, §51).
+    tips: Any = None
     #: What real calls measured about each model (ADDENDUM §25, §26).
     benchmarks: Any = None
     #: Sends the magic packet and waits for the machine to prove it woke (ADDENDUM §20).
@@ -626,6 +629,9 @@ def build_container(settings: Settings | None = None, *, configure_logs: bool = 
     # catalogue, lessons and registries everything else does (§52) rather than a copy of them.
     c.tutor = TutorAgent(c)
     c.agents.register(c.tutor)
+    # Shares the automation engine's gate rather than metering separately: a tip and a
+    # notification compete for the same scarce thing, which is the owner's attention.
+    c.tips = TipEngine(c.learning, gate=c.automations.gate)
 
     from thursday_core.engine import ThursdayCore
 
