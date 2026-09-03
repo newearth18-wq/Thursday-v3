@@ -121,6 +121,16 @@ by whoever runs the dashboard — so label values are declared in advance and an
 collapses to `other`. Only outcomes are labelled: decisions, verdicts, agent and action names,
 redaction pattern names. Never a path, a resource or anything the owner typed.
 
+### T13 as built (ADR 0041)
+
+The node pins the core's SubjectPublicKeyInfo — learned at pairing, where a person is
+confirming a code, and checked before the HELLO is sent. This closes a one-directional
+authentication gap left by Sprint 36: the node proved who it was and the core proved nothing,
+so anyone holding a certificate for the core's hostname could accept the node's HELLO and then
+send it commands. A node holding a pin refuses a plaintext connection rather than falling back.
+
+Still outstanding: short-lived, rotating session tokens.
+
 ## 14.4 Controls always on
 
 Least privilege · explicit permission · encryption at rest (DB + vault) and in transit ·

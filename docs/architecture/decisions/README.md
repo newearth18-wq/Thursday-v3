@@ -48,3 +48,4 @@ done this way?" and have no answer.
 | [0038](0038-a-lost-charge-makes-the-cap-under-bind.md) | A lost charge makes the cap under-bind | A lost record is an accountability failure; a lost constraint spends money |
 | [0039](0039-an-interrupted-step-is-unknown-not-failed.md) | An interrupted step is unknown, not failed | Nobody watched it finish, so nobody can say it did — or that it did not |
 | [0040](0040-an-imagined-protection-is-worse-than-a-known-weakness.md) | An imagined protection is worse than a known weakness | A configured keychain that silently returned the environment vault |
+| [0041](0041-the-node-authenticates-the-core-too.md) | The node authenticates the core, too | Pairing proved the node to the core and the core to nobody |

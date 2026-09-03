@@ -50,9 +50,13 @@ of the three, so selection, availability detection and migration ordering are te
 platform calls themselves are not. *To close:* one run on each of macOS, Windows and a Linux
 desktop.
 
-**No TLS certificate pinning, and no session-token rotation.** The device protocol
-authenticates the node; it does not defend against a compromised CA. *To close:* Sprint 41's
-key-rotation work.
+**Session tokens are not yet short-lived and rotated.** Certificate pinning is done
+(ADR 0041) and closed a gap the pinning work itself surfaced: Sprint 36's authentication ran
+in one direction, so a node proved who it was and the core proved nothing — an attacker with a
+certificate for the core's hostname could accept a node's HELLO and then drive the machine it
+runs on. The node now pins the core's SubjectPublicKeyInfo, learned at pairing where a person
+is present, and checks it before sending anything. Verified against a real TLS handshake
+rather than a mock. *To close:* token rotation.
 
 **The updater cannot install.** It checks, verifies and refuses correctly, and no installer is
 wired (ADR 0033). This is deliberate — a half-built installer is worse than none — but it

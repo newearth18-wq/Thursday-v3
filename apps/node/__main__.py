@@ -26,6 +26,7 @@ import secrets
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 from urllib.parse import urlsplit, urlunsplit
 
 import websockets
@@ -34,6 +35,7 @@ from thursday_devices.node.adapters import for_current_platform
 from thursday_devices.node.executor import NodeExecutor
 from thursday_security.device_auth import sign, signing_payload
 from thursday_security.keys import PrivateKey, hello_payload, pairing_payload
+from thursday_security.pinning import Pin, PinUnavailable, check_peer, peer_pin, pinned_context
 from thursday_shared.models import DeviceAction
 from thursday_shared.protocol import (
     ActionFrame,
@@ -229,15 +231,27 @@ class NodeIdentity:
         pairing = self.data.get("pairing") or {}
         return uuid.UUID(pairing.get("device_id") or self.data["device_id"])
 
-    def record_pairing(self, *, device_id: str, fingerprint: str, core: str = "") -> None:
+    def record_pairing(
+        self, *, device_id: str, fingerprint: str, core: str = "", pin: str = ""
+    ) -> None:
         self.data["pairing"] = {
             "device_id": device_id,
             "fingerprint": fingerprint,
             "core": core,
+            #: The core's SPKI pin, learned during pairing — the one moment a person is
+            #: standing at this device confirming what it is talking to (ADR 0041).
+            "pin": pin,
             "started_at": datetime.now(UTC).isoformat(),
         }
         self._write(self.data)
         log.info("node_pairing_recorded", device_id=device_id, fingerprint=fingerprint)
+
+    @property
+    def core_pin(self) -> Pin | None:
+        """The core's key this node agreed to trust, if it recorded one."""
+        pairing = self.data.get("pairing") or {}
+        value = pairing.get("pin") or ""
+        return Pin(value=value, host=pairing.get("core", "")) if value else None
 
     def forget_pairing(self) -> None:
         """Drop the pairing record after the core has revoked or lost this device.
@@ -318,13 +332,29 @@ def pair(identity: NodeIdentity, *, core_url: str, name: str, os_name: str) -> i
         return 1
 
     reply = response.json()
+
+    # Learn what key the core actually has, now, while a person is here to confirm the code.
+    # Trust-on-first-use is only as good as the moment it happens, and this is the one moment
+    # in the whole system where somebody is standing at the device (ADR 0041).
+    pin = ""
+    if urlsplit(core_url).scheme in {"wss", "https"}:
+        try:
+            pin = peer_pin(base)
+        except PinUnavailable as exc:
+            print(f"could not read the core's certificate, so no pin was recorded: {exc}")
+
     identity.record_pairing(
-        device_id=reply["device_id"], fingerprint=identity.fingerprint, core=core_url
+        device_id=reply["device_id"],
+        fingerprint=identity.fingerprint,
+        core=core_url,
+        pin=pin,
     )
     print(
         f"\n  pairing code   {reply['pairing_code']}\n"
         f"  key            {identity.fingerprint}\n"
-        f"  expires        {reply['expires_at']}\n\n"
+        f"  expires        {reply['expires_at']}\n"
+        + (f"  core key       {Pin(value=pin).short}\n" if pin else "")
+        + "\n"
         "Confirm this code in Thursday, checking the key matches. Then start the node\n"
         "normally — it will sign with its own key from now on, and no longer needs\n"
         f"{TOKEN_ENV} set on this machine.\n"
@@ -406,7 +436,19 @@ class NodeClient:
         )
 
     async def _session(self) -> None:
-        async with websockets.connect(self.core_url, max_size=32 * 1024 * 1024) as ws:
+        pin = self.identity.core_pin
+        connect_args: dict[str, Any] = {"max_size": 32 * 1024 * 1024}
+        if pin is not None:
+            # Trust comes from the pin rather than from a CA, which is the whole point: the
+            # public CA set is exactly what an attacker with a mis-issued certificate has.
+            connect_args["ssl"] = pinned_context()
+
+        async with websockets.connect(self.core_url, **connect_args) as ws:
+            if pin is not None:
+                # Checked before a single frame is sent. A HELLO handed to an impostor is a
+                # HELLO an impostor can relay, and the node's own key does not help: it
+                # authenticates this node *to* whoever is listening.
+                check_peer(_ssl_object(ws), pin)
             nonce = secrets.token_hex(16)
             hello = Hello(
                 device_id=self.identity.device_id,
@@ -608,3 +650,14 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
+
+def _ssl_object(ws: Any) -> Any:
+    """The live TLS object behind a websocket, or None when the connection is plaintext.
+
+    Reached through the transport because `websockets` does not surface it directly. Returning
+    None rather than raising is deliberate: "there is no TLS here" is a fact `check_peer` needs
+    to see, and it treats it as a mismatch rather than as a missing feature.
+    """
+    transport = getattr(ws, "transport", None)
+    return transport.get_extra_info("ssl_object") if transport is not None else None
