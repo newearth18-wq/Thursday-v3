@@ -43,6 +43,7 @@ container, not a unit test of the class in isolation.
 | A hardware recommendation where PRIVATE can never quietly become cloud | `tests/integration/test_recommendation_v63.py` |
 | A first run that cannot finish until Thursday has actually opened something | `tests/integration/test_setup_wizard_v64.py` |
 | Errors and activity in plain language, from a declared list rather than a filter | `tests/integration/test_plain_language_v65.py` |
+| A Repair button that cannot offer a repair the Permission Engine would refuse, and reports what the machine shows rather than what the handler returned | `tests/integration/test_checkup_v66.py` |
 | Metrics whose labels cannot carry a path or a secret | `tests/integration/test_metrics_v49.py` |
 
 ## 23.2 What is not ready, and what that would take
@@ -173,6 +174,15 @@ Within that layer, four things are deliberately absent rather than unfinished:
 already-awake case and the timeout are all tested; nothing has ever gone on a real wire to a
 real NIC. `_send` is injected precisely so the test suite does not broadcast magic packets
 from CI at whatever machines are listening. Model cache eviction (§23) is not built at all.
+
+**"Repair Thursday" can currently repair nothing.** The check is real: it reads the same
+`health()` every probe reads, translates it, and offers a button only where `SelfRecovery`
+would accept the action. The three handlers behind those buttons — `reconnect_node`,
+`switch_model`, `restart_worker` — are placeholders the container wires as no-ops, left from
+V10. Because the outcome is now derived from re-running the health check rather than from the
+handler returning, pressing one answers "ลองซ่อมแล้ว แต่ยังไม่กลับมาทำงาน", which is true.
+*To close:* three real handlers. The verification step is what makes their absence visible
+instead of reporting success.
 
 **The mobile client is a scaffold.** The desktop app is built and works.
 

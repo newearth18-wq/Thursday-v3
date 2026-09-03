@@ -8,6 +8,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Body, Depends, HTTPException
 from fastapi.responses import PlainTextResponse
+from thursday_core import checkup as checkup_module
 from thursday_core.backup import BackupError
 from thursday_core.container import Container
 from thursday_security.policy import HARD_BLOCKED
@@ -60,6 +61,47 @@ async def health_devices(c: Container = Depends(get_container)) -> dict:
 @router.get("/health/models")
 async def health_models(c: Container = Depends(get_container)) -> dict:
     return _subset(await c.health(), "model")
+
+
+@router.get("/checkup")
+async def check_thursday(advanced: bool = False, c: Container = Depends(get_container)) -> dict:
+    """Settings → "Check Thursday" (EASY INSTALL).
+
+    The same checks `/health` runs, said in the owner's language. Two endpoints over one
+    source rather than two health checks: the one that drifts is the one nobody watches.
+
+    A problem carries a `repair` only when `SelfRecovery` would actually accept that action,
+    so the button and the security boundary cannot disagree.
+    """
+    return (await checkup_module.check(c)).render(advanced=advanced)
+
+
+@router.post("/repair")
+async def repair_thursday(
+    component: str,
+    action: str,
+    advanced: bool = False,
+    c: Container = Depends(get_container),
+) -> dict:
+    """Settings → "Repair Thursday" — for one component, by name.
+
+    Takes an action, and that is safe for the same reason `/updates/apply` takes no URL
+    (§120): the action is not trusted, it is *checked*. `SelfRecovery.repair` refuses
+    anything not on the allowlist, so `change_permission` posted here is declined in the
+    same words whether it came from the owner, a model, or a page that persuaded a browser
+    to post it. "ห้ามแก้ไข security-sensitive state โดยไม่มี confirmation" holds here as
+    something stronger than a confirmation: there is no automatic path to that state at all.
+
+    `ok` says whether the thing works now, not whether the handler returned — a repair is
+    verified by re-running the component's health check (ADR 0051).
+    """
+    result = await checkup_module.repair(c, component, action)
+    if not advanced:
+        # `technical` is whatever the handler raised, and a handler that cannot reach a
+        # local model raises the connection error verbatim. Gated exactly as `/checkup`
+        # gates the same field, rather than trusted to be harmless.
+        result.pop("technical", None)
+    return result
 
 
 @router.get("/world-state")
