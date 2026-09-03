@@ -83,6 +83,7 @@ from thursday_core.execution import ToolExecutor
 from thursday_core.focus import DeviceFocus
 from thursday_core.goals import GoalManager, PriorityQueue
 from thursday_core.learning import LearningRecord
+from thursday_core.lessons import LessonRunner
 from thursday_core.logging import configure_logging, get_logger
 from thursday_core.metrics import MetricsCollector, build_registry
 from thursday_core.model_registry import ModelRegistry
@@ -165,6 +166,8 @@ class Container:
     setup: Any = None
     #: What the owner has learned, and how much Thursday should still explain (ONBOARDING §8).
     learning: Any = None
+    #: Drives one lesson through SHOW → TRY → VERIFY → NEXT (ONBOARDING §4).
+    lessons: Any = None
     #: What real calls measured about each model (ADDENDUM §25, §26).
     benchmarks: Any = None
     #: Sends the magic packet and waits for the machine to prove it woke (ADDENDUM §20).
@@ -430,6 +433,7 @@ def build_container(settings: Settings | None = None, *, configure_logs: bool = 
     c.benchmarks = BenchmarkBook()
     c.setup = SetupWizard()
     c.learning = LearningRecord(frequency=settings.teaching_frequency)
+    c.lessons = LessonRunner(c.learning)
     c.compute_router = ComputeRouter(registry=c.model_registry, hub=c.hub, benchmarks=c.benchmarks)
     c.compute_executor = ComputeExecutor(registry=c.model_registry, hub=c.hub)
     c.distributed = DistributedRunner(c.compute_router, c.compute_executor)
