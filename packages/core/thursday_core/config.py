@@ -255,6 +255,12 @@ class Settings(BaseSettings):
     ai_routing_mode: str = "LOCAL_FIRST"
     ai_routing_profile: str = "BALANCED"
 
+    #: Where magic packets go (ADDENDUM §20). The all-networks broadcast by default; a
+    #: deployment with several subnets sets the directed broadcast for the one its machines
+    #: are on, because 255.255.255.255 does not cross a router and a packet that never
+    #: arrives looks exactly like a machine that would not wake.
+    wake_broadcast: str = "255.255.255.255"
+
     # rate limits (§128) --------------------------------------------------------
     #: Requests allowed per minute, per calling address, per class. Generous by design: this
     #: exists to stop a runaway loop, not to ration the owner. A limit tight enough to

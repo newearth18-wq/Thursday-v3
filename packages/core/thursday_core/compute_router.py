@@ -110,7 +110,12 @@ class Candidate:
     profile: ComputeProfile | None = None
     load: ComputeLoad | None = None
     state: ModelState = ModelState.UNLOADED
+    #: Zero means never measured (§25), which the router reads as unknown rather than slow.
     tokens_per_second: float = 0.0
+    #: §26. Zero likewise means unmeasured — a model with no history is not a model with a
+    #: bad one, and starting everything at zero would make the first measured model win for
+    #: ever regardless of how it did.
+    success_rate: float = 0.0
     required_vram: int = 0
     required_ram: int = 0
 
@@ -141,9 +146,13 @@ class Rejection:
 class ComputeRouter:
     """Chooses the machine and the model. Never decides whether the action is allowed."""
 
-    def __init__(self, *, registry: Any = None, hub: Any = None) -> None:
+    def __init__(self, *, registry: Any = None, hub: Any = None, benchmarks: Any = None) -> None:
         self._registry = registry
         self._hub = hub
+        #: Measurements from real calls (ADDENDUM §25). Optional: without it every model
+        #: reads as unmeasured, which is the state the router was designed to handle
+        #: anyway — measurement improves routing rather than enabling it.
+        self._benchmarks = benchmarks
 
     # ------------------------------------------------------------------ the decision
 
@@ -217,12 +226,28 @@ class ComputeRouter:
                     profile=getattr(summary, "compute", None),
                     load=getattr(summary, "load", None),
                     state=entry.observed.state,
-                    tokens_per_second=entry.observed.tokens_per_second,
+                    # Measured throughput when there is any, and the descriptor's figure
+                    # otherwise — which is zero until §25 has seen enough real calls.
+                    tokens_per_second=self._speed_of(entry),
+                    success_rate=self._success_of(entry),
                     required_vram=entry.observed.required_vram_bytes,
                     required_ram=entry.observed.required_ram_bytes,
                 )
             )
         return found
+
+    def _speed_of(self, entry: Any) -> float:
+        if self._benchmarks is None:
+            return float(entry.observed.tokens_per_second)
+        measured = self._benchmarks.speed_of(entry.device_id, entry.name)
+        return measured or float(entry.observed.tokens_per_second)
+
+    def _success_of(self, entry: Any) -> float:
+        return (
+            0.0
+            if self._benchmarks is None
+            else self._benchmarks.success_of(entry.device_id, entry.name)
+        )
 
     # ------------------------------------------------------------------ the filter
 
@@ -311,7 +336,11 @@ class ComputeRouter:
         if request.profile is RoutingProfile.FAST:
             return (explicit, warm, speed, gpu, locality, idle)
         if request.profile is RoutingProfile.QUALITY:
-            return (explicit, gpu, locality, speed, warm, idle)
+            # §26. When quality is what was asked for, a model that succeeds 96% of the time
+            # beats one that succeeds 82%, and both beat the GPU a third model happens to sit
+            # on. Ahead of `gpu` deliberately: the point of the profile is the answer, and
+            # hardware is a means to it.
+            return (explicit, candidate.success_rate, gpu, locality, speed, warm, idle)
         if request.profile is RoutingProfile.LOW_POWER:
             plugged = 0 if (candidate.load and candidate.load.on_battery) else 1
             return (explicit, plugged, locality, warm, idle, speed)

@@ -55,3 +55,4 @@ done this way?" and have no answer.
 | [0045](0045-a-report-is-an-observation-a-correction-is-a-decision.md) | A node's report is an observation; the owner's correction is a decision | A correction the next reconnect overwrites is worse than none |
 | [0046](0046-a-privacy-rule-expressed-as-a-score-is-a-preference.md) | A privacy rule expressed as a score is a preference | Exclusions filter, preferences rank, and no score resurrects an excluded candidate |
 | [0047](0047-a-stage-cannot-be-less-private-than-its-task.md) | A stage cannot be less private than its task | An embedding of a secret reaches the same place the secret would |
+| [0048](0048-sending-is-not-waking-and-measuring-changes-what-runs.md) | Sending is not waking, and measuring changes what runs next | A magic packet is unacknowledged; a bad measurement is self-fulfilling |

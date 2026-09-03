@@ -6,7 +6,7 @@ a multi-user or internet-exposed installation.**
 That sentence is the whole document in one line. What follows is the evidence for it, and —
 more usefully — the evidence against.
 
-Written at Sprint 50 and kept current since, against 1,244 tests that need no database, no
+Written at Sprint 50 and kept current since, against 1,284 tests that need no database, no
 network and no model credentials. `./scripts/check.sh` runs lint, format, types, the suite and the migrations.
 
 ---
@@ -37,6 +37,8 @@ container, not a unit test of the class in isolation.
 | A fallback chain that cannot cross the privacy boundary the first choice respected | `tests/integration/test_compute_fallback_v57.py` |
 | SECRET work never reaching a cloud provider, proved by a spy that records every call | `tests/integration/test_privacy_routing_v58.py` |
 | One task across several machines, where no stage may be less private than the task | `tests/integration/test_distributed_ai_v59.py` |
+| Waking a machine, reported only when the machine actually appears | `tests/integration/test_wake_on_lan_v60.py` |
+| Measurement from real calls that cannot damn a model with one bad sample | `tests/integration/test_benchmarks_v61.py` |
 | Metrics whose labels cannot carry a path or a secret | `tests/integration/test_metrics_v49.py` |
 
 ## 23.2 What is not ready, and what that would take
@@ -136,6 +138,37 @@ switch an attacker can hold shut by making requests is not a kill switch.
 This does not make the API safe to expose. It is single-process and in-memory, so it does not
 survive a restart or coordinate across workers, and it is a bound on *rate* rather than
 authentication — of which there is still none.
+
+**Local AI compute is built and has never met a local AI.** The addendum's six sprints
+(ADRs 0044–0047) plus Wake-on-LAN and benchmarks (ADR 0048) are complete and tested, and
+every one of them was tested against constructed input. **No Ollama, LM Studio, llama.cpp or
+vLLM instance has ever answered Thursday**; the response parsing is checked against responses
+this repository wrote. This container has no inference runtime, no GPU and no second machine.
+*To close:* one machine with Ollama installed and one paired node on a second machine —
+the seams are ports, so nothing needs redesigning first.
+
+Within that layer, four things are deliberately absent rather than unfinished:
+
+- **Distributed stages run sequentially.** §21's example is naturally concurrent — vision on
+  one machine while embeddings run on another — and the `needs` graph carries the information
+  needed to parallelise. It waits on a per-device concurrency limit (§129), which does not
+  exist; running stages in parallel without one would let a task saturate the machine it is
+  running on.
+- **Escalation (§13–§14) is supported, not automatic.** `ComputeExecutor` accepts a quality
+  gate and walks to a stronger model when an answer fails it, and nothing in the agent layer
+  passes one yet. Tier 0–5 is a policy this router can serve rather than one it runs.
+- **Benchmarks do not survive a restart.** The `models` table has `tokens_per_second` and
+  `last_benchmarked_at` waiting for them. Persisting needs a decision about whether a
+  measurement taken before a hardware change should outlive it, and guessing that is worse
+  than restarting the window.
+- **Model purpose is guessed from the model's name.** No runtime reports it. The owner can
+  correct a wrong guess and the correction survives reconnects (ADR 0045), but the first
+  guess for an unfamiliar name is a guess.
+
+**Waking a machine has never woken a machine.** The packet format, the policy gate, the
+already-awake case and the timeout are all tested; nothing has ever gone on a real wire to a
+real NIC. `_send` is injected precisely so the test suite does not broadcast magic packets
+from CI at whatever machines are listening. Model cache eviction (§23) is not built at all.
 
 **The mobile client is a scaffold.** The desktop app is built and works.
 

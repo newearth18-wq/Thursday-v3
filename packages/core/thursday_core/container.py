@@ -10,7 +10,7 @@ Tests build a container of fakes with the same attribute surface.
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from thursday_agents.automation import AutomationAgent
@@ -36,6 +36,7 @@ from thursday_automation.routines import RoutineLearner
 from thursday_automation.skills.learning import SkillObserver
 from thursday_automation.skills.registry import SkillRegistry
 from thursday_devices.hub import DeviceHub
+from thursday_devices.wake import WakeOnLan
 from thursday_memory.embeddings import HashEmbeddingProvider, OllamaEmbeddingProvider
 from thursday_memory.graph import KnowledgeGraph
 from thursday_memory.manager import MemoryManager
@@ -67,6 +68,7 @@ from thursday_voice.routing import AudioRouter
 from thursday_voice.service import VoiceService
 
 from thursday_core.backup import BackupService, default_components
+from thursday_core.benchmarks import BenchmarkBook
 from thursday_core.briefing import Briefer, DecisionJournal
 from thursday_core.bus import InProcessEventBus
 from thursday_core.composer import ResponseComposer
@@ -157,6 +159,13 @@ class Container:
     compute_executor: Any = None
     #: Runs one task across several machines, keeping each stage's provenance (ADDENDUM §21).
     distributed: Any = None
+    #: What real calls measured about each model (ADDENDUM §25, §26).
+    benchmarks: Any = None
+    #: Sends the magic packet and waits for the machine to prove it woke (ADDENDUM §20).
+    wake: Any = None
+    #: Which machines have a MAC recorded, and whether the owner allows waking them. Set by
+    #: the owner; never learned from the network (ADR 0044's reasoning applies here too).
+    wake_records: dict[Any, Any] = field(default_factory=dict)
     #: Whether state actually outlives this process (Sprint 51). False is a supported
     #: configuration and not a degraded one — but it must never be a silent assumption.
     persistent: bool = False
@@ -412,9 +421,11 @@ def build_container(settings: Settings | None = None, *, configure_logs: bool = 
     c.remote_gate = RemoteCommandGate()
     c.hub = DeviceHub(c.bus, remote_gate=c.remote_gate, model_registry=c.model_registry)
     c.device_router = DeviceRouter(c.hub)
-    c.compute_router = ComputeRouter(registry=c.model_registry, hub=c.hub)
+    c.benchmarks = BenchmarkBook()
+    c.compute_router = ComputeRouter(registry=c.model_registry, hub=c.hub, benchmarks=c.benchmarks)
     c.compute_executor = ComputeExecutor(registry=c.model_registry, hub=c.hub)
     c.distributed = DistributedRunner(c.compute_router, c.compute_executor)
+    c.wake = WakeOnLan(c.hub, broadcast=settings.wake_broadcast)
     c.device_focus = DeviceFocus()
     # Pairings outlive the process. An in-memory registry would mean a restart locks out
     # every paired node — it signs with its key, the core no longer knows the key, and the

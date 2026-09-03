@@ -29,7 +29,6 @@ from pathlib import Path
 import pytest
 from thursday_devices.actions import CATALOGUE
 from thursday_security.policy import PolicyTable
-from thursday_shared.enums import PolicyDecision
 
 #: A count with or without a thousands separator. The first version was `\d{3,4}`, which read
 #: "1,010 tests" as ten — and then reported that the README claimed fewer tests than there are
@@ -74,33 +73,30 @@ def test_every_action_in_the_catalogue_has_a_policy():
     is safe and useless: it asks about everything, and approval fatigue is a safety failure
     of its own."""
     table = PolicyTable()
-    unrecognised = []
-    for action in CATALOGUE:
-        policy = table.get(action)
-        namespace = action.split(".")[0]
-        # The fail-closed default is exactly this shape. A namespace default is not.
-        looks_defaulted = (
-            policy.default is PolicyDecision.ASK_ALWAYS
-            and policy.risk.value == "MEDIUM"
-            and namespace not in _ASK_ALWAYS_NAMESPACES
-        )
-        if looks_defaulted:
-            unrecognised.append(action)
+    # Asked of the table directly rather than inferred from the resolved policy's shape.
+    #
+    # This used to guess: a policy of ASK_ALWAYS/MEDIUM outside a known-strict namespace was
+    # taken to be the fail-closed default. That worked until Sprint 60 added `device.wake`
+    # with a *deliberate* ASK_ALWAYS/MEDIUM — indistinguishable from the default by shape, so
+    # the check reported a policy that exists as missing. The heuristic was always standing in
+    # for "is this action listed", and the table can answer that itself.
+    listed = set(table.known_actions())
+    unrecognised = [
+        action
+        for action in CATALOGUE
+        if action not in listed and not _covered_by_ancestor(action, listed)
+    ]
     assert unrecognised == [], f"no policy of their own: {unrecognised}"
 
 
-_ASK_ALWAYS_NAMESPACES = {
-    "system",
-    "email",
-    "message",
-    "social",
-    "purchase",
-    "payment",
-    "shell",
-    "script",
-    "powershell",
-    "code",
-}
+def _covered_by_ancestor(action: str, listed: set[str]) -> bool:
+    """Whether a listed ancestor governs this action (ADR 0007's prefix walk).
+
+    `file.folder.create` is covered by `file.folder`, which is the resolution rule the
+    engine itself uses — so an action inheriting a real policy is not missing one.
+    """
+    parts = action.split(".")
+    return any(".".join(parts[:i]) in listed for i in range(len(parts) - 1, 0, -1))
 
 
 def test_every_agent_declares_what_it_returns(container):
