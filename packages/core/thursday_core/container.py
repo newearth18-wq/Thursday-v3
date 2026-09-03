@@ -28,6 +28,7 @@ from thursday_agents.media import MediaAgent
 from thursday_agents.ports import LocalCalendar, LocalOutbox
 from thursday_agents.registry import AgentRegistry
 from thursday_agents.research import ResearchAgent
+from thursday_agents.tutor import TutorAgent
 from thursday_agents.vision import VisionAgent
 from thursday_automation.engine import AutomationEngine, ProactivityGate
 from thursday_automation.offers import OfferBook
@@ -168,6 +169,8 @@ class Container:
     learning: Any = None
     #: Drives one lesson through SHOW → TRY → VERIFY → NEXT (ONBOARDING §4).
     lessons: Any = None
+    #: Teaches Thursday. READ ceiling, no tools, `tutorial.*` only (ONBOARDING §46-§48).
+    tutor: Any = None
     #: What real calls measured about each model (ADDENDUM §25, §26).
     benchmarks: Any = None
     #: Sends the magic packet and waits for the machine to prove it woke (ADDENDUM §20).
@@ -619,6 +622,10 @@ def build_container(settings: Settings | None = None, *, configure_logs: bool = 
     c.agents.register(CommunicationAgent(c.outbox))
     c.agents.register(VisionAgent(c.vision))
     c.agents.register(AutomationAgent(c.automations, routines=c.routines, skills=c.skill_observer))
+    # Last, and given the container itself: the tutor's honesty depends on reading the same
+    # catalogue, lessons and registries everything else does (§52) rather than a copy of them.
+    c.tutor = TutorAgent(c)
+    c.agents.register(c.tutor)
 
     from thursday_core.engine import ThursdayCore
 
