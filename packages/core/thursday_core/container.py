@@ -94,6 +94,7 @@ from thursday_core.reasoning import ReasoningEngine
 from thursday_core.recovery import SelfRecovery
 from thursday_core.reflection import FeedbackLog, SelfEvaluator
 from thursday_core.resumption import interrupted
+from thursday_core.setup import SetupWizard
 from thursday_core.state import build_state_store
 from thursday_core.supervisor import Supervisor
 from thursday_core.tasks import TaskManager, TaskQueue
@@ -159,6 +160,8 @@ class Container:
     compute_executor: Any = None
     #: Runs one task across several machines, keeping each stage's provenance (ADDENDUM §21).
     distributed: Any = None
+    #: The first run, and whether a real command has ever succeeded (EASY INSTALL).
+    setup: Any = None
     #: What real calls measured about each model (ADDENDUM §25, §26).
     benchmarks: Any = None
     #: Sends the magic packet and waits for the machine to prove it woke (ADDENDUM §20).
@@ -422,6 +425,7 @@ def build_container(settings: Settings | None = None, *, configure_logs: bool = 
     c.hub = DeviceHub(c.bus, remote_gate=c.remote_gate, model_registry=c.model_registry)
     c.device_router = DeviceRouter(c.hub)
     c.benchmarks = BenchmarkBook()
+    c.setup = SetupWizard()
     c.compute_router = ComputeRouter(registry=c.model_registry, hub=c.hub, benchmarks=c.benchmarks)
     c.compute_executor = ComputeExecutor(registry=c.model_registry, hub=c.hub)
     c.distributed = DistributedRunner(c.compute_router, c.compute_executor)

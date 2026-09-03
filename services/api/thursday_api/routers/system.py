@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 from enum import IntEnum
+from typing import Any
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Body, Depends, HTTPException
 from fastapi.responses import PlainTextResponse
 from thursday_core.backup import BackupError
 from thursday_core.container import Container
@@ -18,7 +19,7 @@ from thursday_shared.enums import (
     RiskLevel,
 )
 from thursday_shared.errors import ThursdayError
-from thursday_shared.models import ActionRequest, utcnow
+from thursday_shared.models import ActionRequest, DeviceAction, utcnow
 
 from thursday_api.deps import get_container
 from thursday_api.schemas import EmergencyStopRequest
@@ -236,6 +237,59 @@ async def undo(action_id: UUID, c: Container = Depends(get_container)) -> dict:
         raise HTTPException(status_code=404, detail=exc.to_dict()) from exc
 
 
+@router.get("/setup")
+async def setup_progress(c: Container = Depends(get_container)) -> dict:
+    """Where the first run has got to."""
+    return c.setup.progress()
+
+
+@router.post("/setup/answer")
+async def setup_answer(step: str, value: Any = Body(...), c: Container = Depends(get_container)):
+    """Record one screen's answer and advance."""
+    from thursday_core.setup import SetupError, SetupStep
+
+    try:
+        c.setup.answer(SetupStep(step.upper()), value)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=f"unknown step: {step}") from exc
+    except SetupError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return c.setup.progress()
+
+
+@router.post("/setup/verify")
+async def setup_verify(c: Container = Depends(get_container)) -> dict:
+    """Finish the install, if a real command really worked.
+
+    Runs the test command for real and judges the *result*, not the request. This endpoint
+    cannot be told that setup succeeded — there is no parameter for it, in the same way the
+    updater has no parameter for a URL (ADR 0033): a completion flag a client can post is a
+    completion flag a client will post.
+    """
+    from thursday_core.setup import SetupError
+
+    device = next((d for d in c.hub.online()), None)
+    if device is None:
+        # Not an error the owner caused, and not silent (§38).
+        raise HTTPException(
+            status_code=409,
+            detail="no device is connected yet, so there is nothing to try the command on",
+        )
+
+    try:
+        result = await c.hub.invoke(
+            device.id, DeviceAction(action="app.open", args={"app": "notepad"}, reason="setup")
+        )
+    except ThursdayError as exc:
+        raise HTTPException(status_code=409, detail=exc.to_dict()) from exc
+
+    try:
+        c.setup.verify(result)
+    except SetupError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return c.setup.progress()
+
+
 @router.get("/setup/recommendation")
 async def setup_recommendation(
     preset: str = "BALANCED", advanced: bool = False, c: Container = Depends(get_container)
@@ -249,8 +303,6 @@ async def setup_recommendation(
 
     Proposes only. Nothing is downloaded, installed or configured by asking.
     """
-    from typing import Any
-
     from thursday_core.recommend import AIPreset, recommend
     from thursday_models.local_manager import LocalModelManager
 
