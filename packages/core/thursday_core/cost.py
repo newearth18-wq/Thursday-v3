@@ -35,7 +35,10 @@ from __future__ import annotations
 from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, timedelta
+from typing import Any
 from uuid import UUID
+
+from thursday_shared.ids import new_id
 
 from thursday_core.logging import get_logger
 
@@ -63,6 +66,10 @@ class Charge:
     usd: float
     task_id: UUID | None = None
     agent: str = ""
+    #: Its own identity, so a charge can be deleted from storage when it ages out without a
+    #: lookup table beside the ledger — a second structure keyed on "the same charge" is a
+    #: second source of truth waiting to disagree with the first.
+    id: UUID = field(default_factory=new_id)
 
     @property
     def tokens(self) -> int:
@@ -95,12 +102,19 @@ class CostMeter:
     daily_usd: float | None = None
     monthly_usd: float | None = None
     retention: timedelta = RETENTION
+    #: Where charges live between runs. Without one the ledger is per-process, and a restart
+    #: resets the daily total — which makes restarting a way around the cap.
+    repository: Any = None
+    #: Set when a charge could not be stored. Not cleared by a later success: the missing
+    #: charge means the cap under-binds from here on, and that does not heal.
+    degraded: bool = False
+    lost: int = 0
     _charges: list[Charge] = field(default_factory=list)
     _warned: set[str] = field(default_factory=set)
 
     # ------------------------------------------------------------------ recording
 
-    def record(
+    async def record(
         self,
         *,
         provider: str,
@@ -112,7 +126,20 @@ class CostMeter:
         agent: str = "",
         now: datetime | None = None,
     ) -> Charge:
-        """Note what a call cost. Called by the router, for every call, without exception."""
+        """Note what a call cost. Called by the router, for every call, without exception.
+
+        The in-memory append happens first and does not fail, so the cap keeps binding for
+        the rest of this process whatever storage does. A storage failure is recorded rather
+        than raised: the model call has already happened and already cost money, so failing
+        it now would report an error for something that succeeded and invite a retry that
+        spends again.
+
+        What the failure costs is worth naming precisely, because it is not the same as a
+        lost audit entry. A charge that never reached the table means the cap **under-binds**
+        after the next restart — the owner spends more than they set out to. That is why
+        `degraded` is surfaced rather than swallowed: a ceiling nobody can trust is a ceiling
+        that is not doing its job, and the owner should know which kind they have.
+        """
         charge = Charge(
             at=now or datetime.now(UTC),
             provider=provider,
@@ -124,8 +151,39 @@ class CostMeter:
             agent=agent,
         )
         self._charges.append(charge)
-        self._prune(charge.at)
+
+        if self.repository is not None:
+            try:
+                await self.repository.put(_row(charge))
+            except Exception as exc:
+                self.degraded = True
+                self.lost += 1
+                log.error("spend_write_failed", provider=provider, error=str(exc))
+
+        await self._prune(charge.at)
         return charge
+
+    async def restore(self) -> int:
+        """Load the ledger, which is what makes a period cap survive a restart.
+
+        Sprint 45 named this as its known gap: with the ledger only in memory, restarting
+        reset the daily total, so restarting was a way around the cap.
+        """
+        if self.repository is None:
+            return 0
+        rows = await self.repository.load()
+        restored = self.import_state(rows, replace=False)
+        if restored:
+            log.info("spend_restored", charges=restored, today=round(self.spent_today(), 4))
+        return restored
+
+    def health(self) -> dict:
+        return {
+            "charges": len(self._charges),
+            "today_usd": round(self.spent_today(), 4),
+            "degraded": self.degraded,
+            "lost": self.lost,
+        }
 
     # ------------------------------------------------------------------ the ceiling
 
@@ -250,31 +308,34 @@ class CostMeter:
                 "usd": c.usd,
                 "task_id": str(c.task_id) if c.task_id else None,
                 "agent": c.agent,
+                "id": str(c.id),
             }
             for c in self._charges
         ]
 
     def import_state(self, rows: list[dict], *, replace: bool = True) -> int:
-        """Restore the ledger, which is what makes a period cap survive a restart.
+        """Load charges back, from either shape they arrive in.
 
-        Named as the fix for Sprint 45's stated gap: with the ledger only in memory, a
-        restart reset the daily total, so restarting was a way around the cap.
+        Two callers with two conventions: a backup archive is JSON, so its timestamps and
+        ids are strings, while the repository hands back Python objects straight off the
+        table. Normalising here rather than at each caller means neither has to remember —
+        and a loader that only accepted one of them would work perfectly until the day the
+        other one was used.
         """
-        from uuid import UUID
-
         if replace:
             self._charges.clear()
         for row in rows:
             self._charges.append(
                 Charge(
-                    at=datetime.fromisoformat(row["at"]),
-                    provider=row.get("provider", ""),
-                    tier=row.get("tier", ""),
-                    tokens_in=int(row.get("tokens_in", 0)),
-                    tokens_out=int(row.get("tokens_out", 0)),
-                    usd=float(row.get("usd", 0.0)),
-                    task_id=UUID(row["task_id"]) if row.get("task_id") else None,
-                    agent=row.get("agent", ""),
+                    at=_as_datetime(row["at"]),
+                    provider=row.get("provider") or "",
+                    tier=row.get("tier") or "",
+                    tokens_in=int(row.get("tokens_in") or 0),
+                    tokens_out=int(row.get("tokens_out") or 0),
+                    usd=float(row.get("usd") or 0.0),
+                    task_id=_as_uuid(row.get("task_id")),
+                    agent=row.get("agent") or "",
+                    id=_as_uuid(row.get("id")) or new_id(),
                 )
             )
         self._charges.sort(key=lambda c: c.at)
@@ -282,7 +343,52 @@ class CostMeter:
 
     # ------------------------------------------------------------------ internals
 
-    def _prune(self, now: datetime) -> None:
+    async def _prune(self, now: datetime) -> None:
+        """Drop charges past the retention window, from memory *and* from storage.
+
+        Both, or neither works. Pruning only memory leaves the rows to be reloaded on the
+        next restart, so the window never actually applies and the ledger grows for ever —
+        the same shape as a memory dropped from the index and left in the table, which comes
+        back as though it had never been forgotten (ADR 0019).
+        """
         cutoff = now - self.retention
-        if self._charges and self._charges[0].at < cutoff:
-            self._charges = [c for c in self._charges if c.at >= cutoff]
+        if not self._charges or self._charges[0].at >= cutoff:
+            return
+
+        expired = [c for c in self._charges if c.at < cutoff]
+        self._charges = [c for c in self._charges if c.at >= cutoff]
+        if self.repository is None:
+            return
+        for charge in expired:
+            await self.repository.remove(charge.id)
+
+
+def _row(charge: Charge) -> dict:
+    """A charge as the storage layer wants it. One place, so both directions agree."""
+    return {
+        "id": charge.id,
+        "at": charge.at,
+        "provider": charge.provider,
+        "tier": charge.tier,
+        "tokens_in": charge.tokens_in,
+        "tokens_out": charge.tokens_out,
+        "usd": charge.usd,
+        "task_id": charge.task_id,
+        "agent": charge.agent,
+    }
+
+
+def _as_datetime(value: Any) -> datetime:
+    """A timestamp from JSON or from the database, always aware.
+
+    SQLite has no timezone type, so a stored UTC value comes back naive and every comparison
+    against `datetime.now(UTC)` — which is every comparison here — raises `TypeError`.
+    """
+    when = datetime.fromisoformat(value) if isinstance(value, str) else value
+    return when.replace(tzinfo=UTC) if when.tzinfo is None else when
+
+
+def _as_uuid(value: Any) -> UUID | None:
+    if value is None or isinstance(value, UUID):
+        return value
+    return UUID(str(value))

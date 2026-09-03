@@ -261,6 +261,24 @@ class Container:
                 ),
             }
         )
+        spend = self.costs.health()
+        checks.append(
+            {
+                "component": "spend",
+                # A lost charge is not a lost record: it means the ceiling *under-binds* after
+                # the next restart, so the owner spends more than they set out to. A cap
+                # nobody can trust is a cap that is not doing its job.
+                "ok": not spend["degraded"],
+                "detail": (
+                    f"${spend['today_usd']:.2f} today over {spend['charges']} calls"
+                    + (
+                        f", {spend['lost']} charges could not be stored"
+                        if spend["degraded"]
+                        else ""
+                    )
+                ),
+            }
+        )
         checks.append(
             {
                 "component": "approvals",
@@ -372,6 +390,7 @@ def build_container(settings: Settings | None = None, *, configure_logs: bool = 
     c.costs = CostMeter(
         daily_usd=settings.daily_cost_cap_usd,
         monthly_usd=settings.monthly_cost_cap_usd,
+        repository=_spend_repository(settings, c),
     )
     c.models = _build_models(settings, c.vault, c.costs, c.redactor, c.metrics)
 
@@ -810,6 +829,39 @@ def _build_updates(settings: Settings, backups: Any) -> UpdateService:
     )
 
 
+def _spend_repository(settings: Settings, container: Container) -> Any:
+    """Where the spend ledger is kept between runs (§61).
+
+    None rather than `NullRepository` when persistence is off, so `CostMeter` skips the
+    storage path entirely instead of awaiting a no-op on every model call.
+    """
+    if not settings.persist_costs:
+        return None
+
+    from thursday_shared.db.models import ModelSpend
+    from thursday_shared.db.session import init_engine, session_scope
+
+    init_engine(settings)
+    container.persistent = True
+    return SqlRepository(
+        ModelSpend,
+        session_scope=session_scope,
+        defaults={"user_id": settings.owner_id},
+        order_by="at",
+        fields={
+            "id",
+            "at",
+            "provider",
+            "tier",
+            "tokens_in",
+            "tokens_out",
+            "usd",
+            "task_id",
+            "agent",
+        },
+    )
+
+
 def _audit_repository(settings: Settings, container: Container) -> Any:
     """Where the audit trail is kept between runs.
 
@@ -871,11 +923,13 @@ async def start(container: Container) -> Container:
     """
     memories = await container.memory.restore()
     entries = await container.audit.restore()
+    charges = await container.costs.restore()
     log.info(
         "thursday_state_loaded",
         persistent=container.persistent,
         memories=memories,
         audit_entries=entries,
         audit_chain_intact=container.audit.verify_chain(),
+        spend_charges=charges,
     )
     return container

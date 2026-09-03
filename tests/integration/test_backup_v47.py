@@ -51,7 +51,9 @@ async def populate(container) -> dict:
             actor="user", action="file.write", resource="~/report.md"
         )
     )
-    container.costs.record(provider="cloud", tier="STANDARD", tokens_in=90, tokens_out=10, usd=0.25)
+    await container.costs.record(
+        provider="cloud", tier="STANDARD", tokens_in=90, tokens_out=10, usd=0.25
+    )
     container.policy.override("file.copy", PolicyDecision.AUTO)
     container.journal.record("used the local model", reason="the daily cap was reached")
     return {"memory": record, "task": task}
@@ -89,7 +91,7 @@ async def test_the_spending_ledger_survives_a_restart(container, archive):
     way around the cap. A backup taken before the restart closes it."""
     container.costs.daily_usd = 1.0
     for _ in range(5):
-        container.costs.record(provider="cloud", tier="FAST", usd=0.25)
+        await container.costs.record(provider="cloud", tier="FAST", usd=0.25)
     assert not container.costs.check()
 
     container.backups.create(archive)

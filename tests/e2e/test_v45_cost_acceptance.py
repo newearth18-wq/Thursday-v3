@@ -145,7 +145,7 @@ async def test_the_ledger_matches_what_the_provider_was_actually_asked_to_do(
 
 
 async def test_the_costs_endpoint_reports_what_was_spent(client, container):
-    container.costs.record(
+    await container.costs.record(
         provider="paid-cloud", tier="STANDARD", tokens_in=10, tokens_out=5, usd=0.25
     )
 
@@ -177,7 +177,7 @@ async def test_reaching_the_cap_degrades_the_work_rather_than_stopping_it(
     """
     paid.cost = 1.0
     container.costs.daily_usd = 0.5
-    container.costs.record(provider="paid-cloud", tier="STANDARD", usd=0.6)
+    await container.costs.record(provider="paid-cloud", tier="STANDARD", usd=0.6)
 
     calls_before = paid.calls
     local_before = local.calls
@@ -199,7 +199,7 @@ async def test_the_cap_never_makes_thursday_claim_an_unverified_success(client, 
     exemption, and this is the test that would catch one being added."""
     paid.cost = 1.0
     container.costs.daily_usd = 0.01
-    container.costs.record(provider="paid-cloud", tier="STANDARD", usd=1.0)
+    await container.costs.record(provider="paid-cloud", tier="STANDARD", usd=1.0)
 
     body = (await client.post("/api/v1/conversations", json={"text": "Thursday เปิด chrome"})).json()
     assert body["verified"] is False, "unverifiable under the cap must not report as verified"
@@ -209,7 +209,7 @@ async def test_the_owner_hears_about_the_cap_in_the_brief_before_it_binds(contai
     """In `issues`, not `suggestions`: an approaching cap is something about to constrain
     Thursday, not something being offered."""
     container.costs.daily_usd = 1.0
-    container.costs.record(provider="paid-cloud", tier="STANDARD", usd=0.85)
+    await container.costs.record(provider="paid-cloud", tier="STANDARD", usd=0.85)
 
     brief = await container.briefer.morning()
     assert any("$" in line for line in brief.issues)
@@ -220,7 +220,7 @@ async def test_a_cap_is_not_something_a_conversation_can_raise(client, container
     """§95's shape applied to money. Asking nicely is not an authorization path, and there
     is no endpoint that widens the ceiling."""
     container.costs.daily_usd = 0.01
-    container.costs.record(provider="paid-cloud", tier="STANDARD", usd=1.0)
+    await container.costs.record(provider="paid-cloud", tier="STANDARD", usd=1.0)
 
     await client.post(
         "/api/v1/conversations",
@@ -246,7 +246,7 @@ async def test_the_ledger_survives_the_day_boundary_and_the_month_does_not_reset
     container.costs.monthly_usd = 2.0
     now = datetime(2026, 9, 10, 12, tzinfo=UTC)
     for _ in range(8):
-        container.costs.record(provider="paid-cloud", tier="FAST", usd=0.25, now=now)
+        await container.costs.record(provider="paid-cloud", tier="FAST", usd=0.25, now=now)
 
     assert not container.costs.check(now=now)
     tomorrow = now + timedelta(days=1)

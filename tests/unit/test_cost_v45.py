@@ -102,12 +102,12 @@ async def test_the_local_fallback_after_a_provider_failure_is_still_counted():
     assert meter.charges()[-1].provider == "local"
 
 
-def test_spend_is_reported_by_day_provider_and_period():
+async def test_spend_is_reported_by_day_provider_and_period():
     meter = CostMeter()
     now = datetime(2026, 9, 2, 12, tzinfo=UTC)
-    meter.record(provider="cloud", tier="STANDARD", usd=1.0, now=now)
-    meter.record(provider="cloud", tier="FAST", usd=0.5, now=now - timedelta(days=1))
-    meter.record(provider="local", tier="LOCAL", usd=0.0, now=now)
+    await meter.record(provider="cloud", tier="STANDARD", usd=1.0, now=now)
+    await meter.record(provider="cloud", tier="FAST", usd=0.5, now=now - timedelta(days=1))
+    await meter.record(provider="local", tier="LOCAL", usd=0.0, now=now)
 
     assert meter.spent_today(now=now) == pytest.approx(1.0)
     assert meter.spent_this_month(now=now) == pytest.approx(1.5)
@@ -115,18 +115,18 @@ def test_spend_is_reported_by_day_provider_and_period():
     assert meter.by_day(now=now)[now.date()] == pytest.approx(1.0)
 
 
-def test_the_ledger_does_not_grow_without_bound():
+async def test_the_ledger_does_not_grow_without_bound():
     meter = CostMeter(retention=timedelta(days=7))
     now = datetime(2026, 9, 2, tzinfo=UTC)
-    meter.record(provider="cloud", tier="FAST", usd=1.0, now=now - timedelta(days=30))
-    meter.record(provider="cloud", tier="FAST", usd=2.0, now=now)
+    await meter.record(provider="cloud", tier="FAST", usd=1.0, now=now - timedelta(days=30))
+    await meter.record(provider="cloud", tier="FAST", usd=2.0, now=now)
     assert [c.usd for c in meter.charges()] == [2.0]
 
 
 # --------------------------------------------------------------------------- the ceiling
 
 
-def test_a_cap_binds_on_spend_no_single_task_would_have_noticed():
+async def test_a_cap_binds_on_spend_no_single_task_would_have_noticed():
     """Nobody sets out to spend a hundred dollars. They spend it forty cents at a time, and
     every individual charge looked reasonable — which is exactly what a per-task budget
     checks and passes."""
@@ -136,7 +136,7 @@ def test_a_cap_binds_on_spend_no_single_task_would_have_noticed():
     # count is what does the damage. Deliberately past the cap rather than exactly on it —
     # an assertion sitting on a float boundary tests the arithmetic, not the rule.
     for _ in range(30):
-        meter.record(provider="cloud", tier="FAST", usd=0.04, now=now)
+        await meter.record(provider="cloud", tier="FAST", usd=0.04, now=now)
     assert meter.spent_today(now=now) > 1.0
 
     verdict = meter.check(now=now)
@@ -200,11 +200,11 @@ async def test_a_cap_does_not_override_the_privacy_rule():
     assert decision.tier is ModelTier.LOCAL
 
 
-def test_a_new_day_starts_a_new_daily_budget_but_not_a_new_month():
+async def test_a_new_day_starts_a_new_daily_budget_but_not_a_new_month():
     meter = CostMeter(daily_usd=1.0, monthly_usd=1.25)
     day_one = datetime(2026, 9, 1, 12, tzinfo=UTC)
     for _ in range(16):
-        meter.record(provider="cloud", tier="FAST", usd=0.125, now=day_one)
+        await meter.record(provider="cloud", tier="FAST", usd=0.125, now=day_one)
     assert meter.spent_today(now=day_one) == pytest.approx(2.0)
     assert not meter.check(now=day_one)
 
@@ -215,9 +215,9 @@ def test_a_new_day_starts_a_new_daily_budget_but_not_a_new_month():
     assert verdict.period == "monthly"
 
 
-def test_no_cap_configured_means_no_cap_not_a_guess():
+async def test_no_cap_configured_means_no_cap_not_a_guess():
     meter = CostMeter()
-    meter.record(provider="cloud", tier="REASONING", usd=1000.0)
+    await meter.record(provider="cloud", tier="REASONING", usd=1000.0)
     assert meter.check()
 
 
@@ -237,22 +237,22 @@ def test_nothing_here_can_raise_a_cap():
 # --------------------------------------------------------------------------- warnings
 
 
-def test_the_owner_is_warned_before_the_cap_binds_not_after():
+async def test_the_owner_is_warned_before_the_cap_binds_not_after():
     """A warning that arrives with the refusal is not a warning."""
     meter = CostMeter(daily_usd=1.0)
     now = datetime(2026, 9, 2, 12, tzinfo=UTC)
-    meter.record(provider="cloud", tier="FAST", usd=WARN_AT, now=now)
+    await meter.record(provider="cloud", tier="FAST", usd=WARN_AT, now=now)
 
     said = meter.warnings(now=now)
     assert said and "0.80" in said[0]
     assert meter.check(now=now), "still under the cap when the warning is given"
 
 
-def test_a_warning_is_said_once_per_period_not_every_turn():
+async def test_a_warning_is_said_once_per_period_not_every_turn():
     """One repeated on every turn is one nobody reads, and the first is the one that matters."""
     meter = CostMeter(daily_usd=1.0)
     now = datetime(2026, 9, 2, 12, tzinfo=UTC)
-    meter.record(provider="cloud", tier="FAST", usd=0.9, now=now)
+    await meter.record(provider="cloud", tier="FAST", usd=0.9, now=now)
 
     assert meter.warnings(now=now)
     assert meter.warnings(now=now) == []
@@ -261,7 +261,7 @@ def test_a_warning_is_said_once_per_period_not_every_turn():
     # its own spend to warn about, because the daily total genuinely started again.
     tomorrow = now + timedelta(days=1)
     assert meter.warnings(now=tomorrow) == []
-    meter.record(provider="cloud", tier="FAST", usd=0.9, now=tomorrow)
+    await meter.record(provider="cloud", tier="FAST", usd=0.9, now=tomorrow)
     assert meter.warnings(now=tomorrow) != []
 
 
@@ -312,10 +312,12 @@ async def test_one_success_clears_the_failure_count():
 # --------------------------------------------------------------------------- reporting
 
 
-def test_the_summary_says_where_things_stand():
+async def test_the_summary_says_where_things_stand():
     meter = CostMeter(daily_usd=2.0, monthly_usd=10.0)
     now = datetime(2026, 9, 2, 12, tzinfo=UTC)
-    meter.record(provider="cloud", tier="STANDARD", tokens_in=10, tokens_out=5, usd=0.5, now=now)
+    await meter.record(
+        provider="cloud", tier="STANDARD", tokens_in=10, tokens_out=5, usd=0.5, now=now
+    )
 
     summary = meter.summary(now=now)
     assert summary["today_usd"] == pytest.approx(0.5)

@@ -194,11 +194,11 @@ def test_a_histogram_reports_buckets_a_sum_and_a_count():
     assert "thursday_task_seconds_sum" in rendered
 
 
-def test_gauges_are_read_at_scrape_time_not_mirrored(container):
+async def test_gauges_are_read_at_scrape_time_not_mirrored(container):
     """A mirrored gauge is a second source of truth that can disagree with the first, and the
     disagreement is invisible."""
     assert container.metrics.value("thursday_devices_online") == len(container.hub.online())
-    container.costs.record(provider="cloud", tier="FAST", usd=0.75)
+    await container.costs.record(provider="cloud", tier="FAST", usd=0.75)
     assert container.metrics.value("thursday_spend_today_usd") == pytest.approx(0.75)
 
 

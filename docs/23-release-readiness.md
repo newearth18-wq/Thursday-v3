@@ -63,10 +63,14 @@ stored hashes, the chain continues across the restart, and tampering with the st
 still detected. A write that cannot be stored is never silent — `verify_chain` cannot detect
 an entry that was never written, so the log marks itself degraded and health goes red.
 
-Still in-process: **tasks**, because restoring a `RUNNING` task from a table produces a task
-that looks alive with nothing driving it — worse than losing it, and it needs its resumption
-story designed rather than assumed. And the **spend ledger**, which is smaller and follows the
-same pattern. *To close:* a task-resumption sprint, and a repository for `CostMeter`.
+The **spend ledger** persists as well, so a period cap binds across a restart rather than
+handing back a fresh budget — the gap Sprint 45 named and Sprint 47 closed only for somebody
+who had taken a backup. Pruning past the retention window reaches the table, or the rows come
+back on the next start and the window never applies.
+
+Still in-process: **tasks**. Restoring a `RUNNING` task from a table produces a task that
+looks alive with nothing driving it — worse than losing it — so it needs its resumption story
+designed rather than assumed. *To close:* a task-resumption sprint.
 
 The audit table grows without bound. A retention policy is deliberately absent: deleting audit
 rows is what the append-only design forbids, and how long the owner keeps their own record is

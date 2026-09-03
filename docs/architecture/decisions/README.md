@@ -45,3 +45,4 @@ done this way?" and have no answer.
 | [0035](0035-the-release-gate-is-a-test-not-a-checklist.md) | The release gate is a test, not a checklist | Nine documented-but-untrue claims, none of which failed a test |
 | [0036](0036-the-table-is-the-truth-the-dict-is-an-index.md) | The table is the truth, the dict is an index | Two stores that can disagree are worse than one store and no persistence |
 | [0037](0037-a-missing-audit-entry-leaves-a-valid-chain.md) | A missing audit entry leaves a valid chain | The one failure the hash chain cannot detect, so it must never be silent |
+| [0038](0038-a-lost-charge-makes-the-cap-under-bind.md) | A lost charge makes the cap under-bind | A lost record is an accountability failure; a lost constraint spends money |

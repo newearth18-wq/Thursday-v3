@@ -200,7 +200,7 @@ class ModelRouter:
             response = await provider.complete(request)  # type: ignore[attr-defined]
             self._breaker[name] = 0
             self._tripped_at.pop(name, None)
-            self._meter(response, decision, task_id=task_id, agent=agent)
+            await self._meter(response, decision, task_id=task_id, agent=agent)
             return response, decision
         except Exception as exc:
             self._trip(name, exc)
@@ -216,7 +216,7 @@ class ModelRouter:
                 reasons=(*decision.reasons, f"{name} failed, degraded to local"),
                 fallback_from=name,
             )
-            self._meter(response, degraded, task_id=task_id, agent=agent)
+            await self._meter(response, degraded, task_id=task_id, agent=agent)
             return response, degraded
 
     # ------------------------------------------------------------------ money
@@ -288,7 +288,7 @@ class ModelRouter:
                 self.metrics.inc("thursday_prompt_redactions_total", pattern=pattern)
         return request.model_copy(update={"messages": messages})
 
-    def _meter(
+    async def _meter(
         self,
         response: LLMResponse,
         decision: RouteDecision,
@@ -304,7 +304,7 @@ class ModelRouter:
         """
         if self.meter is None:
             return
-        self.meter.record(
+        await self.meter.record(
             provider=decision.provider_name,
             tier=str(decision.tier),
             tokens_in=response.tokens_in,

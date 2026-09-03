@@ -531,3 +531,156 @@ async def test_health_says_whether_state_is_actually_durable(make_settings, tmp_
     )
     ephemeral = {c["component"]: c for c in await container.health()}
     assert "lives for this process" in ephemeral["database"]["detail"]
+
+
+# ===========================================================================  the spend ledger
+
+
+def make_spend_settings(make_settings, **over):
+    return make_settings(persist_memory=False, persist_audit=False, persist_costs=True, **over)
+
+
+async def test_the_cap_binds_across_a_restart(make_settings):
+    """Sprint 45 named this as its known gap and Sprint 47 closed it only for somebody who
+    had taken a backup: with the ledger in memory, restarting reset the daily total, so
+    restarting was a way around the cap."""
+    first = await boot(make_spend_settings(make_settings))
+    first.costs.daily_usd = 1.0
+    for _ in range(5):
+        await first.costs.record(provider="cloud", tier="FAST", usd=0.25)
+    assert not first.costs.check()
+
+    second = await boot(make_spend_settings(make_settings))
+    second.costs.daily_usd = 1.0
+    assert second.costs.spent_today() == pytest.approx(1.25)
+    assert not second.costs.check(), "a restart must not hand back a fresh budget"
+
+
+async def test_a_restored_charge_keeps_its_attribution(make_settings):
+    from thursday_shared.ids import new_id
+
+    task = new_id()
+    first = await boot(make_spend_settings(make_settings))
+    await first.costs.record(
+        provider="cloud",
+        tier="REASONING",
+        tokens_in=900,
+        tokens_out=100,
+        usd=0.4,
+        task_id=task,
+        agent="research",
+    )
+
+    second = await boot(make_spend_settings(make_settings))
+    charge = second.costs.charges()[-1]
+    assert charge.provider == "cloud"
+    assert charge.tier == "REASONING"
+    assert charge.tokens == 1000
+    assert charge.task_id == task
+    assert charge.agent == "research"
+    assert second.costs.spent(task_id=task) == pytest.approx(0.4)
+
+
+async def test_a_model_call_through_the_router_is_stored_not_just_counted(make_settings):
+    """The router is the metering choke point (ADR 0030). If the wiring stops at the
+    in-memory meter, everything looks right until the next restart."""
+    from thursday_shared.models import LLMMessage, LLMRequest
+
+    first = await boot(make_spend_settings(make_settings))
+    await first.models.complete(LLMRequest(messages=[LLMMessage(role="user", content="hello")]))
+    assert first.costs.charges()
+
+    second = await boot(make_spend_settings(make_settings))
+    assert len(second.costs.charges()) == len(first.costs.charges())
+
+
+async def test_pruning_reaches_the_table(make_settings):
+    """Both, or neither works. Pruning only memory leaves the rows to be reloaded on the next
+    restart, so the retention window never applies and the ledger grows for ever — the same
+    shape as a memory dropped from the index and left in storage (ADR 0019)."""
+    from datetime import timedelta
+
+    from thursday_shared.models import utcnow
+
+    first = await boot(make_spend_settings(make_settings))
+    first.costs.retention = timedelta(days=7)
+    await first.costs.record(
+        provider="cloud", tier="FAST", usd=1.0, now=utcnow() - timedelta(days=30)
+    )
+    await first.costs.record(provider="cloud", tier="FAST", usd=2.0)
+    assert [c.usd for c in first.costs.charges()] == [2.0], "the old charge should be pruned"
+
+    second = await boot(make_spend_settings(make_settings))
+    assert [c.usd for c in second.costs.charges()] == [2.0], "a pruned charge came back"
+
+
+async def test_a_dropped_spend_write_is_never_silent(make_settings):
+    """Unlike a lost audit entry, a lost charge means the cap *under-binds* after the next
+    restart: the owner spends more than they set out to. A ceiling nobody can trust is a
+    ceiling that is not doing its job, so which kind they have has to be visible."""
+    from unittest import mock
+
+    container = await boot(make_spend_settings(make_settings))
+    assert container.costs.degraded is False
+
+    with mock.patch.object(
+        container.costs.repository, "put", side_effect=OSError("the disk is gone")
+    ):
+        await container.costs.record(provider="cloud", tier="FAST", usd=0.5)
+
+    assert container.costs.degraded is True
+    assert container.costs.lost == 1
+    # And the cap still binds *this* session: the charge is in memory even though it is not
+    # in the table, so the failure costs durability rather than the ceiling.
+    assert container.costs.spent_today() == pytest.approx(0.5)
+
+
+async def test_a_model_call_is_not_failed_by_an_unstorable_charge(make_settings):
+    """The call already happened and already cost money. Raising would report an error for
+    something that succeeded, and invite a retry that spends again."""
+    from unittest import mock
+
+    from thursday_shared.models import LLMMessage, LLMRequest
+
+    container = await boot(make_spend_settings(make_settings))
+    with mock.patch.object(container.costs.repository, "put", side_effect=OSError("gone")):
+        response, _ = await container.models.complete(
+            LLMRequest(messages=[LLMMessage(role="user", content="hello")])
+        )
+
+    assert response.text
+    assert container.costs.degraded is True
+
+
+async def test_running_without_spend_persistence_is_unchanged(tmp_path):
+    container = build_container(
+        Settings(
+            data_dir=tmp_path / "var",
+            obsidian_vault=tmp_path / "vault",
+            llm_backend="rule",
+            vault_backend="memory",
+            log_level="ERROR",
+        ),
+        configure_logs=False,
+    )
+    await start(container)
+    assert container.costs.repository is None
+
+    await container.costs.record(provider="cloud", tier="FAST", usd=0.5)
+    assert container.costs.spent_today() == pytest.approx(0.5)
+    assert container.costs.degraded is False
+
+
+async def test_a_degraded_spend_ledger_shows_up_in_health(make_settings):
+    from unittest import mock
+
+    container = await boot(make_spend_settings(make_settings))
+    before = {c["component"]: c for c in await container.health()}
+    assert before["spend"]["ok"] is True
+
+    with mock.patch.object(container.costs.repository, "put", side_effect=OSError("gone")):
+        await container.costs.record(provider="cloud", tier="FAST", usd=0.5)
+
+    after = {c["component"]: c for c in await container.health()}
+    assert after["spend"]["ok"] is False
+    assert "could not be stored" in after["spend"]["detail"]

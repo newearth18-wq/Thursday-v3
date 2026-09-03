@@ -590,6 +590,30 @@ class WorldStateRow(Base, TimestampMixin):
     recent_actions: Mapped[dict[str, Any]] = mapped_column(JSONColumn, default=dict)
 
 
+class ModelSpend(Base, IdMixin):
+    """One model call's cost (§61, Sprint 45).
+
+    Its own table rather than a column on ``agent_runs``, and the grain is the reason: the
+    two calls every conversational turn makes — the reasoning pass that interprets the
+    utterance and the supervisor pass that verifies the result — are not agent runs. Recording
+    spend against agent runs is exactly the accounting that reported zero for a day of
+    conversation, which is what Sprint 45 was about.
+    """
+
+    __tablename__ = "model_spend"
+
+    at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    user_id: Mapped[uuid.UUID | None] = mapped_column(GUID(), nullable=True, index=True)
+    provider: Mapped[str] = mapped_column(String(64), default="", index=True)
+    tier: Mapped[str] = mapped_column(String(32), default="")
+    tokens_in: Mapped[int] = mapped_column(Integer, default=0)
+    tokens_out: Mapped[int] = mapped_column(Integer, default=0)
+    usd: Mapped[float] = mapped_column(Float, default=0.0)
+    #: Attribution, not accounting: the cap is a total, and this says where it went.
+    task_id: Mapped[uuid.UUID | None] = mapped_column(GUID(), nullable=True, index=True)
+    agent: Mapped[str] = mapped_column(String(64), default="")
+
+
 class AuditLogRow(Base, IdMixin):
     """Append-only and hash-chained (§39, T10).
 

@@ -1,6 +1,6 @@
 # ADR 0037 — A missing audit entry leaves a valid chain
 
-**Status:** accepted · **Date:** 2026-09-03 · **Follows:** [ADR 0036](0036-the-table-is-the-truth-the-dict-is-an-index.md)
+**Status:** accepted · **Date:** 2026-09-03 · **Follows:** [ADR 0036](0036-the-table-is-the-truth-the-dict-is-an-index.md) · **Extended by:** [ADR 0038](0038-a-lost-charge-makes-the-cap-under-bind.md)
 
 ## Context
 
