@@ -49,6 +49,9 @@ class StoredCredential:
     algorithm: str = "ed25519"
     paired_at: datetime | None = None
     revoked_at: datetime | None = None
+    #: When this device last replaced its own key (§117). None means never — the key it
+    #: paired with is the key it still has.
+    rotated_at: datetime | None = None
 
 
 class CredentialStore(Protocol):
@@ -109,6 +112,10 @@ class FileCredentialStore:
                         algorithm=row.get("algorithm", "ed25519"),
                         paired_at=_when(row.get("paired_at")),
                         revoked_at=_when(row.get("revoked_at")),
+                        # `.get`, so a file written before rotation existed still loads.
+                        # A registry that refused to read its own older format would lock
+                        # out every device on the upgrade that introduced the field.
+                        rotated_at=_when(row.get("rotated_at")),
                     )
                 )
             except (KeyError, TypeError, ValueError) as exc:
@@ -128,6 +135,7 @@ class FileCredentialStore:
                     "algorithm": c.algorithm,
                     "paired_at": c.paired_at.isoformat() if c.paired_at else None,
                     "revoked_at": c.revoked_at.isoformat() if c.revoked_at else None,
+                    "rotated_at": c.rotated_at.isoformat() if c.rotated_at else None,
                 }
                 for c in credentials
             ],

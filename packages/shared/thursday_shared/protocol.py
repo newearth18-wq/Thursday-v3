@@ -17,6 +17,22 @@ from thursday_shared.models import DeviceCapabilities, DeviceTelemetry, UndoReco
 
 PROTOCOL_VERSION = 1
 
+#: WebSocket close codes in the private range (4000–4999), so a node can tell *why* it was
+#: dropped without parsing a message it may never receive. The distinction that matters is
+#: between "come back" and "do not": a node that reconnects after being revoked is a node
+#: hammering a core that will refuse it for ever, and a node that gives up after a routine
+#: session expiry is a machine the owner has silently lost.
+CLOSE_PROTOCOL_ERROR = 4400
+#: HELLO failed authentication. Terminal for this identity: reconnecting changes nothing.
+CLOSE_UNAUTHENTICATED = 4401
+#: The session reached its maximum age (§79). Expected, routine, and the node should
+#: reconnect immediately with a fresh signed HELLO.
+CLOSE_SESSION_EXPIRED = 4408
+#: The core ended this session — a revocation, or §134's emergency stop. Not an invitation
+#: to reconnect; whether the node may return is decided by whether its credential still
+#: authenticates, which the core will answer at the next HELLO.
+CLOSE_SESSION_ENDED = 4409
+
 
 class Frame(BaseModel):
     model_config = ConfigDict(extra="forbid")

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect
@@ -14,6 +15,7 @@ from thursday_shared.enums import PolicyDecision, TrustLevel
 from thursday_shared.errors import ThursdayError
 from thursday_shared.models import ActionRequest, DeviceAction, DeviceCapabilities
 from thursday_shared.protocol import (
+    CLOSE_SESSION_EXPIRED,
     ActionResultFrame,
     ErrorFrame,
     Heartbeat,
@@ -24,6 +26,7 @@ from thursday_shared.protocol import (
 
 from thursday_api.deps import get_container
 from thursday_api.schemas import (
+    CredentialRotation,
     DeviceActionRequest,
     DeviceHeartbeat,
     DeviceRegistration,
@@ -48,7 +51,13 @@ async def list_devices(c: Container = Depends(get_container)) -> dict:
 async def list_credentials(
     include_revoked: bool = False, c: Container = Depends(get_container)
 ) -> dict:
-    """Which devices hold an identity, and which key. For the security dashboard (§133)."""
+    """Which devices hold an identity, which key, and how old it is (§117, §133).
+
+    `rotation_due` is a statement about hygiene, not about access. A device on this list
+    still works, and that is the design position of ADR 0042: a key that expired on its own
+    would lock the owner out of their own machines on a timer.
+    """
+    max_age = timedelta(days=c.settings.device_credential_max_age_days)
     return {
         "credentials": [
             {
@@ -59,6 +68,9 @@ async def list_credentials(
                 "algorithm": cred.algorithm,
                 "paired_at": cred.paired_at.isoformat(),
                 "revoked_at": cred.revoked_at.isoformat() if cred.revoked_at else None,
+                "rotated_at": cred.rotated_at.isoformat() if cred.rotated_at else None,
+                "key_age_days": cred.age().days,
+                "rotation_due": cred.due_for_rotation(max_age),
             }
             for cred in c.pairing.credentials(include_revoked=include_revoked)
         ]
@@ -129,6 +141,46 @@ async def complete_pairing(request: PairingComplete, c: Container = Depends(get_
         # separate decisions (ADR 0024); the owner raises trust deliberately.
         "trust_level": int(summary.trust_level),
         "paired_at": credential.paired_at.isoformat(),
+    }
+
+
+@router.post("/devices/{device_id}/rotate")
+async def rotate_credential(
+    device_id: UUID, request: CredentialRotation, c: Container = Depends(get_container)
+) -> dict:
+    """Let a paired node replace its own key without a person re-pairing it (§117).
+
+    Unauthenticated in the session sense, and that is not an oversight: the two signatures
+    in the body *are* the authentication, and they are stronger than a session would be.
+    The request is authorised by the private key the core already trusts for this device,
+    which is the same thing every HELLO from it proves.
+
+    The live session is dropped on success. It was authenticated with the key that has just
+    been retired, so leaving it up would let the old key keep driving the machine for as
+    long as the connection lasted — which would make rotation a change of record-keeping
+    rather than a change of access.
+    """
+    try:
+        credential = c.pairing.rotate(
+            device_id,
+            new_public_key=request.new_public_key,
+            signature_by_old=request.signature_by_old,
+            signature_by_new=request.signature_by_new,
+            nonce=request.nonce,
+            issued_at=request.issued_at,
+        )
+    except PairingError as exc:
+        # 403 rather than 404 for an unknown device: the caller is presenting signatures,
+        # and "no such device" versus "bad signature" is a distinction worth denying them.
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+
+    # `unregister`, not `forget`: this device is coming straight back with its new key, and
+    # forgetting it would drop the trust level the owner granted and list it as gone.
+    await c.hub.unregister(device_id)
+    return {
+        "device_id": str(device_id),
+        "fingerprint": credential.fingerprint,
+        "rotated_at": credential.rotated_at.isoformat() if credential.rotated_at else None,
     }
 
 
@@ -365,12 +417,60 @@ async def device_socket(websocket: WebSocket) -> None:
 
         session = WebSocketDeviceSession(websocket, frame)
         summary = await container.hub.register(session)
+
+        # §79. One HELLO used to authenticate a connection for as long as it happened to
+        # stay up — days, on a machine that never sleeps. That is the gap this closes, and
+        # the reason it matters is rotation: a session authenticated with a key that has
+        # since been replaced would outlive the key, and rotation that ends nothing is not
+        # rotation. The deadline is told to the node so it can reconnect a moment early
+        # rather than discovering it mid-action.
+        max_session = timedelta(hours=container.settings.device_session_max_hours)
+        deadline = datetime.now(UTC) + max_session
         await websocket.send_text(
-            Welcome(session_id=summary.id, policy={"heartbeat_s": 15.0}).model_dump_json()
+            Welcome(
+                session_id=summary.id,
+                policy={
+                    "heartbeat_s": 15.0,
+                    "session_expires_at": deadline.isoformat(),
+                    "session_max_s": max_session.total_seconds(),
+                },
+            ).model_dump_json()
         )
 
         while True:
-            raw = await websocket.receive_text()
+            remaining = (deadline - datetime.now(UTC)).total_seconds()
+            if remaining <= 0:
+                # Not an error, and said so: a node that treats a routine expiry as a
+                # failure is a machine the owner silently loses.
+                log.info(
+                    "device_session_expired",
+                    device=session.name,
+                    device_id=str(session.device_id),
+                    after_s=round(max_session.total_seconds()),
+                )
+                await websocket.send_text(
+                    ErrorFrame(
+                        code="session_expired",
+                        message="session reached its maximum age; reconnect with a new HELLO",
+                        fatal=False,
+                    ).model_dump_json()
+                )
+                await websocket.close(code=CLOSE_SESSION_EXPIRED)
+                return
+
+            # Bounded by whatever comes first: the next frame, or the deadline. Waiting on
+            # `receive_text` alone would hold a session open past its expiry for as long as
+            # the node stayed quiet, which is exactly the case the bound is for.
+            try:
+                raw = await asyncio.wait_for(websocket.receive_text(), timeout=remaining)
+            except TimeoutError:
+                # The deadline arrived while the node had nothing to say — the ordinary
+                # case, since a quiet node is a healthy one. Loop round rather than falling
+                # through to the handler's `except TimeoutError`, which would tear the
+                # socket down with the close code that means "do not come back". Telling a
+                # node it was cut off when its session merely aged is how a machine that
+                # should have reconnected in a second stays gone.
+                continue
             incoming = parse_frame(raw)
             if isinstance(incoming, ActionResultFrame):
                 session.deliver(incoming)

@@ -165,3 +165,18 @@ class PairingComplete(BaseModel):
 
     code: str
     device_type: str = "desktop"
+
+
+class CredentialRotation(BaseModel):
+    """A paired node replacing its own key (§117).
+
+    Signed twice over the same payload: once by the key being retired, which is the
+    authority for the request, and once by the key being introduced, which proves the node
+    can actually sign with what it is asking the core to trust.
+    """
+
+    new_public_key: str
+    signature_by_old: str
+    signature_by_new: str
+    nonce: str
+    issued_at: datetime

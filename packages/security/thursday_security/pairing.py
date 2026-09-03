@@ -28,7 +28,7 @@ from __future__ import annotations
 
 import secrets
 from collections import defaultdict
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
@@ -41,9 +41,20 @@ from thursday_security.credentials import (
     MemoryCredentialStore,
     StoredCredential,
 )
-from thursday_security.keys import PublicKey, pairing_payload
+from thursday_security.keys import PublicKey, pairing_payload, rotation_payload
 
 log = get_logger(__name__)
+
+#: How far a rotation request's own timestamp may sit from the core's clock, and how long
+#: its nonce is remembered afterwards (twice this). Tighter than HELLO's five minutes: a
+#: rotation is a deliberate act by a running node with a working clock, not a laptop waking
+#: from sleep with a drifted one, and a captured rotation is worth more than a captured
+#: HELLO — it names the key the core will trust next.
+_ROTATION_SKEW = timedelta(minutes=2)
+
+#: Memory ceiling for rotation nonces. Age is the real bound; this stops a node that
+#: rotates in a loop from growing the set without limit.
+_MAX_ROTATION_NONCES = 1024
 
 #: How long a pairing code is good for. Minutes, not hours: the owner is standing at the
 #: device reading it off a screen, so a short window costs nothing and a long one is a
@@ -113,6 +124,8 @@ class DeviceCredential:
     algorithm: str = "ed25519"
     paired_at: datetime = field(default_factory=lambda: datetime.now(UTC))
     revoked_at: datetime | None = None
+    #: When the device last replaced this key. None means it is still the pairing key.
+    rotated_at: datetime | None = None
 
     @property
     def active(self) -> bool:
@@ -121,6 +134,29 @@ class DeviceCredential:
     @property
     def fingerprint(self) -> str:
         return self.public_key.fingerprint
+
+    @property
+    def issued_at(self) -> datetime:
+        """When the key in use now started being the key in use.
+
+        Rotation resets the clock; pairing starts it. Age is a property of the *key*, not
+        of the relationship with the device, and a device that rotated yesterday has a
+        one-day-old key however long ago it first paired.
+        """
+        return self.rotated_at or self.paired_at
+
+    def age(self, *, now: datetime | None = None) -> timedelta:
+        return (now or datetime.now(UTC)) - self.issued_at
+
+    def due_for_rotation(self, max_age: timedelta, *, now: datetime | None = None) -> bool:
+        """Whether this key has been in use longer than the deployment intends.
+
+        Reported, never enforced — see ADR 0042. A device key that expired on its own would
+        turn "the owner was away for a while" into "every machine is locked out and must be
+        re-paired by hand", which is the outage `credentials.py` exists to prevent, arriving
+        on a timer instead of a restart.
+        """
+        return self.active and self.age(now=now) >= max_age
 
 
 class PairingService:
@@ -140,6 +176,8 @@ class PairingService:
         #: should make them start again, not resume a conversation with a person who has
         #: walked away.
         self._pending: dict[str, PendingPairing] = {}
+        #: Rotation nonces seen inside the freshness window, so one cannot be replayed.
+        self._rotation_nonces: dict[str, datetime] = {}
         self._store: CredentialStore = store or MemoryCredentialStore()
         self._credentials: dict[UUID, DeviceCredential] = {
             row.device_id: _restore(row) for row in self._store.load()
@@ -263,6 +301,122 @@ class PairingService:
         )
         return credential
 
+    # ------------------------------------------------------------------ rotation (§117)
+
+    def rotate(
+        self,
+        device_id: UUID,
+        *,
+        new_public_key: str,
+        signature_by_old: str,
+        signature_by_new: str,
+        nonce: str,
+        issued_at: datetime,
+        now: datetime | None = None,
+    ) -> DeviceCredential:
+        """Replace a device's key with one it has just generated, without re-pairing.
+
+        Pairing needs a person: they read a code off a screen and type it into a client they
+        already trust. That is the right cost for enrolling a machine and the wrong cost for
+        routine hygiene — if rotating means walking to every machine, nobody rotates, and
+        §117 becomes a paragraph rather than a practice. So rotation is authorised by the
+        key being replaced, not by a human.
+
+        **Two signatures, and both are load-bearing.**
+
+        `signature_by_old` proves the caller is the incumbent. It is the entire authority
+        for this operation: whoever holds the current private key already *is* the device
+        as far as the core can tell, so letting them name a successor grants nothing they
+        did not already have.
+
+        `signature_by_new` proves the caller holds the private half of the key it is asking
+        the core to trust from now on. Nothing about security requires it — an attacker with
+        the old key could sign both. It is here because without it, one malformed request
+        replaces a working credential with a key nobody can sign for, and the machine is
+        locked out until somebody walks over to it. Rotation that can brick a device by
+        accident does not get used either.
+
+        What this deliberately does **not** accept:
+
+        · a device the registry does not know — rotation is not a second way to enrol;
+        · a **revoked** device, however good its signatures. Revocation is sticky (§80), and
+          a revoked key that could name its own replacement would be a way back in;
+        · a stale or replayed request — same skew window and nonce memory as HELLO, because
+          a captured rotation is worth strictly more to an attacker than a captured HELLO.
+        """
+        now = now or datetime.now(UTC)
+        credential = self._credentials.get(device_id)
+
+        if credential is None:
+            raise PairingError("that device is not paired")
+        if not credential.active:
+            log.warning("rotation_refused_revoked", device_id=str(device_id))
+            raise PairingError("that device is not paired")
+
+        if abs((now - issued_at).total_seconds()) > _ROTATION_SKEW.total_seconds():
+            raise PairingError("that rotation request is not fresh")
+        if nonce in self._rotation_nonces:
+            log.warning("rotation_replay_refused", device_id=str(device_id))
+            raise PairingError("that rotation request has already been used")
+
+        try:
+            incoming = PublicKey(encoded=new_public_key)
+        except ValueError as exc:
+            raise PairingError("that is not a usable public key") from exc
+
+        payload = rotation_payload(
+            device_id=str(device_id),
+            old_fingerprint=credential.fingerprint,
+            new_public_key=new_public_key,
+            nonce=nonce,
+            issued_at=issued_at,
+        )
+        if not credential.public_key.verify(payload, signature_by_old):
+            log.warning("rotation_refused_signature", device_id=str(device_id), by="current key")
+            raise PairingError("that rotation request is not signed by the current key")
+        if not incoming.verify(payload, signature_by_new):
+            log.warning("rotation_refused_signature", device_id=str(device_id), by="new key")
+            raise PairingError("that rotation request is not signed by the new key")
+
+        self._remember_rotation_nonce(nonce, now)
+        rotated = replace(credential, public_key=incoming, rotated_at=now)
+        self._credentials[device_id] = rotated
+        self._persist()
+
+        # `paired_at` is intentionally left alone. It answers "when did the owner decide to
+        # trust this machine", which rotation does not change and which nothing else records.
+        log.info(
+            "device_key_rotated",
+            device=rotated.name,
+            device_id=str(device_id),
+            was=credential.fingerprint,
+            now=rotated.fingerprint,
+        )
+        return rotated
+
+    def due_for_rotation(
+        self, max_age: timedelta, *, now: datetime | None = None
+    ) -> list[DeviceCredential]:
+        """Active credentials whose key has been in use longer than `max_age`.
+
+        For the security dashboard (§133) and the morning brief. Being on this list changes
+        nothing about whether the device works.
+        """
+        return [c for c in self._credentials.values() if c.due_for_rotation(max_age, now=now)]
+
+    def _remember_rotation_nonce(self, nonce: str, now: datetime) -> None:
+        """Bounded, and pruned by age rather than only by count.
+
+        A count-only bound is a subtle replay hole: an attacker who can make the core rotate
+        (or merely attempt) enough times pushes a captured nonce out of memory and can then
+        replay it. Age is what actually matters, and the count is a memory ceiling on top.
+        """
+        cutoff = now - _ROTATION_SKEW * 2
+        self._rotation_nonces = {n: t for n, t in self._rotation_nonces.items() if t > cutoff}
+        self._rotation_nonces[nonce] = now
+        while len(self._rotation_nonces) > _MAX_ROTATION_NONCES:
+            self._rotation_nonces.pop(next(iter(self._rotation_nonces)))
+
     # ------------------------------------------------------------------ the registry
 
     def credential(self, device_id: UUID) -> DeviceCredential | None:
@@ -294,16 +448,11 @@ class PairingService:
         credential = self._credentials.get(device_id)
         if credential is None:
             return None
-        revoked = DeviceCredential(
-            device_id=credential.device_id,
-            public_key=credential.public_key,
-            name=credential.name,
-            os=credential.os,
-            hostname=credential.hostname,
-            algorithm=credential.algorithm,
-            paired_at=credential.paired_at,
-            revoked_at=now or datetime.now(UTC),
-        )
+        # `replace`, not a field-by-field rebuild. The rebuild listed every field it meant
+        # to keep, so adding `rotated_at` to the dataclass would have silently reset it on
+        # revocation — a copy that enumerates fields is a copy that goes stale the next time
+        # somebody adds one, and does it quietly.
+        revoked = replace(credential, revoked_at=now or datetime.now(UTC))
         self._credentials[device_id] = revoked
         self._persist()
         # Any pairing this device has in flight dies with it, or revocation is a race.
@@ -358,6 +507,7 @@ class PairingService:
                     algorithm=c.algorithm,
                     paired_at=c.paired_at,
                     revoked_at=c.revoked_at,
+                    rotated_at=c.rotated_at,
                 )
                 for c in self._credentials.values()
             ]
@@ -417,4 +567,5 @@ def _restore(row: StoredCredential) -> DeviceCredential:
         algorithm=row.algorithm,
         paired_at=row.paired_at or datetime.now(UTC),
         revoked_at=row.revoked_at,
+        rotated_at=row.rotated_at,
     )

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import time
+from contextlib import suppress
 from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
@@ -29,6 +30,7 @@ from thursday_shared.models import (
     Event,
 )
 from thursday_shared.protocol import (
+    CLOSE_SESSION_ENDED,
     ActionFrame,
     ActionResultFrame,
     Hello,
@@ -166,11 +168,28 @@ class WebSocketDeviceSession:
         return self.telemetry
 
     async def close(self) -> None:
+        """End the session *and* the connection under it.
+
+        Closing the transport is the part that was missing, and it mattered more than it
+        looks. `unregister` drops the session from the hub, which stops the core from
+        dispatching to the device — but the node's socket stayed open and the handler's
+        read loop kept running, so a device the owner had just **revoked** was still
+        attached, still sending, and still being read. §134's emergency stop uses this same
+        call to "disconnect Nodes"; without this line it disconnected nothing a node could
+        notice, and a kill switch whose effect is invisible to the thing being killed is
+        not a kill switch.
+
+        Failures are suppressed rather than raised: this runs on the disconnect path too,
+        where the socket is already gone and closing it again is the normal case, not an
+        error worth propagating into revocation or into the emergency stop.
+        """
         self._closed = True
         for future in self._pending.values():
             if not future.done():
                 future.set_exception(DeviceUnavailable("device disconnected", device=self.name))
         self._pending.clear()
+        with suppress(Exception):
+            await self._ws.close(code=CLOSE_SESSION_ENDED)
 
 
 class DeviceHub:

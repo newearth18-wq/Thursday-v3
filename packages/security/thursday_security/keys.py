@@ -171,3 +171,38 @@ def hello_payload(*, device_id: str, name: str, os: str, nonce: str, issued_at: 
     signature could be presented as a connection signature.
     """
     return "|".join(["thursday.hello.v1", device_id, name, os, nonce, issued_at.isoformat()])
+
+
+def rotation_payload(
+    *,
+    device_id: str,
+    old_fingerprint: str,
+    new_public_key: str,
+    nonce: str,
+    issued_at: datetime,
+) -> str:
+    """What a node signs — twice — to replace its own key (§82, §117).
+
+    Domain-prefixed like the other two, for the same reason: a rotation request must not be
+    constructible from a signature made for a connection.
+
+    Two fields here are doing security work that is easy to leave out.
+
+    ``old_fingerprint`` binds the request to the exact credential it replaces. Without it, a
+    rotation captured today stays valid against whatever key the device holds next year, so
+    an attacker who recorded one request could undo every later rotation with it.
+
+    ``new_public_key`` binds it to the incoming key. Without it, an attacker who intercepted
+    a rotation could swap in a key of their own and keep the victim's signature — which is
+    the whole attack this exists to prevent.
+    """
+    return "|".join(
+        [
+            "thursday.rotate.v1",
+            device_id,
+            old_fingerprint,
+            new_public_key,
+            nonce,
+            issued_at.isoformat(),
+        ]
+    )

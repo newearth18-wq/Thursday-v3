@@ -19,7 +19,7 @@ from pathlib import Path
 from typing import Any
 from uuid import UUID
 
-from pydantic import computed_field
+from pydantic import Field, computed_field
 from pydantic_settings import BaseSettings, PydanticBaseSettingsSource, SettingsConfigDict
 from thursday_shared.enums import AutonomyLevel, ProactivityLevel
 
@@ -81,6 +81,8 @@ _YAML_MAP: dict[str, dict[str, str]] = {
         "stale_after_s": "device_stale_after_s",
         "require_signature": "require_device_signature",
         "action_timeout_s": "device_action_timeout_s",
+        "session_max_hours": "device_session_max_hours",
+        "credential_max_age_days": "device_credential_max_age_days",
     },
     "permissions": {"approval_ttl_seconds": "approval_ttl_seconds"},
     "execution": {
@@ -223,6 +225,16 @@ class Settings(BaseSettings):
     device_stale_after_s: float = 90.0
     device_action_timeout_s: float = 30.0
     require_device_signature: bool = True
+    #: How long one authenticated node session may last before the node must prove its
+    #: identity again (§79). There is deliberately no "unbounded" value: a session that
+    #: never expires is one whose authentication can outlive the key that produced it,
+    #: which is precisely what rotation is supposed to end. Raise it if reconnects are
+    #: expensive on your link; you cannot switch it off.
+    device_session_max_hours: float = Field(default=12.0, ge=0.25)
+    #: How long a device credential is expected to go between rotations (§117). Reported,
+    #: never enforced — see ADR 0042 for why an expiring device key is an outage rather
+    #: than a control.
+    device_credential_max_age_days: int = Field(default=180, ge=1)
 
     # execution -----------------------------------------------------------------
     max_plan_steps: int = 12

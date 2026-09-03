@@ -111,12 +111,6 @@ class DeviceAuthenticator:
         if not self.required:
             return AuthOutcome(True, "signature checking is disabled for this environment")
 
-        if not self.configured:
-            # Fail closed. A deployment that requires signatures but configured no token is
-            # misconfigured, and guessing that it meant "allow everything" is how an
-            # unauthenticated device ends up trusted in production.
-            return AuthOutcome(False, "no device token is configured on the core")
-
         if not signature:
             return AuthOutcome(False, "the HELLO frame carried no signature")
 
@@ -137,6 +131,18 @@ class DeviceAuthenticator:
         if keyed is not None:
             if not keyed.ok:
                 return keyed
+        elif not self.configured:
+            # Nothing to check this signature against: the device has no registered key and
+            # the core has no enrolment token. Fail closed — guessing that a deployment
+            # which configured neither meant "allow everything" is how an unauthenticated
+            # device ends up trusted in production.
+            #
+            # This check used to run *first*, before the key path, which quietly made the
+            # recommended end state impossible: once every device has paired, the enrolment
+            # token has no job left, and a core that dropped it refused every properly
+            # paired machine. Pairing is what removes the need for the token (§80), so the
+            # token's absence cannot be what refuses a paired device.
+            return AuthOutcome(False, "no device token is configured on the core")
         elif not self._verify_with_token(
             device_id=device_id,
             name=name,

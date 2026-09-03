@@ -23,6 +23,7 @@ import json
 import os
 import platform
 import secrets
+import time
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
@@ -34,10 +35,16 @@ from thursday_core.logging import configure_logging, get_logger
 from thursday_devices.node.adapters import for_current_platform
 from thursday_devices.node.executor import NodeExecutor
 from thursday_security.device_auth import sign, signing_payload
-from thursday_security.keys import PrivateKey, hello_payload, pairing_payload
+from thursday_security.keys import (
+    PrivateKey,
+    hello_payload,
+    pairing_payload,
+    rotation_payload,
+)
 from thursday_security.pinning import Pin, PinUnavailable, check_peer, peer_pin, pinned_context
 from thursday_shared.models import DeviceAction
 from thursday_shared.protocol import (
+    CLOSE_SESSION_EXPIRED,
     ActionFrame,
     ActionResultFrame,
     Heartbeat,
@@ -58,6 +65,11 @@ TOKEN_ENV = "THURSDAY_SECRET_DEVICE_ENROLLMENT_SECRET"  # noqa: S105
 #: What the node's key is called inside the keychain, so the owner can find and remove it.
 KEY_ACCOUNT = "node-identity"
 
+#: Where a key that has been generated for a rotation lives until the core accepts it.
+#: Separate from the live key on purpose: until the core says yes, the live key is still
+#: the one that works, and overwriting it early is how a rotation locks a machine out.
+PENDING_KEY_ACCOUNT = "node-identity-pending"
+
 
 class KeyMigrationError(Exception):
     """A key that could not be moved into the keychain. The file is left untouched."""
@@ -65,6 +77,10 @@ class KeyMigrationError(Exception):
 
 RECONNECT_BASE_S = 2.0
 RECONNECT_MAX_S = 60.0
+
+#: How long a session must have lasted for its expiry to count as routine rather than as a
+#: core that is refusing this node in an expensive way.
+MIN_HEALTHY_SESSION_S = 30.0
 
 
 class NodeIdentity:
@@ -193,6 +209,99 @@ class NodeIdentity:
         )
         return key
 
+    # ------------------------------------------------------------------ rotation (§117)
+
+    @property
+    def pending_key_path(self) -> Path:
+        return self.path.with_suffix(".pending.key")
+
+    def pending_key(self) -> PrivateKey | None:
+        """The key staged for a rotation that has not been confirmed, if there is one."""
+        from thursday_security.keychain import KeychainError
+
+        if self._keychain.available:
+            with contextlib.suppress(KeychainError):
+                stored = self._keychain.get(PENDING_KEY_ACCOUNT)
+                if stored is not None:
+                    return PrivateKey.from_pem(stored)
+        if self.pending_key_path.exists():
+            return PrivateKey.from_pem(self.pending_key_path.read_text())
+        return None
+
+    def stage_pending(self) -> PrivateKey:
+        """Generate the successor key and write it down *before* asking the core to take it.
+
+        Persisted first, deliberately. If the core accepts a rotation and the node dies
+        before it hears back, the machine's identity is now a key it never saved — and a
+        node whose key the core does not recognise has to be re-paired by a person standing
+        at it. Writing first turns that from a lost identity into a resumable one: the key
+        is on disk, and `--rotate-key` can ask the core whether it already took it.
+
+        An existing staged key is reused rather than replaced, for the same reason.
+        """
+        existing = self.pending_key()
+        if existing is not None:
+            return existing
+
+        key = PrivateKey.generate()
+        from thursday_security.keychain import KeychainError
+
+        if self._keychain.available:
+            try:
+                self._keychain.put(PENDING_KEY_ACCOUNT, key.to_pem())
+                return key
+            except KeychainError as exc:
+                raise SystemExit(
+                    f"this machine has a keychain and Thursday could not use it: {exc}"
+                ) from exc
+
+        self.pending_key_path.parent.mkdir(parents=True, exist_ok=True)
+        self.pending_key_path.touch(mode=0o600, exist_ok=True)
+        self.pending_key_path.chmod(0o600)
+        self.pending_key_path.write_text(key.to_pem())
+        return key
+
+    def promote_pending(self) -> PrivateKey:
+        """Make the staged key this node's identity, once the core has accepted it."""
+        key = self.pending_key()
+        if key is None:
+            raise KeyMigrationError("there is no staged key to promote")
+
+        from thursday_security.keychain import KeychainError
+
+        if self._keychain.available:
+            self._keychain.put(KEY_ACCOUNT, key.to_pem())
+            if self._keychain.get(KEY_ACCOUNT) != key.to_pem():
+                # Same rule as the migration in `_adopt_or_generate`: read it back before
+                # discarding what it replaces.
+                raise KeyMigrationError(
+                    "the keychain accepted the rotated key and did not hand it back; "
+                    "the staged key has been left in place"
+                )
+            with contextlib.suppress(KeychainError):
+                self._keychain.delete(PENDING_KEY_ACCOUNT)
+        else:
+            self.key_path.touch(mode=0o600, exist_ok=True)
+            self.key_path.chmod(0o600)
+            self.key_path.write_text(key.to_pem())
+            self.pending_key_path.unlink(missing_ok=True)
+
+        self._key = key
+        if pairing := self.data.get("pairing"):
+            pairing["fingerprint"] = key.public.fingerprint
+            pairing["rotated_at"] = datetime.now(UTC).isoformat()
+            self._write(self.data)
+        log.info("node_key_rotated", fingerprint=key.public.fingerprint)
+        return key
+
+    def discard_pending(self) -> None:
+        from thursday_security.keychain import KeychainError
+
+        if self._keychain.available:
+            with contextlib.suppress(KeychainError):
+                self._keychain.delete(PENDING_KEY_ACCOUNT)
+        self.pending_key_path.unlink(missing_ok=True)
+
     @property
     def storage(self) -> str:
         """Where this node's key actually lives. Reported, never inferred."""
@@ -309,6 +418,103 @@ def pairing_request(identity: NodeIdentity, *, name: str, os_name: str, hostname
     }
 
 
+def rotation_request(identity: NodeIdentity, successor: PrivateKey) -> dict:
+    """The body of a `POST /devices/{id}/rotate`, signed by both keys.
+
+    The retiring key is the authority — it is what the core already trusts for this device.
+    The incoming key signs the same bytes to prove the node can actually use what it is
+    asking the core to adopt; without that second signature a typo in this function would
+    hand the core a key nobody holds, and the machine would need re-pairing by hand.
+    """
+    nonce = secrets.token_hex(16)
+    issued_at = datetime.now(UTC)
+    new_public_key = successor.public.encoded
+    payload = rotation_payload(
+        device_id=str(identity.device_id),
+        old_fingerprint=identity.key.public.fingerprint,
+        new_public_key=new_public_key,
+        nonce=nonce,
+        issued_at=issued_at,
+    )
+    return {
+        "new_public_key": new_public_key,
+        "signature_by_old": identity.key.sign(payload),
+        "signature_by_new": successor.sign(payload),
+        "nonce": nonce,
+        "issued_at": issued_at.isoformat(),
+    }
+
+
+def rotate_key(identity: NodeIdentity, *, core_url: str) -> int:
+    """Replace this node's key with a fresh one (§117), without a person re-pairing it.
+
+    The interesting case is not the happy path; it is the reply that never arrives. The core
+    may have accepted the rotation and the node may never learn it, which would leave the
+    machine signing with a key the core has already retired — locked out, and needing
+    somebody to walk to it.
+
+    So the successor is written down first, and when the request fails the node *asks the
+    core what it holds* rather than assuming. If the core's fingerprint for this device is
+    already the staged key, the earlier attempt landed and this promotes it. That turns the
+    one failure mode that costs a physical visit into an ordinary retry.
+    """
+    import httpx
+
+    if not identity.paired:
+        print("this node is not paired, so there is no key to rotate; run --pair first")
+        return 1
+
+    base = api_base(core_url)
+    successor = identity.stage_pending()
+    url = f"{base}/devices/{identity.device_id}/rotate"
+    try:
+        response = httpx.post(url, json=rotation_request(identity, successor), timeout=15.0)
+    except httpx.HTTPError as exc:
+        print(f"could not reach the core at {base}: {exc}")
+        return _resolve_staged(identity, successor, base=base)
+
+    if response.status_code == 200:
+        identity.promote_pending()
+        print(f"rotated. this node's key is now {identity.key.public.fingerprint}")
+        return 0
+
+    detail = response.text.strip()
+    print(f"the core refused the rotation ({response.status_code}): {detail}")
+    return _resolve_staged(identity, successor, base=base)
+
+
+def _resolve_staged(identity: NodeIdentity, successor: PrivateKey, *, base: str) -> int:
+    """Ask the core whether it already accepted the staged key.
+
+    Read-only, and it decides nothing on its own: it compares the fingerprint the core
+    reports for this device with the one the node staged. Equal means an earlier attempt
+    succeeded and only the answer was lost.
+    """
+    import httpx
+
+    try:
+        response = httpx.get(f"{base}/devices/credentials", timeout=15.0)
+        rows = response.json().get("credentials", []) if response.status_code == 200 else []
+    except (httpx.HTTPError, ValueError) as exc:
+        print(f"could not ask the core which key it holds: {exc}")
+        rows = []
+
+    mine = next((r for r in rows if r.get("device_id") == str(identity.device_id)), None)
+    if mine and mine.get("fingerprint") == successor.public.fingerprint:
+        identity.promote_pending()
+        print(
+            "the core had already accepted this key — the reply was lost, not the rotation.\n"
+            f"this node's key is now {identity.key.public.fingerprint}"
+        )
+        return 0
+
+    print(
+        "the staged key has been kept. run --rotate-key again to retry;"
+        " this node is still using its current key and still works."
+    )
+    return 1
+
+
 def pair(identity: NodeIdentity, *, core_url: str, name: str, os_name: str) -> int:
     """Ask the core to pair this node, and print the code for the owner to confirm.
 
@@ -392,17 +598,38 @@ class NodeClient:
     async def run_forever(self) -> None:
         delay = RECONNECT_BASE_S
         while True:
+            started = time.monotonic()
             try:
                 await self._session()
                 delay = RECONNECT_BASE_S
+            except websockets.ConnectionClosed as exc:
+                self.connected = False
+                lasted = time.monotonic() - started
+                # A session that reached its maximum age (§79) is not a failure. Backing off
+                # from it — and logging it as a disconnection — would make the ordinary
+                # consequence of a security control look like a fault, and would leave the
+                # machine unreachable for the length of the backoff every time.
+                if _close_code(exc) == CLOSE_SESSION_EXPIRED and lasted >= MIN_HEALTHY_SESSION_S:
+                    log.info("node_session_expired", lasted_s=round(lasted), action="reconnecting")
+                    self.last_error = None
+                    delay = RECONNECT_BASE_S
+                    continue
+                # The `lasted` guard is why this is not simply "expired means reconnect": a
+                # core that expires sessions the instant they open would otherwise have every
+                # node reconnecting in a tight loop, which is a denial of service the nodes
+                # perform on their owner's behalf.
+                delay = await self._back_off(exc, delay)
             except (OSError, websockets.WebSocketException) as exc:
                 self.connected = False
-                self.last_error = f"{type(exc).__name__}: {exc}"
-                log.warning("node_disconnected", error=str(exc), retry_in=round(delay, 1))
-                await asyncio.sleep(delay)
-                delay = min(delay * 2, RECONNECT_MAX_S)
+                delay = await self._back_off(exc, delay)
             except asyncio.CancelledError:
                 raise
+
+    async def _back_off(self, exc: Exception, delay: float) -> float:
+        self.last_error = f"{type(exc).__name__}: {exc}"
+        log.warning("node_disconnected", error=str(exc), retry_in=round(delay, 1))
+        await asyncio.sleep(delay)
+        return min(delay * 2, RECONNECT_MAX_S)
 
     def sign_hello(self, hello: Hello) -> str:
         """Sign the HELLO with whichever identity this node actually has.
@@ -550,6 +777,11 @@ def main() -> None:
         help="register this node's key with the core and print a code to confirm, then exit",
     )
     parser.add_argument(
+        "--rotate-key",
+        action="store_true",
+        help="replace this node's key with a fresh one and exit (no re-pairing needed)",
+    )
+    parser.add_argument(
         "--forget-pairing",
         action="store_true",
         help="drop this node's pairing record (after the owner revoked it) and exit",
@@ -580,6 +812,13 @@ def main() -> None:
         identity.forget_pairing()
         print("pairing record dropped; this node will use the enrolment token again")
         raise SystemExit(0)
+
+    if args.rotate_key:
+        # After `--forget-pairing`, not before. If somebody passes both, the one that means
+        # "this identity is finished" has to win — rotating a pairing record that is about
+        # to be dropped would ask the core to adopt a key for a device this node is in the
+        # middle of forgetting.
+        raise SystemExit(rotate_key(identity, core_url=args.core))
 
     roots = [Path(p) for p in (args.allow_root or [str(Path.home())])]
     executor = NodeExecutor(for_current_platform(), allowed_roots=roots)
@@ -661,3 +900,15 @@ def _ssl_object(ws: Any) -> Any:
     """
     transport = getattr(ws, "transport", None)
     return transport.get_extra_info("ssl_object") if transport is not None else None
+
+
+def _close_code(exc: websockets.ConnectionClosed) -> int | None:
+    """The code the *core* sent, or None if it never sent one.
+
+    Only `rcvd` is consulted. `sent` is this node's own close frame, and reading it would
+    make the node's reason for hanging up look like the core's — so a node that closed a
+    connection itself could conclude the core had expired its session and reconnect at once
+    in a loop.
+    """
+    received = getattr(exc, "rcvd", None)
+    return getattr(received, "code", None) if received is not None else None

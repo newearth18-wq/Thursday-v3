@@ -6,8 +6,8 @@ a multi-user or internet-exposed installation.**
 That sentence is the whole document in one line. What follows is the evidence for it, and —
 more usefully — the evidence against.
 
-Written at Sprint 50, against 986 tests that need no database, no network and no model
-credentials. `./scripts/check.sh` runs lint, format, types, the suite and the migrations.
+Written at Sprint 50 and kept current since, against 1,097 tests that need no database, no
+network and no model credentials. `./scripts/check.sh` runs lint, format, types, the suite and the migrations.
 
 ---
 
@@ -29,6 +29,7 @@ container, not a unit test of the class in isolation.
 | Spend metered at the router, capped, and degrading to local | `tests/e2e/test_v45_cost_acceptance.py` |
 | Backup and restore, with a real round trip through a real file | `tests/integration/test_backup_v47.py` |
 | Update verification with no parameter for a URL | `tests/integration/test_updates_v48.py` |
+| Device key rotation, and a session that expires rather than a key that does | `tests/integration/test_rotation_v52.py` |
 | Metrics whose labels cannot carry a path or a secret | `tests/integration/test_metrics_v49.py` |
 
 ## 23.2 What is not ready, and what that would take
@@ -50,13 +51,33 @@ of the three, so selection, availability detection and migration ordering are te
 platform calls themselves are not. *To close:* one run on each of macOS, Windows and a Linux
 desktop.
 
-**Session tokens are not yet short-lived and rotated.** Certificate pinning is done
-(ADR 0041) and closed a gap the pinning work itself surfaced: Sprint 36's authentication ran
-in one direction, so a node proved who it was and the core proved nothing — an attacker with a
-certificate for the core's hostname could accept a node's HELLO and then drive the machine it
-runs on. The node now pins the core's SubjectPublicKeyInfo, learned at pairing where a person
-is present, and checks it before sending anything. Verified against a real TLS handshake
-rather than a mock. *To close:* token rotation.
+**Device sessions are bounded and device keys rotate; three other rotations do not.**
+Certificate pinning (ADR 0041) closed the gap the pinning work itself surfaced: Sprint 36's
+authentication ran in one direction, so a node proved who it was and the core proved nothing.
+The node now pins the core's SubjectPublicKeyInfo, learned at pairing where a person is
+present, and checks it before sending anything.
+
+Rotation and session lifetime followed (ADR 0042), and sizing that gap found three defects
+rather than one missing feature. `NodeSession.close()` dropped the session and left the
+**socket open**, so revoking a connected device did not disconnect it — and §134's emergency
+stop, which calls the same method to "disconnect Nodes", disconnected nothing a node could
+notice. A HELLO authenticated a connection for as long as it stayed up. And
+`DeviceAuthenticator` refused outright when no shared enrolment token was configured, before
+it ever looked at the device's registered key, so the end state §80 aims at — every machine
+paired, the enrolment token dropped because it has no job left — refused every properly
+paired device.
+
+A node now replaces its own key with `--rotate-key`, signed by both the retiring and the
+incoming key, with no person at the machine; the old key stops working immediately; a revoked
+device cannot rotate its way back in; and the successor is written to disk *before* the core
+is asked to take it, so a lost reply is a retry rather than a physical visit. Sessions expire
+at twelve hours, with no setting that removes the bound.
+
+Key age is **reported and never enforced**, and that is a decision rather than an omission: a
+device key that expired on its own would lock the owner out of their own machines on a timer.
+
+*Still open:* the other three rotations §117 lists — the shared enrolment token, the core's
+TLS key, and provider API keys.
 
 **The updater cannot install.** It checks, verifies and refuses correctly, and no installer is
 wired (ADR 0033). This is deliberate — a half-built installer is worse than none — but it
