@@ -53,3 +53,4 @@ done this way?" and have no answer.
 | [0043](0043-a-limit-the-caller-cannot-choose.md) | A limit the caller cannot choose, and a kill switch it cannot reach | Rate limiting keyed on the peer, never on a header the caller writes |
 | [0044](0044-discovery-that-does-not-scan.md) | Discovery that does not scan | Finding local AI by sweeping the LAN is the reconnaissance §29 forbids |
 | [0045](0045-a-report-is-an-observation-a-correction-is-a-decision.md) | A node's report is an observation; the owner's correction is a decision | A correction the next reconnect overwrites is worse than none |
+| [0046](0046-a-privacy-rule-expressed-as-a-score-is-a-preference.md) | A privacy rule expressed as a score is a preference | Exclusions filter, preferences rank, and no score resurrects an excluded candidate |

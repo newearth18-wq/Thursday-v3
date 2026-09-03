@@ -70,6 +70,7 @@ from thursday_core.backup import BackupService, default_components
 from thursday_core.briefing import Briefer, DecisionJournal
 from thursday_core.bus import InProcessEventBus
 from thursday_core.composer import ResponseComposer
+from thursday_core.compute_router import ComputeRouter
 from thursday_core.config import Settings, get_settings
 from thursday_core.context import ContextEngine
 from thursday_core.cost import CostMeter
@@ -147,6 +148,9 @@ class Container:
     #: Which model exists on which machine (ADDENDUM §5). Populated by nodes reporting their
     #: inventory, corrected by the owner, consulted by the compute router.
     model_registry: Any = None
+    #: Chooses which machine and which model (ADDENDUM §7). Decides nothing about whether an
+    #: action is allowed — that stays with the Permission Engine (§30, §31).
+    compute_router: Any = None
     #: Whether state actually outlives this process (Sprint 51). False is a supported
     #: configuration and not a degraded one — but it must never be a silent assumption.
     persistent: bool = False
@@ -402,6 +406,7 @@ def build_container(settings: Settings | None = None, *, configure_logs: bool = 
     c.remote_gate = RemoteCommandGate()
     c.hub = DeviceHub(c.bus, remote_gate=c.remote_gate, model_registry=c.model_registry)
     c.device_router = DeviceRouter(c.hub)
+    c.compute_router = ComputeRouter(registry=c.model_registry, hub=c.hub)
     c.device_focus = DeviceFocus()
     # Pairings outlive the process. An in-memory registry would mean a restart locks out
     # every paired node — it signs with its key, the core no longer knows the key, and the

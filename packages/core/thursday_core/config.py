@@ -85,6 +85,10 @@ _YAML_MAP: dict[str, dict[str, str]] = {
         "credential_max_age_days": "device_credential_max_age_days",
     },
     "permissions": {"approval_ttl_seconds": "approval_ttl_seconds"},
+    "compute": {
+        "routing_mode": "ai_routing_mode",
+        "routing_profile": "ai_routing_profile",
+    },
     "limits": {
         "default_per_minute": "rate_limit_default_per_minute",
         "expensive_per_minute": "rate_limit_expensive_per_minute",
@@ -243,6 +247,13 @@ class Settings(BaseSettings):
     #: never enforced — see ADR 0042 for why an expiring device key is an outage rather
     #: than a control.
     device_credential_max_age_days: int = Field(default=180, ge=1)
+
+    # AI compute routing (ADDENDUM §15, §46) -------------------------------------
+    #: §15's recommended default. LOCAL_FIRST rather than AUTO: the addendum names both as
+    #: reasonable, and preferring the owner's own hardware is the choice that needs no
+    #: justification when somebody asks where their data went.
+    ai_routing_mode: str = "LOCAL_FIRST"
+    ai_routing_profile: str = "BALANCED"
 
     # rate limits (§128) --------------------------------------------------------
     #: Requests allowed per minute, per calling address, per class. Generous by design: this

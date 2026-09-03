@@ -112,6 +112,70 @@ async def list_compute(c: Container = Depends(get_container)) -> dict:
     return {"devices": devices}
 
 
+@router.get("/compute/route")
+async def explain_route(
+    capability: str = "ai.llm",
+    sensitivity: str = "PRIVATE",
+    profile: str | None = None,
+    mode: str | None = None,
+    heavy: bool = False,
+    c: Container = Depends(get_container),
+) -> dict:
+    """Where would this work go, and why (ADDENDUM §7–§9)?
+
+    A dry run. It chooses nothing and runs nothing — it answers the question §44 says the
+    owner should never have to ask, for the times somebody does: "why did that go to the
+    laptop?". A router whose decisions cannot be inspected is one nobody can debug, and
+    routing is exactly the kind of logic that goes subtly wrong for months.
+
+    On failure it returns the rejections rather than a bare 404, because "nothing could run
+    this" is only useful with the reasons attached (§38).
+    """
+    from thursday_core.compute_router import (
+        ComputeRequest,
+        NoComputeAvailable,
+        RoutingMode,
+        RoutingProfile,
+    )
+    from thursday_shared.enums import DataSensitivity
+
+    try:
+        request = ComputeRequest(
+            capability=capability,
+            sensitivity=DataSensitivity[sensitivity.upper()],
+            profile=RoutingProfile(profile or c.settings.ai_routing_profile),
+            mode=RoutingMode(mode or c.settings.ai_routing_mode),
+            heavy=heavy,
+        )
+    except (KeyError, ValueError) as exc:
+        raise HTTPException(status_code=422, detail=f"unknown routing option: {exc}") from exc
+
+    try:
+        target = c.compute_router.choose(request)
+    except NoComputeAvailable as exc:
+        return {
+            "routed": False,
+            "capability": capability,
+            "reason": exc.message,
+            "rejected": exc.details.get("rejected", []),
+        }
+
+    return {
+        "routed": True,
+        "target": {
+            "device_id": str(target.device_id) if target.device_id else None,
+            "runtime": str(target.runtime),
+            "model": target.model,
+            "local": target.local,
+            "reasons": list(target.reasons),
+        },
+        "fallback": [
+            {"device_id": str(f.device_id) if f.device_id else None, "model": f.model}
+            for f in target.fallback
+        ],
+    }
+
+
 @router.get("/models")
 async def list_models(
     capability: str | None = None,
