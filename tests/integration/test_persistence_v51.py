@@ -684,3 +684,259 @@ async def test_a_degraded_spend_ledger_shows_up_in_health(make_settings):
     after = {c["component"]: c for c in await container.health()}
     assert after["spend"]["ok"] is False
     assert "could not be stored" in after["spend"]["detail"]
+
+
+# ===========================================================================  task resumption
+
+
+def make_task_settings(make_settings, **over):
+    return make_settings(
+        persist_memory=False, persist_audit=False, persist_costs=False, persist_tasks=True, **over
+    )
+
+
+async def a_running_task(container, *steps):
+    """A task that was mid-plan when the process died.
+
+    `steps` are (seq, name, action, status) — the shape a crash actually leaves behind.
+    """
+    from thursday_shared.enums import StepKind, TaskState
+    from thursday_shared.models import Plan, PlanStep
+
+    task = await container.tasks.create(title="send the report", objective="Friday's report")
+    await container.tasks.set_plan(
+        task.id,
+        Plan(
+            objective="Friday's report",
+            steps=[
+                PlanStep(
+                    seq=seq,
+                    kind=StepKind.DEVICE,
+                    name=name,
+                    objective=name,
+                    args={"action": action},
+                    status=status,
+                )
+                for seq, name, action, status in steps
+            ],
+        ),
+    )
+    await container.tasks.transition(task.id, TaskState.PLANNING)
+    await container.tasks.transition(task.id, TaskState.RUNNING)
+    return task
+
+
+# --------------------------------------------------------------------------- never RUNNING
+
+
+async def test_a_task_never_comes_back_running(make_settings):
+    """The failure this whole design exists to avoid. A `RUNNING` row reloaded as `RUNNING`
+    is a task that looks alive with nothing driving it: the coroutine died with the process,
+    and the owner watches it not progress with no reason to think anything is wrong."""
+    from thursday_shared.enums import TaskState
+
+    first = await boot(make_task_settings(make_settings))
+    task = await a_running_task(first, (1, "open", "app.open", TaskState.RUNNING))
+    assert first.tasks.get(task.id).status is TaskState.RUNNING
+
+    second = await boot(make_task_settings(make_settings))
+    restored = second.tasks.get(task.id)
+    assert restored is not None
+    assert restored.status is TaskState.INTERRUPTED
+    assert restored.status is not TaskState.RUNNING
+
+
+async def test_interrupted_is_not_terminal_and_not_paused(make_settings):
+    """Reusing PAUSED would lose the distinction that matters: "you stopped this" and "we
+    crashed while doing this" call for different responses, and only the second leaves a step
+    whose outcome nobody observed."""
+    from thursday_shared.enums import TaskState
+
+    assert TaskState.INTERRUPTED.is_terminal is False
+    assert TaskState.INTERRUPTED is not TaskState.PAUSED
+
+    first = await boot(make_task_settings(make_settings))
+    task = await a_running_task(first, (1, "open", "app.open", TaskState.RUNNING))
+    await first.tasks.pause(task.id)
+
+    second = await boot(make_task_settings(make_settings))
+    assert second.tasks.get(task.id).status is TaskState.PAUSED, "a pause is not a crash"
+
+
+async def test_a_completed_task_is_untouched_by_the_restart(make_settings):
+    from thursday_shared.enums import TaskState
+    from thursday_shared.models import VerificationReport
+
+    first = await boot(make_task_settings(make_settings))
+    task = await first.tasks.create(title="done already", objective="finished")
+    await first.tasks.transition(task.id, TaskState.PLANNING)
+    await first.tasks.transition(task.id, TaskState.RUNNING)
+    await first.tasks.transition(task.id, TaskState.VERIFYING)
+    await first.tasks.complete(
+        task.id, result={"ok": True}, verification=VerificationReport(verdict="PASS")
+    )
+
+    second = await boot(make_task_settings(make_settings))
+    assert second.tasks.get(task.id).status is TaskState.COMPLETED
+
+
+# --------------------------------------------------------------------------- what is known
+
+
+async def test_a_completed_step_is_not_offered_for_repeat(make_settings):
+    """It was done and observed (ADR 0012). Repeating it would redo work that happened."""
+    from thursday_core.resumption import analyse
+    from thursday_shared.enums import TaskState
+
+    first = await boot(make_task_settings(make_settings))
+    task = await a_running_task(
+        first,
+        (1, "read", "file.read", TaskState.COMPLETED),
+        (2, "open", "app.open", TaskState.RUNNING),
+    )
+
+    second = await boot(make_task_settings(make_settings))
+    plan = analyse(second.tasks.get(task.id))
+
+    assert [s.state for s in plan.steps] == ["done", "unknown"]
+    assert plan.resume_from == 2, "it should continue from the step nobody watched finish"
+
+
+async def test_the_step_that_was_running_is_unknown_not_failed(make_settings):
+    """It may have completed, half-completed, or never started. Calling it failed would be a
+    claim nobody can support, and calling it done would be worse."""
+    from thursday_core.resumption import analyse
+    from thursday_shared.enums import TaskState
+
+    first = await boot(make_task_settings(make_settings))
+    task = await a_running_task(first, (1, "open", "app.open", TaskState.RUNNING))
+
+    second = await boot(make_task_settings(make_settings))
+    plan = analyse(second.tasks.get(task.id))
+    assert [s.state for s in plan.unknown] == ["unknown"]
+
+
+# --------------------------------------------------------------------------- what is safe
+
+
+async def test_an_interrupted_email_is_never_offered_as_safe_to_repeat(make_settings):
+    """§194: no external communication silently duplicated. Nobody knows whether the email
+    went, and "probably not" is not a basis for sending a second one."""
+    from thursday_core.resumption import analyse
+    from thursday_shared.enums import TaskState
+
+    first = await boot(make_task_settings(make_settings))
+    task = await a_running_task(first, (1, "send", "email.send", TaskState.RUNNING))
+
+    second = await boot(make_task_settings(make_settings))
+    plan = analyse(second.tasks.get(task.id))
+
+    assert plan.safe is False
+    assert "outside this machine" in plan.reason
+    assert plan.unknown[0].safe_to_repeat is False
+
+
+@pytest.mark.parametrize("action", ["email.send", "message.send", "purchase.make", "file.delete"])
+async def test_nothing_irreversible_or_external_is_repeatable(make_settings, action):
+    from thursday_core.resumption import analyse
+    from thursday_shared.enums import TaskState
+
+    first = await boot(make_task_settings(make_settings))
+    task = await a_running_task(first, (1, "step", action, TaskState.RUNNING))
+
+    second = await boot(make_task_settings(make_settings))
+    assert analyse(second.tasks.get(task.id)).safe is False, action
+
+
+@pytest.mark.parametrize("action", ["file.read", "app.open", "system.info", "clipboard.write"])
+async def test_a_local_reversible_step_is_repeatable(make_settings, action):
+    """The safety must not swallow the feature: if nothing were repeatable, resumption would
+    be a report that says "give up" in every case."""
+    from thursday_core.resumption import analyse
+    from thursday_shared.enums import TaskState
+
+    first = await boot(make_task_settings(make_settings))
+    task = await a_running_task(first, (1, "step", action, TaskState.RUNNING))
+
+    second = await boot(make_task_settings(make_settings))
+    assert analyse(second.tasks.get(task.id)).safe is True, action
+
+
+def test_the_repeat_rule_asks_the_policy_table_rather_than_a_second_list():
+    """A second list of dangerous actions is a second thing to keep in step, and this
+    repository has found that bug enough times."""
+    import inspect
+
+    from thursday_core import resumption
+
+    source = inspect.getsource(resumption.safe_to_repeat)
+    assert "PolicyTable" in source
+    for hardcoded in ('"email.send"', '"purchase.make"', '"file.delete"'):
+        assert hardcoded not in source, f"{hardcoded} is hardcoded instead of asked"
+
+
+# --------------------------------------------------------------------------- offered, not taken
+
+
+async def test_nothing_resumes_itself(make_settings):
+    """ADR 0027: noticing is not doing. And a process that auto-resumed on boot would, in a
+    crash loop, redo the same dangerous thing on every restart."""
+    from thursday_core import resumption
+    from thursday_shared.enums import TaskState
+
+    first = await boot(make_task_settings(make_settings))
+    task = await a_running_task(first, (1, "open", "app.open", TaskState.RUNNING))
+
+    second = await boot(make_task_settings(make_settings))
+    assert second.tasks.get(task.id).status is TaskState.INTERRUPTED
+
+    # And the module offers no way to do it: it reports, and that is the whole surface.
+    doers = [
+        name
+        for name in dir(resumption)
+        if not name.startswith("_") and any(w in name for w in ("resume", "run", "execute"))
+    ]
+    assert doers == []
+
+
+async def test_interrupted_work_reaches_the_owner_in_the_brief(make_settings):
+    from thursday_shared.enums import TaskState
+
+    first = await boot(make_task_settings(make_settings))
+    await a_running_task(first, (1, "send", "email.send", TaskState.RUNNING))
+
+    second = await boot(make_task_settings(make_settings))
+    brief = await second.briefer.morning()
+    assert any("send the report" in line for line in brief.issues)
+
+
+# --------------------------------------------------------------------------- the wiring
+
+
+async def test_every_public_mutator_persists(make_settings):
+    """The answer to "each caller must remember": enumerate the API and check.
+
+    Five places mutate a task, and a sixth added later that forgets to persist would be
+    invisible until a restart. This test is what makes that visible on the day it is written.
+    """
+    import inspect
+
+    from thursday_core.tasks import TaskManager
+
+    mutators = {
+        name
+        for name, member in inspect.getmembers(TaskManager, inspect.isfunction)
+        if not name.startswith("_")
+        and name not in {"get", "list", "is_cancelled", "export_state", "import_state", "restore"}
+    }
+    assert mutators, "the API check found nothing to check"
+
+    source = inspect.getsource(TaskManager)
+    for name in mutators:
+        body = (
+            source.split(f"def {name}(", 1)[1].split("\n    async def ")[0].split("\n    def ")[0]
+        )
+        persists = (
+            "_save(task)" in body or "self.transition(" in body or "await self.transition" in body
+        )
+        assert persists, f"{name} mutates a task and never persists it"

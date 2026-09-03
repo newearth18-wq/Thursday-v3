@@ -9,8 +9,10 @@ from __future__ import annotations
 
 import asyncio
 from datetime import UTC, datetime
+from typing import Any
 from uuid import UUID
 
+from pydantic import ValidationError
 from thursday_shared.enums import TASK_TRANSITIONS, Priority, TaskState
 from thursday_shared.errors import BudgetExceeded, ThursdayError
 from thursday_shared.models import Budget, Event, Plan, Spend, Task, VerificationReport
@@ -27,10 +29,15 @@ class InvalidTransition(ThursdayError):
 class TaskManager:
     """Owns task lifecycle and the (in-memory here, Postgres in production) task table."""
 
-    def __init__(self, bus: object | None = None) -> None:
+    def __init__(self, bus: object | None = None, *, repository: Any = None) -> None:
         self._tasks: dict[UUID, Task] = {}
         self._bus = bus
         self._cancelled: set[UUID] = set()
+        #: Where tasks live between runs. `_tasks` is an index over it, written through on
+        #: every mutation and loaded at startup (ADR 0036).
+        from thursday_core.persistence import NullRepository
+
+        self._repository = repository or NullRepository()
 
     # ------------------------------------------------------------------ lifecycle
 
@@ -64,6 +71,7 @@ class TaskManager:
             deadline=deadline,
         )
         self._tasks[task.id] = task
+        await self._save(task)
         await self._emit("task.created", task)
         return task
 
@@ -99,6 +107,7 @@ class TaskManager:
             task.finished_at = task.updated_at
             if to is TaskState.COMPLETED:
                 task.progress = 1.0
+        await self._save(task)
         await self._emit(f"task.{to.value.lower()}", task, reason=reason)
         return task
 
@@ -106,6 +115,7 @@ class TaskManager:
         task = self._require(task_id)
         task.plan = plan
         task.updated_at = datetime.now(UTC)
+        await self._save(task)
         return task
 
     async def complete(
@@ -162,15 +172,17 @@ class TaskManager:
         task = self._require(task_id)
         task.progress = max(0.0, min(1.0, progress))
         task.updated_at = datetime.now(UTC)
+        await self._save(task)
         await self._emit("task.progress", task)
         return task
 
     # ------------------------------------------------------------------ budget (§61)
 
-    def charge(self, task_id: UUID, spend: Spend) -> None:
+    async def charge(self, task_id: UUID, spend: Spend) -> None:
         task = self._require(task_id)
         for field in ("tokens", "usd", "seconds", "agent_calls", "tool_calls"):
             setattr(task.spent, field, getattr(task.spent, field) + getattr(spend, field))
+        await self._save(task)
         if breach := task.spent.exceeds(task.budget):
             raise BudgetExceeded(
                 f"task exceeded its {breach} budget",
@@ -197,6 +209,45 @@ class TaskManager:
             task = Task.model_validate(row)
             self._tasks[task.id] = task
         return len(rows)
+
+    # ------------------------------------------------------------------ persistence
+
+    async def _save(self, task: Task) -> None:
+        """Write a task through to storage.
+
+        Called from `transition` — which every state change funnels through — and from the
+        three mutators that change fields without changing state. A test enumerates the
+        public API and asserts each mutator persists, because "remember to call this" is how
+        the next mutator silently does not.
+        """
+        await self._repository.put(task.model_dump(mode="python"))
+
+    async def restore(self) -> int:
+        """Load tasks, and tell the truth about the ones that were running.
+
+        A `RUNNING` row comes back as `INTERRUPTED`, never as `RUNNING`. The coroutine that
+        was executing it died with the process, so a task reloaded as running is a task that
+        looks alive with nothing driving it — which is worse than losing it, because the
+        owner watches it not progress and has no reason to think anything is wrong.
+        """
+        rows = await self._repository.load()
+        restored = 0
+        interrupted = 0
+        for row in rows:
+            try:
+                task = Task.model_validate(row)
+            except ValidationError as exc:
+                log.warning("task_row_unreadable", error=str(exc))
+                continue
+            if task.status is TaskState.RUNNING:
+                task.status = TaskState.INTERRUPTED
+                interrupted += 1
+            self._tasks[task.id] = task
+            restored += 1
+
+        if restored:
+            log.info("tasks_restored", tasks=restored, interrupted=interrupted)
+        return restored
 
     def _require(self, task_id: UUID) -> Task:
         task = self._tasks.get(task_id)

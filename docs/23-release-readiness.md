@@ -68,9 +68,15 @@ handing back a fresh budget — the gap Sprint 45 named and Sprint 47 closed onl
 who had taken a backup. Pruning past the retention window reaches the table, or the rows come
 back on the next start and the window never applies.
 
-Still in-process: **tasks**. Restoring a `RUNNING` task from a table produces a task that
-looks alive with nothing driving it — worse than losing it — so it needs its resumption story
-designed rather than assumed. *To close:* a task-resumption sprint.
+**Tasks** persist too, with the resumption story designed rather than assumed (ADR 0039). A
+task never comes back `RUNNING`: it comes back `INTERRUPTED`, because the coroutine driving it
+died with the process. Completed steps are done; the step that was in flight is *unknown* —
+nobody observed its outcome — and whether it may be repeated is asked of the policy table, so
+an interrupted `email.send` is never offered as safe. Nothing resumes itself: interrupted work
+appears in the brief and at `GET /api/v1/tasks/interrupted`, and continuing is the owner's
+call.
+
+All four stores — memory, audit, spend, tasks — report their durability through `health()`.
 
 The audit table grows without bound. A retention policy is deliberately absent: deleting audit
 rows is what the append-only design forbids, and how long the owner keeps their own record is

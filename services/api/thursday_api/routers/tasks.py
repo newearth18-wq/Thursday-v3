@@ -84,3 +84,37 @@ async def cancel(task_id: UUID, c: Container = Depends(get_container)) -> dict:
     c.queue.cancel(task_id)
     task = await c.tasks.cancel(task_id)
     return {"status": task.status.value}
+
+
+# ------------------------------------------------------------------ resumption (ADR 0039)
+
+
+@router.get("/tasks/interrupted")
+async def interrupted_tasks(c: Container = Depends(get_container)) -> dict:
+    """Work the last run left in flight, and what continuing each would involve.
+
+    Reports; resumes nothing. The judgement it hands over is about a step whose outcome
+    nobody observed, and whether repeating that step is acceptable is a question about the
+    owner's data rather than about Thursday's convenience.
+    """
+    from thursday_core.resumption import analyse, interrupted
+
+    return {
+        "tasks": [
+            {
+                "task_id": str(r.task_id),
+                "title": r.title,
+                "resume_from": r.resume_from,
+                "safe": r.safe,
+                "reason": r.reason,
+                "unknown_steps": [
+                    {"seq": s.seq, "name": s.name, "reason": s.reason} for s in r.unknown
+                ],
+                "steps": [
+                    {"seq": s.seq, "name": s.name, "state": s.state, "repeatable": s.safe_to_repeat}
+                    for s in r.steps
+                ],
+            }
+            for r in (analyse(t) for t in interrupted(c.tasks))
+        ]
+    }

@@ -198,7 +198,7 @@ class ToolExecutor:
             self._undo.record(result.undo)  # type: ignore[attr-defined]
 
         if self._tasks is not None and call.task_id is not None:
-            self._tasks.charge(  # type: ignore[attr-defined]
+            await self._tasks.charge(  # type: ignore[attr-defined]
                 call.task_id,
                 Spend(tool_calls=1, usd=result.cost_usd, seconds=(time.perf_counter() - started)),
             )

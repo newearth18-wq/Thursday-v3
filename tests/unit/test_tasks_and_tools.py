@@ -70,9 +70,9 @@ async def test_budgets_are_enforced_and_a_subtask_cannot_exceed_its_parent(tasks
     assert child.budget.usd == 0.10
     assert child.budget.tool_calls == 5
 
-    tasks.charge(parent.id, Spend(usd=0.05))
+    await tasks.charge(parent.id, Spend(usd=0.05))
     with pytest.raises(BudgetExceeded) as exc:
-        tasks.charge(parent.id, Spend(usd=0.09))
+        await tasks.charge(parent.id, Spend(usd=0.09))
     assert exc.value.details["limit"] == 0.10
 
 

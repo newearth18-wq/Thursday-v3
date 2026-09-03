@@ -117,7 +117,11 @@ class Task(Base, IdMixin, TimestampMixin):
     status: Mapped[str] = mapped_column(String(24), default="NEW", index=True)
     priority: Mapped[int] = mapped_column(Integer, default=5)
     progress: Mapped[float] = mapped_column(Float, default=0.0)
-    plan: Mapped[dict[str, Any]] = mapped_column(JSONColumn, default=dict)
+    #: Nullable because "no plan yet" is a real state the domain model expresses as None.
+    #: Storing `{}` instead would round-trip as an *empty plan*, which is a different claim:
+    #: one says nobody has planned this, the other says somebody planned it and it needs no
+    #: steps (ADR 0039).
+    plan: Mapped[dict[str, Any] | None] = mapped_column(JSONColumn, nullable=True)
     assigned_agent: Mapped[str | None] = mapped_column(String(64), nullable=True)
     origin_device_id: Mapped[uuid.UUID | None] = mapped_column(
         GUID(), ForeignKey("devices.id"), nullable=True
@@ -136,7 +140,7 @@ class Task(Base, IdMixin, TimestampMixin):
     result: Mapped[dict[str, Any]] = mapped_column(JSONColumn, default=dict)
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
     #: The Supervisor's report. A task is COMPLETED only with a passing one (§76).
-    verification: Mapped[dict[str, Any]] = mapped_column(JSONColumn, default=dict)
+    verification: Mapped[dict[str, Any] | None] = mapped_column(JSONColumn, nullable=True)
     trace_id: Mapped[str] = mapped_column(String(32), default="", index=True)
 
     __table_args__ = (Index("ix_tasks_user_status", "user_id", "status"),)

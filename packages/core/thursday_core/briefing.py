@@ -258,6 +258,13 @@ class Briefer:
             if t.deadline and not t.status.is_terminal and t.deadline <= horizon
         ]
         brief.approvals = [a.action for a in self._approvals.pending()]
+        # Interrupted work goes in `issues`, not `suggestions`: it is not an offer, it is
+        # something that stopped halfway and is waiting on a decision only the owner can make
+        # about a step whose outcome nobody observed.
+        from thursday_core.resumption import analyse, interrupted
+
+        for task in interrupted(self._tasks):
+            brief.issues.append(analyse(task).describe("th"))
         if self._costs is not None:
             # In `issues` rather than `suggestions`: approaching a spending cap is something
             # about to constrain Thursday, not something being offered. It belongs where the

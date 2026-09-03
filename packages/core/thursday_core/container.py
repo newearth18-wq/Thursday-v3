@@ -86,6 +86,7 @@ from thursday_core.projects import ProjectManager
 from thursday_core.reasoning import ReasoningEngine
 from thursday_core.recovery import SelfRecovery
 from thursday_core.reflection import FeedbackLog, SelfEvaluator
+from thursday_core.resumption import interrupted
 from thursday_core.state import build_state_store
 from thursday_core.supervisor import Supervisor
 from thursday_core.tasks import TaskManager, TaskQueue
@@ -422,7 +423,7 @@ def build_container(settings: Settings | None = None, *, configure_logs: bool = 
     else:
         log.info("browser_tools_unavailable", reason="playwright is not installed")
     c.tool_router = ToolRouter(c.tools)
-    c.tasks = TaskManager(c.bus)
+    c.tasks = TaskManager(c.bus, repository=_task_repository(settings, c))
     c.state = build_state_store(settings.redis_url)
     c.queue = TaskQueue()
     c.executor = ToolExecutor(
@@ -829,6 +830,26 @@ def _build_updates(settings: Settings, backups: Any) -> UpdateService:
     )
 
 
+def _task_repository(settings: Settings, container: Container) -> Any:
+    """Where tasks live between runs (ADR 0039)."""
+    if not settings.persist_tasks:
+        return NullRepository()
+
+    from thursday_shared.db.models import Task as TaskRow
+    from thursday_shared.db.session import init_engine, session_scope
+    from thursday_shared.models import Task as TaskModel
+
+    init_engine(settings)
+    container.persistent = True
+    return SqlRepository(
+        TaskRow,
+        session_scope=session_scope,
+        defaults={"user_id": settings.owner_id},
+        order_by="created_at",
+        fields=set(TaskModel.model_fields),
+    )
+
+
 def _spend_repository(settings: Settings, container: Container) -> Any:
     """Where the spend ledger is kept between runs (§61).
 
@@ -924,6 +945,7 @@ async def start(container: Container) -> Container:
     memories = await container.memory.restore()
     entries = await container.audit.restore()
     charges = await container.costs.restore()
+    tasks = await container.tasks.restore()
     log.info(
         "thursday_state_loaded",
         persistent=container.persistent,
@@ -931,5 +953,7 @@ async def start(container: Container) -> Container:
         audit_entries=entries,
         audit_chain_intact=container.audit.verify_chain(),
         spend_charges=charges,
+        tasks=tasks,
+        interrupted=len(interrupted(container.tasks)),
     )
     return container

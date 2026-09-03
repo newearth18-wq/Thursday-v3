@@ -97,6 +97,7 @@ _YAML_MAP: dict[str, dict[str, str]] = {
         "memory": "persist_memory",
         "audit": "persist_audit",
         "costs": "persist_costs",
+        "tasks": "persist_tasks",
         "owner_id": "owner_id",
     },
     "updates": {
@@ -244,6 +245,7 @@ class Settings(BaseSettings):
     persist_memory: bool = False
     persist_audit: bool = False
     persist_costs: bool = False
+    persist_tasks: bool = False
     #: Thursday is single-tenant. This is the owner row the seeds create.
     owner_id: UUID = UUID("00000000-0000-0000-0000-000000000001")
 

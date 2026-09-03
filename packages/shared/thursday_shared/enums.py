@@ -14,8 +14,13 @@ class TaskState(StrEnum):
     * ``WAITING_APPROVAL`` — blocked on a human decision
     * ``BLOCKED`` — blocked on something outside the plan (a device is offline)
     * ``PAUSED`` — the owner stopped it deliberately
+    * ``INTERRUPTED`` — the process stopped while this was running, and nothing is driving it
 
     Collapsing them would lose the one thing the owner needs to know: what to do about it.
+
+    ``INTERRUPTED`` exists rather than reusing ``PAUSED`` because the difference is the whole
+    point: "you stopped this" and "we crashed while doing this" call for different responses,
+    and only the second one leaves a step whose outcome nobody observed.
     """
 
     NEW = "NEW"
@@ -27,6 +32,9 @@ class TaskState(StrEnum):
     WAITING_APPROVAL = "WAITING_APPROVAL"
     BLOCKED = "BLOCKED"
     PAUSED = "PAUSED"
+    #: Was RUNNING when the process stopped. Never entered while a process is alive: it is
+    #: what a RUNNING task becomes when it is loaded from storage (ADR 0039).
+    INTERRUPTED = "INTERRUPTED"
     VERIFYING = "VERIFYING"
     COMPLETED = "COMPLETED"
     FAILED = "FAILED"
@@ -62,12 +70,23 @@ TASK_TRANSITIONS: dict[TaskState, frozenset[TaskState]] = {
             TaskState.FAILED,
         }
     ),
+    # INTERRUPTED is reachable from RUNNING, but only by the loader: a live process moving a
+    # task there would be claiming a crash that did not happen.
+    TaskState.INTERRUPTED: frozenset(
+        {
+            TaskState.READY,
+            TaskState.RUNNING,
+            TaskState.CANCELLED,
+            TaskState.FAILED,
+        }
+    ),
     TaskState.RUNNING: frozenset(
         {
             TaskState.WAITING,
             TaskState.WAITING_APPROVAL,
             TaskState.BLOCKED,
             TaskState.PAUSED,
+            TaskState.INTERRUPTED,
             TaskState.VERIFYING,
             TaskState.CANCELLED,
             TaskState.FAILED,

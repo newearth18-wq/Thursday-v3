@@ -257,7 +257,7 @@ class AgentOrchestrator:
                     step=step, result=None, verification=None, error=exc.message, attempts=attempt
                 )
 
-            self._tasks.charge(task.id, result.spend)  # type: ignore[attr-defined]
+            await self._tasks.charge(task.id, result.spend)  # type: ignore[attr-defined]
             verification = await self._supervisor.verify(  # type: ignore[attr-defined]
                 contract, result, attempt=attempt, max_attempts=step.max_attempts
             )

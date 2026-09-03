@@ -164,9 +164,10 @@ def test_the_readme_states_one_test_count_and_the_right_number_of_adrs():
     claimed = {int(n.replace(",", "")) for n in re.findall(TEST_COUNT, readme)}
     assert len(claimed) == 1, f"the README states more than one test count: {claimed}"
 
-    # Generated rather than listed. The hand-written version ran out at thirty-six and then
-    # matched "thirty" inside "thirty-seven", reporting the wrong number for a README that
-    # was correct — a check that fails for its own reasons is worse than one that does not run.
+    # Anchored to the sentence that is actually about ADRs. The unanchored version searched
+    # the whole README and matched "twenty-four" from "the twenty-four deliverables" — a
+    # number word about something else entirely. Generated rather than listed, because the
+    # hand-written list ran out at thirty-six and then matched "thirty" inside "thirty-seven".
     words = {
         f"{tens}{'-' + unit if unit else ''}": base + n
         for tens, base in (("twenty", 20), ("thirty", 30), ("forty", 40), ("fifty", 50))
@@ -174,16 +175,10 @@ def test_the_readme_states_one_test_count_and_the_right_number_of_adrs():
             ["", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine"]
         )
     }
-    # Longest first, and anchored: "thirty" is a prefix of "thirty-four", and matching the
-    # short one made this test report 30 for a README that said thirty-four.
-    stated = next(
-        (
-            n
-            for word, n in sorted(words.items(), key=lambda kv: -len(kv[0]))
-            if re.search(rf"\b{word}\b", readme)
-        ),
-        None,
-    )
+    sentence = re.search(r"and ([a-z\-]+)\s*\n?\[architecture decisions\]", readme)
+    assert sentence, "the README no longer states an ADR count where this test looks for it"
+    stated = words.get(sentence.group(1))
+
     actual = len(list(DECISIONS.glob("0*.md")))
     assert stated == actual, f"README says {stated} ADRs; there are {actual}"
 

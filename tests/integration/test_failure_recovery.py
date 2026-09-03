@@ -167,4 +167,4 @@ async def test_budget_exhaustion_stops_a_task_cleanly(container, office_pc, sess
     from thursday_shared.models import Spend
 
     with pytest.raises(Exception, match="budget"):
-        container.tasks.charge(task.id, Spend(tool_calls=1))
+        await container.tasks.charge(task.id, Spend(tool_calls=1))
