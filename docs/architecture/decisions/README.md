@@ -59,3 +59,4 @@ done this way?" and have no answer.
 | [0049](0049-the-shipped-configuration-is-the-product.md) | The shipped configuration is the product | settings.yaml pointed a fresh install at a Redis nobody installed |
 | [0050](0050-setup-ends-when-the-machine-proves-it.md) | Setup ends when the machine proves it, not when the form does | A wizard that congratulates itself has told the owner it works, on no evidence |
 | [0051](0051-a-repair-button-is-not-a-way-around-the-permission-engine.md) | A repair button is not a way around the Permission Engine | The repairs a person reaches for in a crisis are exactly the forbidden ones |
+| [0052](0052-a-tutor-is-a-view-of-the-system-not-a-description-of-it.md) | A tutor is a view of the system, not a description of it | A second description of what Thursday can do drifts, and the tutor is the part most believed |

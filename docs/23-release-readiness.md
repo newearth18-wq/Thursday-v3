@@ -44,6 +44,7 @@ container, not a unit test of the class in isolation.
 | A first run that cannot finish until Thursday has actually opened something | `tests/integration/test_setup_wizard_v64.py` |
 | Errors and activity in plain language, from a declared list rather than a filter | `tests/integration/test_plain_language_v65.py` |
 | A Repair button that cannot offer a repair the Permission Engine would refuse, and reports what the machine shows rather than what the handler returned | `tests/integration/test_checkup_v66.py` |
+| A tutor whose lessons end when the machine proves it, and whose practice mode has no execution path | `tests/e2e/test_onboarding_acceptance.py` |
 | Metrics whose labels cannot carry a path or a secret | `tests/integration/test_metrics_v49.py` |
 
 ## 23.2 What is not ready, and what that would take
@@ -183,6 +184,19 @@ V10. Because the outcome is now derived from re-running the health check rather 
 handler returning, pressing one answers "ลองซ่อมแล้ว แต่ยังไม่กลับมาทำงาน", which is true.
 *To close:* three real handlers. The verification step is what makes their absence visible
 instead of reporting success.
+
+**The Learning Center has no UI.** Sprints 67-72 built the tutor as API and logic: the
+capability catalogue, lessons with real verification, the tip engine, the Tutor agent, and
+`GET /learn`. Nothing in the desktop app renders any of it, so the §13 interactive walkthrough
+(highlighting a real button with an arrow) and the §22 gesture tutorial with a live hand
+skeleton do not exist. *To close:* a Learning Center view in the Tauri app; the data it needs
+is already served.
+
+**Some lessons the spec names are not written.** §17's five basics are, plus stopping. The
+vision (§21), gesture (§22), agent (§19), automation (§20) and multi-device (§64) lessons are
+not — each needs hardware or a second machine this container has never had, and writing a
+lesson that has never been run against the thing it teaches is how the camera lesson would
+come to describe a camera nobody tested.
 
 **The mobile client is a scaffold.** The desktop app is built and works.
 

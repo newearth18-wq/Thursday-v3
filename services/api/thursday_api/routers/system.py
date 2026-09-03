@@ -8,6 +8,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Body, Depends, HTTPException
 from fastapi.responses import PlainTextResponse
+from thursday_core import catalogue, practice
 from thursday_core import checkup as checkup_module
 from thursday_core.backup import BackupError
 from thursday_core.container import Container
@@ -102,6 +103,139 @@ async def repair_thursday(
         # gates the same field, rather than trusted to be harmless.
         result.pop("technical", None)
     return result
+
+
+# ------------------------------------------------------- learning (ADAPTIVE ONBOARDING)
+
+
+@router.get("/learn")
+async def learning_center(c: Container = Depends(get_container)) -> dict:
+    """§10's "เรียนรู้ Thursday" — the whole centre in one read.
+
+    Not called Documentation on purpose (§10). What comes back is what this machine can
+    actually do (§52), what the owner has already used (§42), and one suggested next thing
+    (§57) — never a wall of features, and never a score to accumulate.
+    """
+    return {
+        "summary": catalogue.summary_line(c),
+        "areas": catalogue.areas(c),
+        "path": c.tutor.learning_path(),
+        "progress": c.learning.snapshot(),
+        "next": c.tutor.suggest(),
+        "practice": practice.offers(c),
+    }
+
+
+@router.get("/learn/features")
+async def learning_features(c: Container = Depends(get_container)) -> dict:
+    """Every feature, available or not, each with why (§11, §12)."""
+    return {
+        "features": [row.render() for row in catalogue.catalogue(c)],
+        "agents": c.tutor.agent_descriptions(),
+    }
+
+
+@router.post("/learn/{lesson_id}/start")
+async def learn_start(lesson_id: str, c: Container = Depends(get_container)) -> dict:
+    """Begin a lesson. Refuses gracefully with §12's reason if the machine cannot run it."""
+    result = c.lessons.start(c, lesson_id)
+    if result is None:
+        raise HTTPException(status_code=404, detail="ไม่พบบทเรียนนี้")
+    return _lesson_payload(result)
+
+
+@router.post("/learn/{lesson_id}/attempt")
+async def learn_attempt(
+    lesson_id: str, evidence: Any = Body(default=None), c: Container = Depends(get_container)
+) -> dict:
+    """Judge one attempt by what it left behind.
+
+    Takes evidence, not a verdict. There is no field here through which a client could say
+    the step succeeded — the step's own check reads the machine and decides (ADR 0012, and
+    the same shape as `/setup/verify` and `/updates/apply`).
+    """
+    result = await c.lessons.attempt(c, lesson_id, evidence)
+    if result is None:
+        raise HTTPException(status_code=404, detail="ไม่พบบทเรียนนี้")
+    return _lesson_payload(result)
+
+
+@router.post("/learn/{lesson_id}/skip")
+async def learn_skip(lesson_id: str, c: Container = Depends(get_container)) -> dict:
+    """ "ข้ามก่อน" (§2). Recorded as skipped, never as completed."""
+    result = c.lessons.skip(lesson_id)
+    if result is None:
+        raise HTTPException(status_code=404, detail="ไม่พบบทเรียนนี้")
+    return _lesson_payload(result)
+
+
+def _lesson_payload(result: Any) -> dict:
+    return {
+        "lesson": result.lesson_id,
+        "step": result.step,
+        "passed": result.passed,
+        "message": result.message,
+        "done": result.done,
+        "next": {"show": result.next_show, "try": result.next_try},
+    }
+
+
+@router.post("/learn/tips/dismiss")
+async def dismiss_tip(capability: str, c: Container = Depends(get_container)) -> dict:
+    """ "ไม่ต้อง" (§66). Recorded against the capability, so no rephrasing gets past it."""
+    c.tips.dismiss(capability)
+    return {"dismissed": capability}
+
+
+@router.post("/learn/reset")
+async def reset_learning(scope: str = "tips", c: Container = Depends(get_container)) -> dict:
+    """§38's three resets, each doing exactly what it says.
+
+    `tips` restores the offers without touching what the owner actually did — that is their
+    history, not the tutor's. `tutorials` forgets lessons only. `all` is "restart
+    introduction": back to a machine that has never met anybody.
+    """
+    if scope == "tips":
+        return {"scope": scope, "reset": c.learning.reset_tips()}
+    if scope == "tutorials":
+        return {"scope": scope, "reset": c.learning.reset_tutorials()}
+    if scope == "all":
+        c.learning.reset_all()
+        return {"scope": scope, "reset": True}
+    raise HTTPException(status_code=422, detail="scope must be tips, tutorials or all")
+
+
+@router.get("/learn/practice/{action:path}")
+async def practice_action(action: str, c: Container = Depends(get_container)) -> dict:
+    """§23. Describes what an action *would* do and what Thursday would ask.
+
+    A read, and the URL says so. Nothing is dispatched, no approval is created, and the
+    payload states `happened: false` rather than leaving a client to infer it.
+    """
+    return practice.rehearse(c, action).render()
+
+
+@router.get("/learn/why/{action:path}")
+async def why_it_asks(action: str, c: Container = Depends(get_container)) -> dict:
+    """§35's "ทำไมเมื่อกี้ถึงถามฉันก่อน", read back from the live policy table."""
+    return {"action": action, "why": practice.explain_decision(c, action)}
+
+
+@router.post("/learn/teaching")
+async def set_teaching(frequency: str, c: Container = Depends(get_container)) -> dict:
+    """§39. The owner's dial, and it is honoured absolutely — OFF means no unsolicited
+    teaching of any kind, including the first-run introduction."""
+    from thursday_core.learning import TeachingFrequency
+
+    try:
+        c.learning.frequency = TeachingFrequency[frequency.strip().upper()]
+    except KeyError as exc:
+        allowed = ", ".join(member.name for member in TeachingFrequency)
+        raise HTTPException(status_code=422, detail=f"frequency must be one of {allowed}") from exc
+    return {
+        "teaching": c.learning.frequency.name,
+        "unprompted": c.learning.may_teach_unprompted(),
+    }
 
 
 @router.get("/world-state")

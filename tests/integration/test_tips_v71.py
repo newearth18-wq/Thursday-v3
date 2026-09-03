@@ -180,23 +180,39 @@ def test_availability_is_a_veto_rather_than_a_weight(container):
     assert "available" in why
 
 
-def test_nothing_is_offered_before_the_owner_has_done_the_thing_it_builds_on(container):
-    """§6's example earns its welcome from frequency: "คุณใช้ผมหาไฟล์บ่อย". Offering the
-    advanced move to somebody who has never done the basic one is getting ahead of them."""
+@pytest.mark.parametrize("uses", range(USES_BEFORE_UPGRADE))
+def test_nothing_is_offered_until_the_owner_has_done_it_often_enough(container, uses):
+    """§6's offer earns its welcome from frequency, and says so in its own words:
+    "คุณใช้ผมหาไฟล์บ่อย". Offered after one search that sentence is untrue, and a tip whose
+    text is false is worse than no tip. So the threshold is a veto rather than a small
+    penalty — an e2e run is what caught this, firing at one use with a score of 0.79.
+    """
+    for i in range(uses):
+        container.learning.used("file_search", now=NOW + timedelta(seconds=i))
     score, why = container.tips.score(container, "skills", after="file_search", now=NOW)
     assert score == 0.0
-    assert "has not used" in why
+    assert "only" in why
 
 
-def test_repeated_use_scores_higher_than_a_single_use(container):
-    once = LearningRecord(frequency=TeachingFrequency.NORMAL)
-    once.used("file_search", now=NOW)
-    often = LearningRecord(frequency=TeachingFrequency.NORMAL)
+def test_and_is_offered_once_it_has(container):
+    _used(container.tips, "file_search", USES_BEFORE_UPGRADE, now=NOW)
+    score, why = container.tips.score(container, "skills", after="file_search", now=NOW)
+    assert score > 0
+    assert str(USES_BEFORE_UPGRADE) in why
+
+
+def test_a_capability_already_mentioned_scores_below_one_never_raised(container):
+    """The first mention is the informative one, so an untouched capability outranks one
+    Thursday has already brought up — among candidates that all cleared the threshold."""
+    fresh = LearningRecord(frequency=TeachingFrequency.NORMAL)
+    mentioned = LearningRecord(frequency=TeachingFrequency.NORMAL)
     for i in range(USES_BEFORE_UPGRADE):
-        often.used("file_search", now=NOW + timedelta(seconds=i))
+        fresh.used("file_search", now=NOW + timedelta(seconds=i))
+        mentioned.used("file_search", now=NOW + timedelta(seconds=i))
+    mentioned.introduced("skills", now=NOW)
 
-    low, _ = TipEngine(once).score(container, "skills", after="file_search", now=NOW)
-    high, _ = TipEngine(often).score(container, "skills", after="file_search", now=NOW)
+    high, _ = TipEngine(fresh).score(container, "skills", after="file_search", now=NOW)
+    low, _ = TipEngine(mentioned).score(container, "skills", after="file_search", now=NOW)
     assert high > low > 0
 
 

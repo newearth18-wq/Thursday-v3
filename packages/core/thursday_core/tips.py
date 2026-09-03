@@ -262,16 +262,14 @@ class TipEngine:
         # the offer is welcome rather than random.
         if after:
             uses = self._record.entry(after).uses
-            if uses >= USES_BEFORE_UPGRADE:
-                score += 0.3
-                reasons.append(f"used {after} {uses} times")
-            elif uses >= 1:
-                score += 0.1
-                reasons.append(f"used {after}")
-            else:
-                # They have not done the thing this builds on. Offering the advanced move
-                # first is how a tutorial gets ahead of somebody.
-                return 0.0, f"has not used {after} yet"
+            if uses < USES_BEFORE_UPGRADE:
+                # A veto, not a small penalty, and the reason is in the tip's own words: it
+                # says "คุณใช้ผมหาไฟล์บ่อย". Offered after one search that sentence is simply
+                # untrue, and a tip whose text is false is worse than no tip. §6's premise is
+                # frequency, and §66 names the number.
+                return 0.0, f"has used {after} only {uses} time(s)"
+            score += 0.3
+            reasons.append(f"used {after} {uses} times")
 
         # Never mentioned beats mentioned-once: the first time is the informative one.
         if familiarity is Familiarity.NOT_DISCOVERED:
