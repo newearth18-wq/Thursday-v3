@@ -1,0 +1,9 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body { @apply select-none overflow-hidden; }
+  ::-webkit-scrollbar { @apply w-1.5; }
+  ::-webkit-scrollbar-thumb { @apply rounded bg-ink-600; }
+}

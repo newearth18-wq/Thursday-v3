@@ -1,0 +1,102 @@
+# Thursday's non-secret configuration (PART 85).
+#
+# Precedence, lowest to highest:  defaults in code  <  settings.yaml  <  .env  <  environment
+#
+# Secrets never appear here. They live behind the SecretProvider — the OS keychain in
+# production, THURSDAY_SECRET_* in development — and this file only ever names their handles.
+
+identity:
+  assistant_name: Thursday
+  owner_name: Owner
+  locale: th-TH
+  timezone: Asia/Bangkok
+  # 0 off · 1 low · 2 normal · 3 high — governs when Thursday *speaks* unprompted.
+  proactivity: 2
+  # 0 suggest-only · 1 safe actions · 2 moderate · 3 high — governs when Thursday *acts*.
+  # Raising this never relaxes the ASK_ALWAYS set (ADR 0009).
+  autonomy: 2
+
+database:
+  # Ships as SQLite so a fresh checkout runs with no server at all (ADR 0006).
+  #
+  # For the locked production stack, `docker compose up` sets THURSDAY_DB_* in the
+  # environment, which takes precedence over this file. To point a local checkout at
+  # Postgres, either set those variables or change `driver` here to postgresql+asyncpg.
+  #
+  # The URL is composed from parts so no password is ever written into a tracked file:
+  # THURSDAY_DB_PASSWORD comes from the environment or .env. Setting
+  # THURSDAY_DATABASE_URL overrides all of this outright.
+  driver: sqlite+aiosqlite
+  host: localhost
+  port: 5432
+  name: thursday
+  user: thursday
+  pool_size: 10
+  echo: false
+
+redis:
+  url: redis://localhost:6379/0
+  # Namespaces for the three things Redis holds: queue, realtime state, and locks.
+  queue_prefix: thursday:queue
+  state_prefix: thursday:state
+  lock_prefix: thursday:lock
+
+models:
+  # rule (offline, deterministic) · ollama (local) · anthropic (cloud)
+  backend: rule
+  allow_cloud: true
+  fast: claude-haiku-4-5-20251001
+  standard: claude-sonnet-5
+  reasoning: claude-opus-5
+  ollama_url: http://127.0.0.1:11434
+  ollama_model: llama3.1:8b
+  # The vault handle, not the key.
+  anthropic_key_handle: anthropic_api_key
+
+voice:
+  wake_word: thursday
+  stt: stub        # stub | whisper
+  tts: stub        # stub | piper
+  voice_name: thursday-neutral
+  # Wake-word gating is what keeps audio off the wire until it is addressed to Thursday.
+  always_ready: false
+  barge_in: true
+
+vision:
+  # Camera is off until asked for, every time (PART 51).
+  camera_enabled: false
+  require_indicator: true
+  gesture_timeout_s: 10
+  observation_retention_days: 7
+
+memory:
+  embedding_backend: hash        # hash (offline) | ollama
+  embedding_dimensions: 256
+  working_ttl_hours: 24
+  obsidian_enabled: true
+  obsidian_vault: thursday_vault
+
+devices:
+  heartbeat_s: 15
+  # A node silent for this long is treated as offline, whatever the socket believes.
+  stale_after_s: 90
+  require_signature: true
+  action_timeout_s: 30
+
+permissions:
+  approval_ttl_seconds: 300
+  # Per-action overrides, e.g. `app.open: AUTO`. The BLOCK set cannot be overridden here,
+  # and an ASK_ALWAYS action cannot be downgraded to AUTO.
+  overrides: {}
+
+execution:
+  max_plan_steps: 12
+  max_step_attempts: 2
+  max_dynamic_agents_per_task: 4
+  max_agent_depth: 2
+  default_task_budget_usd: 0.50
+  default_task_budget_seconds: 300
+
+logging:
+  level: INFO
+  json: false

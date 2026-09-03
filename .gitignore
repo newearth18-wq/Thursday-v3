@@ -1,0 +1,26 @@
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.env
+.env.*
+!.env.example
+*.db
+*.sqlite3
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+dist/
+build/
+*.egg-info/
+node_modules/
+.DS_Store
+var/
+thursday_vault/
+
+# Tauri / desktop build output
+apps/desktop/src-tauri/target/
+apps/desktop/src-tauri/gen/
+.coverage
+coverage.xml
+htmlcov/

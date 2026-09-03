@@ -1,0 +1,87 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # The project requires 3.12 (PEP 695 generics are used in the source), so the
+        # floor and the current release are what CI proves.
+        python-version: ["3.12", "3.13"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Set up Python ${{ matrix.python-version }}
+        run: uv python install ${{ matrix.python-version }}
+
+      - name: Install dependencies
+        run: |
+          uv venv --python ${{ matrix.python-version }}
+          uv pip install -e ".[dev]"
+
+      # Put the venv on PATH and call the tools directly rather than through `uv run`.
+      # `uv run` re-resolves the whole dependency graph across every Python the project
+      # claims to support, which can fail for a version this job is not even running —
+      # and it would not be running the environment the install step just built. These
+      # are the same commands scripts/check.sh runs locally.
+      - name: Use the project environment
+        run: echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
+
+      - name: Lint
+        run: |
+          ruff check .
+          ruff format --check .
+
+      # The suite needs no database, no Redis, no model credentials and no GUI —
+      # that is a design requirement, not a convenience.
+      - name: Test
+        run: pytest -q --cov=packages --cov=services --cov-report=term-missing
+
+      - name: Migrations apply from empty, and match the models
+        run: |
+          mkdir -p var
+          alembic upgrade head
+          alembic check
+
+      - name: Seeds are idempotent
+        run: |
+          python -m database.seeds
+          python -m database.seeds
+
+      - name: No secrets in tracked files
+        run: python scripts/check_no_secrets.py
+
+  desktop:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/desktop
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      # tsc and the bundler resolve module paths independently, so one can pass while
+      # the other fails. Both run, or neither is worth running.
+      # ci, not install: the lockfile is committed, so the build is the same one
+      # a contributor gets.
+      - name: Install
+        run: npm ci --no-audit --no-fund
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Build
+        run: npm run build

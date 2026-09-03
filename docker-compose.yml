@@ -1,0 +1,97 @@
+# Thursday's production shape (PART 2). `docker compose up` gives you the locked stack;
+# the test suite still runs against SQLite and an in-process bus, by design (ADR 0006).
+name: thursday
+
+services:
+  postgres:
+    # pgvector ships the extension pre-built; installing it into stock postgres at runtime
+    # is the usual source of "works on my machine".
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-thursday}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-thursday}
+      POSTGRES_DB: ${POSTGRES_DB:-thursday}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./docker/postgres-init.sql:/docker-entrypoint-initdb.d/00-init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-thursday} -d ${POSTGRES_DB:-thursday}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    # appendonly keeps the queue across a restart; losing a queued task silently is worse
+    # than a slightly slower write.
+    command: redis-server --appendonly yes
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  api:
+    build:
+      context: .
+      dockerfile: docker/api.Dockerfile
+    environment:
+      # Discrete parts, not a composed URL: the password stays an environment value and
+      # never becomes a string sitting in a tracked file.
+      THURSDAY_DB_HOST: postgres
+      THURSDAY_DB_PORT: "5432"
+      THURSDAY_DB_NAME: ${POSTGRES_DB:-thursday}
+      THURSDAY_DB_USER: ${POSTGRES_USER:-thursday}
+      THURSDAY_DB_PASSWORD: ${POSTGRES_PASSWORD:-thursday}
+      THURSDAY_REDIS_URL: redis://redis:6379/0
+      THURSDAY_HOST: 0.0.0.0
+      THURSDAY_LOG_JSON: "true"
+    env_file:
+      - path: .env
+        required: false
+    ports:
+      - "${THURSDAY_PORT:-8000}:8000"
+    depends_on:
+      postgres: {condition: service_healthy}
+      redis: {condition: service_healthy}
+    # Migrations run here rather than in an entrypoint script so a failed migration stops
+    # the deploy instead of starting a server against the wrong schema.
+    command: >
+      sh -c "alembic upgrade head &&
+             python -m apps.server --host 0.0.0.0 --port 8000"
+    volumes:
+      - vault-data:/data/vault
+
+  worker:
+    build:
+      context: .
+      dockerfile: docker/api.Dockerfile
+    environment:
+      THURSDAY_DB_HOST: postgres
+      THURSDAY_DB_PORT: "5432"
+      THURSDAY_DB_NAME: ${POSTGRES_DB:-thursday}
+      THURSDAY_DB_USER: ${POSTGRES_USER:-thursday}
+      THURSDAY_DB_PASSWORD: ${POSTGRES_PASSWORD:-thursday}
+      THURSDAY_REDIS_URL: redis://redis:6379/0
+      THURSDAY_LOG_JSON: "true"
+    env_file:
+      - path: .env
+        required: false
+    depends_on:
+      postgres: {condition: service_healthy}
+      redis: {condition: service_healthy}
+      api: {condition: service_started}
+    command: ["python", "-m", "apps.worker"]
+    volumes:
+      - vault-data:/data/vault
+
+volumes:
+  postgres-data:
+  redis-data:
+  vault-data:

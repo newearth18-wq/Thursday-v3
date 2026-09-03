@@ -1,0 +1,24 @@
+[package]
+name = "thursday-desktop"
+version = "0.2.0"
+description = "Thursday — personal AI operating system"
+authors = ["Thursday"]
+edition = "2021"
+rust-version = "1.77"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["tray-icon"] }
+tauri-plugin-shell = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# Used only by the tray's emergency stop, which must not depend on the webview being
+# responsive to reach the API.
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+
+[features]
+# Tauri strips the console window on Windows release builds.
+default = ["custom-protocol"]
+custom-protocol = ["tauri/custom-protocol"]

@@ -1,0 +1,917 @@
+"""ThursdayCore — the request pipeline from PART 7.
+
+    INPUT → NORMALIZE → AUTHENTICATE → LOAD WORLD STATE → LOAD MEMORY
+          → LOAD DEVICE CONTEXT → BUILD CONTEXT → INTENT → PLANNING
+          → PERMISSION CHECK → EXECUTION → VERIFICATION → MEMORY DECISION
+          → WORLD STATE UPDATE → RESPONSE
+
+One method owns the whole path, so the order cannot drift and the four steps that make this
+an operating system rather than a chat loop — classification, authorisation, verification,
+and the memory-write decision — cannot be skipped by a new code path.
+"""
+
+from __future__ import annotations
+
+from typing import Any
+from uuid import UUID
+
+from thursday_shared.enums import (
+    DataSensitivity,
+    IntentKind,
+    MemoryLayer,
+    MemorySource,
+    TaskState,
+)
+from thursday_shared.errors import (
+    ApprovalRequired,
+    BudgetExceeded,
+    DeviceUnavailable,
+    PermissionDenied,
+    PrivacyViolation,
+)
+from thursday_shared.ids import bind_trace_id
+from thursday_shared.models import (
+    Budget,
+    Citation,
+    ContextPackage,
+    ConversationTurn,
+    Event,
+    GestureContext,
+    MemoryCandidate,
+    MemoryQuery,
+    MemoryWrite,
+    ScreenContext,
+    SelectionContext,
+    ThursdayReply,
+    ThursdayResponse,
+    UserRequest,
+)
+
+from thursday_core.logging import get_logger
+from thursday_core.persona import phrase
+
+log = get_logger(__name__)
+
+#: What the intent rules call a layer, and what it means to the memory manager.
+_MEMORY_LAYERS: dict[str, MemoryLayer] = {
+    "preference": MemoryLayer.PREFERENCE,
+    "procedural": MemoryLayer.PROCEDURAL,
+    "project": MemoryLayer.PROJECT,
+    "semantic": MemoryLayer.SEMANTIC,
+}
+
+
+class ThursdayCore:
+    """The one entry point. Everything the owner says arrives through ``handle_request``."""
+
+    def __init__(self, container: Any) -> None:
+        self.c = container
+        #: Sessions the owner told Thursday not to remember. Held in memory only:
+        #: a suppression that outlived the conversation would be a setting, and the
+        #: owner said "this", not "from now on".
+        self._suppressed: set[UUID] = set()
+
+    # ------------------------------------------------------------------ PART 6 entry point
+
+    async def handle_request(self, request: UserRequest) -> ThursdayResponse:
+        """PART 6/7. One request in, one response out, whatever the modality.
+
+        NORMALIZE happens here: audio becomes a transcript before anything else looks at
+        the request, so the rest of the pipeline never has to care how the words arrived.
+        """
+        text = request.text
+        if not text and request.audio is not None:
+            text = await self._transcribe(request.audio)
+
+        if not text.strip():
+            reply = self.c.composer.clarify(
+                _clarify_question(self.c.composer.language_of(request.text)),
+                language=self.c.composer.language_of(request.text),
+            )
+            return ThursdayResponse.from_reply(reply, conversation_id=request.conversation_id)
+
+        reply = await self.handle_turn(
+            session_id=request.conversation_id,
+            text=text,
+            device_id=request.device_id,
+            modality=request.modality,
+            screen=request.screen_context,
+            selection=request.selection_context,
+            gesture=request.gesture_context,
+            wait_for_approval=request.wait_for_approval,
+        )
+        task = self.c.tasks.get(reply.task_id) if reply.task_id else None
+        return ThursdayResponse.from_reply(
+            reply,
+            conversation_id=request.conversation_id,
+            status=task.status if task else None,
+            voice=self.c.settings.voice_name,
+            device_id=request.device_id,
+        )
+
+    async def _transcribe(self, audio: bytes) -> str:
+        """Speech in, text out. The STT provider is a port; the core never knows which."""
+        stt = getattr(self.c, "stt", None)
+        if stt is None:
+            log.warning("no_stt_provider_configured")
+            return ""
+        return await stt.transcribe(audio)
+
+    # ------------------------------------------------------------------ the pipeline
+
+    async def handle_turn(
+        self,
+        *,
+        session_id: UUID,
+        text: str,
+        device_id: UUID | None = None,
+        modality: str = "text",
+        screen: ScreenContext | None = None,
+        selection: SelectionContext | None = None,
+        gesture: GestureContext | None = None,
+        wait_for_approval: bool = False,
+    ) -> ThursdayReply:
+        trace_id = bind_trace_id()
+        turn = ConversationTurn(
+            session_id=session_id,
+            role="user",
+            text=text,
+            device_id=device_id,
+            modality=modality,  # type: ignore[arg-type]
+        )
+        self.c.context_engine.record_turn(turn)
+        await self.c.bus.publish(
+            Event(
+                kind="conversation.turn.received",
+                session_id=session_id,
+                device_id=device_id,
+                payload={"length": len(text), "modality": modality},
+            )
+        )
+
+        language = self.c.composer.language_of(text)
+
+        # 2–3. Context and privacy classification.
+        context = await self.c.context_engine.build(
+            turn,
+            screen=screen,
+            selection=selection,
+            gesture=gesture,
+            budget=Budget(
+                usd=self.c.settings.default_task_budget_usd,
+                seconds=self.c.settings.default_task_budget_seconds,
+            ),
+            offline=self.c.settings.offline,
+        )
+
+        # 4–5. Model routing happens inside the reasoning engine; understand the request.
+        try:
+            intent = await self.c.reasoning.understand(context)
+        except PrivacyViolation as exc:
+            return self._finish(
+                session_id, self.c.composer.blocked(reason=exc.message, language=language)
+            )
+
+        log.info("intent", kind=str(intent.kind), confidence=intent.confidence, trace_id=trace_id)
+
+        if intent.kind is IntentKind.STOP:
+            return self._finish(session_id, await self._handle_stop(language))
+        if intent.kind in (IntentKind.APPROVE, IntentKind.DECLINE):
+            # Answering a question, which is a different act from giving an instruction and
+            # has to be resolved before anything tries to plan the word "yes".
+            return self._finish(
+                session_id,
+                await self._handle_answer(
+                    intent, session_id, language, yes=intent.kind is IntentKind.APPROVE
+                ),
+            )
+        if intent.kind is IntentKind.VISION:
+            return self._finish(session_id, await self._handle_vision(intent, language))
+        if intent.kind is IntentKind.MEMORY_FORGET:
+            # Ahead of everything else in the memory pipeline: the owner asking is the
+            # strongest signal the write policy has, in both directions (§7).
+            return self._finish(session_id, await self._handle_forget(intent, session_id, language))
+        if intent.kind is IntentKind.MEMORY_WRITE:
+            # A control intent: it never reaches the planner, because there is nothing to
+            # plan. The write policy still applies — being told to remember something is
+            # not a licence to store a credential (§35).
+            return self._finish(
+                session_id, await self._handle_remember(intent, session_id, language)
+            )
+        if intent.kind is IntentKind.CLARIFY or intent.confidence < 0.35:
+            # A conversational answer is harmless even when the classifier was unsure;
+            # only a low-confidence *action* has to become a question.
+            if intent.direct_answer and intent.kind in (IntentKind.ANSWER, IntentKind.UNKNOWN):
+                return self._finish(
+                    session_id,
+                    self.c.composer.answer(
+                        intent.direct_answer,
+                        language=language,
+                        confidence=intent.confidence,
+                        people_present=context.world.people_present,
+                    ),
+                )
+            reply = self.c.composer.clarify(_clarify_question(language), language=language)
+            reply.detail = intent.rationale or None
+            return self._finish(session_id, reply)
+        if intent.kind is IntentKind.STATUS and intent.entities.get("subject") == "device":
+            return self._finish(session_id, self._device_status_reply(intent, context, language))
+        if intent.kind is IntentKind.STATUS and intent.entities.get("subject") == "last_task":
+            return self._finish(session_id, self._last_task_reply(intent, context, language))
+
+        # 6. Plan. A skill run is the one intent whose plan does not come from the planner:
+        #    the steps were learned, not derived. Everything after this point is identical,
+        #    which is the point — a skill becomes an ordinary task the moment it has a plan.
+        if intent.kind is IntentKind.SKILL_RUN:
+            resolved = self._plan_from_skill(intent, context, language)
+            if isinstance(resolved, ThursdayReply):
+                return self._finish(session_id, resolved)
+            plan = resolved
+        else:
+            plan = self.c.planner.plan(intent, context)
+
+        if not plan.steps:
+            reply = await self._answer_directly(intent, context, language)
+            await self._remember(turn, intent, context, reply)
+            return self._finish(session_id, reply)
+
+        # 7–9. Authorise and execute; the orchestrator verifies each step.
+        task = await self.c.tasks.create(
+            title=intent.objective[:80],
+            objective=intent.objective,
+            session_id=session_id,
+            origin_device_id=device_id,
+            budget=context.budget,
+        )
+        await self.c.tasks.transition(task.id, TaskState.PLANNING)
+
+        def answered(reply: ThursdayReply) -> ThursdayReply:
+            """Every reply from here on belongs to this task, however it turned out.
+
+            The caller uses this to look the task up — for its state, its steps, or to
+            cancel it — so a reply that omits it leaves them holding a message about work
+            they cannot find. Attaching it in one place is the only way it stays true for
+            the failure paths as well as the happy one.
+            """
+            reply.task_id = task.id
+            return self._finish(session_id, reply)
+
+        try:
+            outcome = await self.c.orchestrator.run(
+                task, plan, context, wait_for_approval=wait_for_approval
+            )
+        except ApprovalRequired as exc:
+            approval = self.c.approvals.get(UUID(exc.details["approval_id"]))
+            return answered(self.c.composer.needs_approval(approval, language=language))
+        except PermissionDenied as exc:
+            await self.c.tasks.fail(task.id, exc.message)
+            return answered(self.c.composer.blocked(reason=exc.message, language=language))
+        except DeviceUnavailable as exc:
+            await self.c.tasks.fail(task.id, exc.message)
+            question = exc.details.get("question") or exc.message
+            return answered(self.c.composer.clarify(question, language=language))
+        except BudgetExceeded as exc:
+            await self.c.tasks.fail(task.id, exc.message)
+            return answered(self.c.composer.failure(reason=exc.message, language=language))
+
+        if outcome.approval_required is not None:
+            approval = self.c.approvals.get(UUID(outcome.approval_required.details["approval_id"]))
+            return answered(self.c.composer.needs_approval(approval, language=language))
+
+        reply = await self._report(task, outcome, context, intent, language)
+        await self._remember(turn, intent, context, reply, outcome=outcome)
+        return answered(reply)
+
+    # ------------------------------------------------------------------ reporting
+
+    async def _report(
+        self, task, outcome, context: ContextPackage, intent, language: str
+    ) -> ThursdayReply:
+        people = context.world.people_present
+        summary = outcome.summary()
+
+        if outcome.ok:
+            verification = outcome.outcomes[-1].verification
+            await self.c.tasks.transition(task.id, TaskState.VERIFYING)
+            await self.c.tasks.complete(
+                task.id,
+                result={"summary": summary, "steps": [o.step.name for o in outcome.outcomes]},
+                verification=verification,
+            )
+            answer = outcome.outcomes[-1].result.output.get("answer") if outcome.outcomes else None
+            if answer:
+                return self.c.composer.answer(
+                    answer,
+                    language=language,
+                    confidence=verification.confidence,
+                    citations=_citations(outcome),
+                    people_present=people,
+                )
+            return self.c.composer.success(
+                summary=summary,
+                verification=verification,
+                language=language,
+                intent=intent,
+                citations=_citations(outcome),
+                people_present=people,
+                on_device=_inherited_device(outcome),
+            )
+
+        failure = outcome.first_failure()
+        error = _explain_failure(failure)
+        await self.c.tasks.fail(
+            task.id, error, verification=failure.verification if failure else None
+        )
+
+        # A step that ran but could not be confirmed is reported as unverified, not failed —
+        # the difference matters to the person deciding what to do next (§76).
+        if failure and failure.verification and failure.result and failure.result.ok:
+            return self.c.composer.unverified(
+                summary=failure.result.summary or summary,
+                verification=failure.verification,
+                language=language,
+                intent=intent,
+                people_present=people,
+            )
+        if outcome.partial:
+            return self.c.composer.partial_failure(
+                done=summary,
+                failed=failure.step.name if failure else "the remaining work",
+                preserved="ผมเก็บผลลัพธ์ส่วนที่สำเร็จไว้แล้ว"
+                if language == "th"
+                else "I kept what did complete",
+                language=language,
+                people_present=people,
+            )
+        return self.c.composer.failure(reason=error, language=language, people_present=people)
+
+    async def _answer_directly(
+        self, intent, context: ContextPackage, language: str
+    ) -> ThursdayReply:
+        if intent.direct_answer:
+            return self.c.composer.answer(
+                intent.direct_answer,
+                language=language,
+                confidence=intent.confidence,
+                people_present=context.world.people_present,
+            )
+        if intent.kind is IntentKind.STATUS:
+            return self.c.composer.answer(
+                self._status_text(context, language),
+                language=language,
+                confidence=0.95,
+                people_present=context.world.people_present,
+            )
+        text = await self.c.reasoning.answer(context)
+        citations = [
+            Citation(source=m.source, ref=m.source_ref or str(m.layer), confidence=m.confidence)
+            for m in context.memories[:3]
+        ]
+        return self.c.composer.answer(
+            text,
+            language=language,
+            confidence=0.7,
+            citations=citations,
+            people_present=context.world.people_present,
+        )
+
+    def _device_status_reply(self, intent, context: ContextPackage, language: str) -> ThursdayReply:
+        """Answer "is the home PC on?" — and remember that we are now talking about it.
+
+        Asking after a machine by name is the clearest statement there is of what the next
+        sentence will be about. Without recording it, "เปิด Chrome ให้หน่อย" lands on the
+        phone in the owner's hand (§22, V8).
+        """
+        hint = intent.entities.get("device_name") or intent.target_device
+        resolution = self.c.device_router.resolve(
+            hint, world=context.world, origin_device_id=context.turn.device_id
+        )
+        if resolution.device is not None and hint:
+            self.c.device_focus.remember(
+                context.turn.session_id,
+                device_id=resolution.device.id,
+                device_name=resolution.device.name,
+                reason=f"you asked about {resolution.device.name}",
+            )
+        if resolution.device is None:
+            known = self.c.hub.find_by_name(str(hint or ""))
+            if known is not None:
+                text = (
+                    f"{known.name} ออฟไลน์อยู่ ครั้งล่าสุดที่เชื่อมต่อคือ "
+                    f"{known.last_seen_at:%Y-%m-%d %H:%M} UTC"
+                    if language == "th"
+                    else f"{known.name} is offline. Last seen {known.last_seen_at:%Y-%m-%d %H:%M} UTC."
+                )
+                return self.c.composer.answer(text, language=language, confidence=0.9)
+            return self.c.composer.clarify(resolution.question(), language=language)
+
+        device = resolution.device
+        telemetry = device.telemetry
+        bits = [f"{device.name} ออนไลน์" if language == "th" else f"{device.name} is online"]
+        if telemetry and telemetry.battery_percent is not None:
+            bits.append(f"battery {telemetry.battery_percent:.0f}%")
+        if telemetry and telemetry.active_window:
+            bits.append(f"active window: {telemetry.active_window}")
+        return self.c.composer.answer(" · ".join(bits), language=language, confidence=0.95)
+
+    async def _handle_answer(
+        self, intent, session_id: UUID, language: str, *, yes: bool
+    ) -> ThursdayReply:
+        """ "ทำเลย" / "ไม่ต้อง" — the answer to whatever Thursday last asked.
+
+        Two different things can be outstanding and both are answered with the same word.
+        An **approval** gates work already under way and was asked *for*; an **offer** is a
+        suggestion nobody requested. When both are open the approval wins, because someone
+        answering has almost certainly just been interrupted by it — and because guessing
+        wrong on an approval means either blocking work the owner released or releasing work
+        they meant to leave alone, while guessing wrong on an offer means a suggestion is
+        re-asked later.
+        """
+        approvals = self.c.approvals.pending()
+        if approvals:
+            approval = approvals[0]
+            await self.c.approvals.decide(approval.id, approve=yes)
+            text = (
+                (f"อนุมัติแล้วครับ — {approval.action}" if yes else f"ยกเลิก {approval.action} แล้วครับ")
+                if language == "th"
+                else (f"Approved — {approval.action}." if yes else f"Left {approval.action} alone.")
+            )
+            return self.c.composer.answer(text, language=language, confidence=0.95)
+
+        offer = self.c.offers.accept() if yes else self.c.offers.decline()
+        if offer is None:
+            text = (
+                "ตอนนี้ผมยังไม่ได้ถามอะไรค้างไว้ครับ"
+                if language == "th"
+                else "There is nothing outstanding for me to act on."
+            )
+            return self.c.composer.answer(text, language=language, confidence=0.9)
+        if not yes:
+            # Declined offers are not re-raised immediately; the observation stays
+            # suppressed for its window, which is what stops "no" being asked again in a
+            # minute's time.
+            text = "ครับ ไม่ทำแล้วครับ" if language == "th" else "Understood — I will leave it."
+            return self.c.composer.answer(text, language=language, confidence=0.95)
+
+        return await self._act_on_offer(offer, session_id, language)
+
+    async def _act_on_offer(self, offer, session_id: UUID, language: str) -> ThursdayReply:
+        """Turn an accepted offer into ordinary work.
+
+        Ordinary is the point: the offer becomes a `UserRequest` and goes down the same
+        path as anything the owner typed — planner, permission engine, agents, Supervisor.
+        A proactive request that took a shortcut past any of those would be a second
+        execution path, and the one thing V10 must not introduce is a way for Thursday to
+        act on its own initiative *and* on its own terms.
+        """
+        plan = self.c.planner.plan_for_offer(offer.action)
+        if plan is None:
+            # No structured shape for this offer — it is an instruction, so it goes through
+            # the ordinary path exactly as if the owner had typed it.
+            reply = await self.handle_turn(
+                session_id=session_id,
+                text=str(offer.action.get("instruction") or offer.text),
+            )
+            reply.detail = (reply.detail or "") + f" (accepted: {offer.text})"
+            return reply
+
+        return await self._run_plan(
+            plan, session_id=session_id, language=language, source=offer.text
+        )
+
+    async def _run_plan(
+        self, plan, *, session_id: UUID, language: str, source: str
+    ) -> ThursdayReply:
+        """Run a plan Thursday built for itself, down the ordinary path.
+
+        The same task record, the same orchestrator, the same Supervisor, the same audit.
+        The only thing that differs is where the plan came from — and that is recorded on
+        the reply rather than being invisible, because "Thursday did this because it offered
+        and I said yes" is a different fact from "I asked for this" and the owner should be
+        able to tell them apart later.
+        """
+        context = await self.c.context_engine.build(
+            ConversationTurn(session_id=session_id, role="system", text=plan.objective),
+            budget=Budget(
+                usd=self.c.settings.default_task_budget_usd,
+                seconds=self.c.settings.default_task_budget_seconds,
+            ),
+            offline=self.c.settings.offline,
+        )
+        task = await self.c.tasks.create(
+            title=plan.objective[:80],
+            objective=plan.objective,
+            session_id=session_id,
+            budget=context.budget,
+        )
+        await self.c.tasks.transition(task.id, TaskState.PLANNING)
+
+        try:
+            outcome = await self.c.orchestrator.run(task, plan, context, wait_for_approval=False)
+        except ApprovalRequired as exc:
+            approval = self.c.approvals.get(UUID(exc.details["approval_id"]))
+            reply = self.c.composer.needs_approval(approval, language=language)
+            reply.task_id = task.id
+            return self._finish(session_id, reply)
+        except (PermissionDenied, DeviceUnavailable, BudgetExceeded) as exc:
+            await self.c.tasks.fail(task.id, exc.message)
+            reply = self.c.composer.failure(reason=exc.message, language=language)
+            reply.task_id = task.id
+            return self._finish(session_id, reply)
+
+        reply = await self._report(task, outcome, context, None, language)
+        reply.task_id = task.id
+        reply.detail = (reply.detail or "") + f" (accepted: {source})"
+        return self._finish(session_id, reply)
+
+    def _plan_from_skill(self, intent, context: ContextPackage, language: str):
+        """Find the skill the owner meant and turn it into a plan.
+
+        "แบบเดิม" carries two claims — *do this thing*, and *the way you already do it* —
+        and which one matters depends on what Thursday actually knows:
+
+        * **A learned skill matches.** The second claim names it; run it.
+        * **Two skills match equally.** The sentence does not identify one of them, so ask.
+          Running the wrong workflow is worse than asking: its steps have already happened
+          by the time anybody notices.
+        * **No skill matches.** The second claim is not about a skill at all — it is the
+          owner pointing at a remembered instruction ("these reports start with a summary
+          table", §7). So the marker is stripped and the sentence planned as the ordinary
+          request it also is, with that instruction applied. Announcing a missing skill here
+          would be answering a question the owner did not ask, while ignoring the one
+          they did.
+        """
+        from thursday_automation.skills.matching import find_skill
+        from thursday_automation.skills.planning import SkillNotRunnable, plan_from_skill
+
+        from thursday_core import intent_rules
+
+        utterance = str(intent.entities.get("utterance") or intent.objective)
+        match = find_skill(utterance, self.c.skills.active())
+
+        # Nothing active matched. Before falling through, check whether a skill exists that
+        # the owner has not approved yet: quietly planning something else in its place would
+        # do work they did not ask for while looking like it did what they wanted. A skill
+        # held back by its own lifecycle is a fact worth saying out loud (§52).
+        if match is None:
+            pending = find_skill(utterance, self.c.skills.list())
+            if pending is not None and pending.confident:
+                match = pending
+
+        if match is not None and not match.confident:
+            return self.c.composer.clarify(match.question(), language=language)
+        if match is not None:
+            try:
+                return plan_from_skill(match.skill)
+            except SkillNotRunnable as exc:
+                return self.c.composer.blocked(reason=exc.args[0], language=language)
+
+        plain = intent_rules.without_like_before(utterance)
+        if plain and (fallback := intent_rules.parse(plain)) is not None:
+            plan = self.c.planner.plan(fallback.intent, context)
+            if plan.steps:
+                return plan
+
+        text = (
+            "ผมยังไม่มีสกิลที่เคยทำแบบนี้ครับ — บอกขั้นตอนมาได้เลย แล้วผมจะจำไว้เป็นสกิล"
+            if language == "th"
+            else "I have no learned skill for that yet. Walk me through it once and I "
+            "will capture it as one."
+        )
+        return self.c.composer.answer(text, language=language, confidence=0.9)
+
+    def _last_task_reply(self, intent, context: ContextPackage, language: str) -> ThursdayReply:
+        """ "ผลเมื่อกี้เป็นยังไง" — asked, as often as not, from a different machine (V8).
+
+        The lookup is deliberately not scoped to this conversation. The owner ran something
+        on the PC, walked away, and is now asking on their phone: a new device, a new
+        session, the same question. Tasks live in the core precisely so that this works —
+        a task scoped to the session that started it would be invisible the moment the owner
+        picked up a different device, which would make the core's ownership of tasks
+        pointless.
+        """
+        task = next(
+            (t for t in self.c.tasks.list(limit=20) if t.status.is_terminal),
+            None,
+        )
+        if task is None:
+            text = (
+                "ยังไม่มีงานที่เสร็จไปก่อนหน้านี้ครับ"
+                if language == "th"
+                else "There is no finished task to report on yet."
+            )
+            return self.c.composer.answer(text, language=language, confidence=0.9)
+
+        where = self.c.hub.summary(task.origin_device_id) if task.origin_device_id else None
+        device = where.name if where else None
+        # Naming the machine is the point of the answer, not decoration: the owner is
+        # asking from somewhere else, and "it worked" without "on the PC" is ambiguous
+        # in exactly the situation this reply exists for.
+        result = (task.result or {}).get("summary") or task.title
+
+        if intent.entities.get("continue"):
+            if where is not None:
+                self.c.device_focus.remember(
+                    context.turn.session_id,
+                    device_id=where.id,
+                    device_name=where.name,
+                    reason=f"you asked to continue on {where.name}",
+                )
+            text = (
+                f"งานล่าสุดคือ “{task.title}” บน {device or 'เครื่องที่ไม่ทราบชื่อ'} — "
+                f"{self._outcome_word(task, language)} สั่งต่อได้เลยครับ ผมจะทำบนเครื่องนั้น"
+                if language == "th"
+                else f"The last task was “{task.title}” on {device or 'an unknown device'} — "
+                f"{self._outcome_word(task, language)}. Say what to do next and I'll run it there."
+            )
+            return self.c.composer.answer(text, language=language, confidence=0.9)
+
+        text = (
+            f"งานล่าสุด “{task.title}” {self._outcome_word(task, language)}"
+            + (f" บน {device}" if device else "")
+            + (f" — {result}" if result and result != task.title else "")
+            if language == "th"
+            else f"The last task, “{task.title}”, {self._outcome_word(task, language)}"
+            + (f" on {device}" if device else "")
+            + (f" — {result}" if result and result != task.title else "")
+        )
+        return self.c.composer.answer(text, language=language, confidence=0.92)
+
+    @staticmethod
+    def _outcome_word(task, language: str) -> str:
+        if task.status is TaskState.COMPLETED:
+            return "เสร็จแล้ว" if language == "th" else "completed"
+        if task.status is TaskState.CANCELLED:
+            return "ถูกยกเลิก" if language == "th" else "was cancelled"
+        return "ล้มเหลว" if language == "th" else "failed"
+
+    def _status_text(self, context: ContextPackage, language: str) -> str:
+        running = self.c.tasks.list(status=TaskState.RUNNING)
+        waiting = self.c.tasks.list(status=TaskState.WAITING_APPROVAL)
+        if not running and not waiting:
+            return "ตอนนี้ไม่มีงานที่กำลังทำอยู่" if language == "th" else "Nothing is running right now."
+        lines = []
+        if running:
+            lines.append(
+                ("กำลังทำ: " if language == "th" else "Running: ")
+                + ", ".join(f"{t.title} ({t.progress:.0%})" for t in running[:5])
+            )
+        if waiting:
+            lines.append(
+                ("รออนุมัติ: " if language == "th" else "Waiting for approval: ")
+                + ", ".join(t.title for t in waiting[:5])
+            )
+        return "\n".join(lines)
+
+    # ------------------------------------------------------------------ side paths
+
+    async def _handle_vision(self, intent, language: str) -> ThursdayReply:
+        """Looking at something (§25, §51).
+
+        The camera is not opened here. A grant is checked and, when it is missing, the
+        owner is *asked* — a component that turns on a camera to answer a question it was
+        asked has no consent model, only a habit of asking forgiveness.
+        """
+        vision = getattr(self.c, "vision", None)
+        if vision is None:
+            return self.c.composer.blocked(
+                reason="no camera or screen is configured on this device", language=language
+            )
+
+        action = str(intent.entities.get("action", ""))
+
+        if action == "vision.where":
+            thing = str(intent.entities.get("thing", "")).strip()
+            sighting = vision.spatial.last_seen(thing)
+            if sighting is None:
+                # Never seen it. Before giving up, ask memory — the owner may have *told*
+                # Thursday where it is, and answering "I have never seen it" while holding
+                # a note that says "the spare keys live in the drawer" would be absurd.
+                remembered = await self.c.memory.recall(
+                    MemoryQuery(text=thing, k=3, min_confidence=0.4)
+                )
+                if remembered:
+                    return self.c.composer.answer(
+                        remembered[0].content,
+                        language=language,
+                        confidence=remembered[0].confidence,
+                    )
+                return self.c.composer.answer(
+                    phrase("never_seen", language, thing=thing), language=language
+                )
+            # Phrased as a sighting by the model itself, never as a claim about now (§25).
+            return self.c.composer.answer(
+                sighting.describe(language), language=language, confidence=sighting.confidence
+            )
+
+        if action == "vision.screen":
+            reading = await vision.read_screen(question=intent.objective)
+            if reading.uncertain:
+                return self.c.composer.clarify(
+                    "ผมอ่านหน้าจอไม่ออก ช่วยบอกได้ไหมว่าดูตรงไหน"
+                    if language == "th"
+                    else "I could not read the screen — which part did you mean?",
+                    language=language,
+                )
+            return self.c.composer.answer(reading.summary, language=language)
+
+        # Camera identification.
+        allowed, why = (
+            vision.camera.may_capture() if vision.camera else (False, "no camera is configured")
+        )
+        if not allowed:
+            reply = self.c.composer.clarify(
+                phrase("camera_needs_permission", language), language=language
+            )
+            reply.detail = why
+            return reply
+
+        answer = await vision.identify(intent.objective)
+        if not answer.ok:
+            return self.c.composer.blocked(reason=answer.refused or "", language=language)
+        if answer.uncertain:
+            return self.c.composer.clarify(answer.text, language=language)
+        return self.c.composer.answer(answer.text, language=language)
+
+    async def _handle_forget(self, intent, session_id: UUID, language: str) -> ThursdayReply:
+        """ "ลืมเรื่อง X" and "อย่าจำเรื่องนี้" are two different instructions.
+
+        The first deletes what is stored. The second is about the conversation happening
+        now — and "this" means what was *just said*, so honouring it has to do both halves:
+        stop writing from here on, and remove what this session already wrote. Only
+        stopping would leave the thing the owner was pointing at still in memory, which is
+        the opposite of what they asked for.
+        """
+        if str(intent.entities.get("mode")) == "suppress":
+            self._suppressed.add(session_id)
+            removed = await self.c.memory.forget_from_session(session_id)
+            log.info("memory_suppressed", session=str(session_id), removed=len(removed))
+            return self.c.composer.will_not_remember(language=language)
+
+        subject = str(intent.entities.get("subject") or "").strip()
+        removed = await self.c.memory.forget_about(subject)
+        return self.c.composer.forgotten(subject, len(removed), language=language)
+
+    async def _handle_remember(self, intent, session_id: UUID, language: str) -> ThursdayReply:
+        """PART 39's write path, driven by the owner saying so out loud.
+
+        The owner asking is the strongest signal the write policy has, so this goes in as
+        ``MemorySource.USER`` — but it goes through ``propose`` rather than around it, so
+        the credential and privacy refusals still hold.
+        """
+        fact = str(intent.entities.get("fact") or intent.objective).strip()
+        # The rules already decided which layer this belongs in, and the distinction
+        # matters: a procedural memory is *applied* to later work by the planner, while a
+        # semantic one is only ever recalled. Mapping every non-preference write to
+        # SEMANTIC silently threw that away, so "these reports start with a summary table"
+        # became trivia instead of an instruction.
+        layer = _MEMORY_LAYERS.get(
+            str(intent.entities.get("layer", "")).lower(), MemoryLayer.SEMANTIC
+        )
+        judgement, record = await self.c.memory.propose(
+            MemoryCandidate(
+                layer=layer,
+                content=fact,
+                source=MemorySource.USER,
+                confidence=0.95,
+                # The owner said it deliberately; that is what importance is measuring.
+                importance=0.8,
+                session_id=session_id,
+            )
+        )
+        if record is None:
+            return self.c.composer.not_remembered(judgement.reason, language=language)
+        return self.c.composer.remembered(fact, language=language)
+
+    async def _handle_stop(self, language: str) -> ThursdayReply:
+        """§44 — stop speaking, pause agents, cancel what is safe to cancel."""
+        cancelled = 0
+        for task in self.c.tasks.list(status=TaskState.RUNNING):
+            self.c.queue.cancel(task.id)
+            await self.c.tasks.cancel(task.id, reason="owner said stop")
+            cancelled += 1
+        await self.c.bus.publish(
+            Event(kind="conversation.interrupted", payload={"cancelled": cancelled})
+        )
+        state = (
+            f"ยกเลิกงานที่กำลังทำ {cancelled} รายการ"
+            if language == "th" and cancelled
+            else (f"cancelled {cancelled} running task(s)" if cancelled else "")
+        )
+        return self.c.composer.stopped(language=language, state=state)
+
+    async def _remember(self, turn, intent, context: ContextPackage, reply, outcome=None) -> None:
+        """§7.3 — the write policy decides; this only proposes."""
+        if context.sensitivity >= DataSensitivity.SECRET:
+            return
+        if turn.session_id in self._suppressed:
+            # The owner said not to. That outranks every heuristic below it (§7).
+            #
+            # Note where this check sits: on the *implicit* write path only. A later
+            # explicit "จำไว้ว่า X" in the same conversation is still honoured, because
+            # "don't remember this" was about what had just been said, not a standing gag.
+            # Reading it as one would mean silently ignoring the clearest instruction the
+            # owner can give — the same failure as remembering what they asked to forget.
+            log.debug("memory_write_suppressed", session=str(turn.session_id))
+            return
+        if outcome is not None and outcome.ok:
+            await self.c.memory.write(
+                MemoryWrite(
+                    layer=MemoryLayer.EPISODIC,
+                    content=f"{intent.objective} → {outcome.summary()}",
+                    structured={
+                        "outcome": "success",
+                        "steps": [o.step.name for o in outcome.outcomes],
+                        "verified": True,
+                    },
+                    importance=0.55,
+                    confidence=0.9,
+                    source=MemorySource.AGENT,
+                    task_id=outcome.task.id,
+                    session_id=turn.session_id,
+                    sensitivity=context.sensitivity,
+                )
+            )
+            # A verified multi-step success is a procedure worth reusing (§93).
+            if len(outcome.outcomes) > 1:
+                await self.c.memory.write(
+                    MemoryWrite(
+                        layer=MemoryLayer.PROCEDURAL,
+                        key=intent.objective[:60],
+                        content="; ".join(
+                            f"{o.step.name}: {o.step.objective}" for o in outcome.outcomes
+                        ),
+                        structured={
+                            "steps": [o.step.model_dump(mode="json") for o in outcome.outcomes]
+                        },
+                        importance=0.7,
+                        confidence=0.85,
+                        source=MemorySource.AGENT,
+                        session_id=turn.session_id,
+                        sensitivity=context.sensitivity,
+                    )
+                )
+            return
+
+        await self.c.memory.write(
+            MemoryWrite(
+                layer=MemoryLayer.SEMANTIC,
+                content=turn.text,
+                importance=0.4,
+                confidence=0.8,
+                source=MemorySource.USER,
+                session_id=turn.session_id,
+                sensitivity=context.sensitivity,
+            )
+        )
+
+    def _finish(self, session_id: UUID, reply: ThursdayReply) -> ThursdayReply:
+        self.c.context_engine.record_turn(
+            ConversationTurn(session_id=session_id, role="thursday", text=reply.text)
+        )
+        return reply
+
+
+def _clarify_question(language: str) -> str:
+    """The owner gets a question, not the classifier's internal rationale."""
+    return (
+        "ผมยังไม่แน่ใจว่าต้องการให้ทำอะไร ช่วยบอกให้ชัดขึ้นอีกนิดได้ไหม"
+        if language == "th"
+        else "I'm not sure what you'd like me to do — could you put it another way?"
+    )
+
+
+def _explain_failure(failure) -> str:
+    """Say what actually went wrong, not that something did."""
+    if failure is None:
+        return "the work did not complete"
+    if failure.error:
+        return failure.error
+    if failure.result is not None and failure.result.error:
+        return failure.result.error
+    if failure.verification is not None and failure.verification.critique:
+        return failure.verification.critique
+    return f"step {failure.step.name!r} did not complete"
+
+
+def _inherited_device(outcome) -> str | None:
+    """The machine a step ran on, when the conversation rather than the owner chose it.
+
+    None in the ordinary case — naming the device on every reply would be noise, and noise
+    is what stops people reading the one reply where it mattered.
+    """
+    for step_outcome in outcome.outcomes:
+        step = step_outcome.step
+        if step.device_announced and step.resolved_device:
+            return step.resolved_device
+    return None
+
+
+def _citations(outcome) -> list[Citation]:
+    citations: list[Citation] = []
+    for step in outcome.outcomes:
+        if step.result is None:
+            continue
+        for source in step.result.output.get("sources", [])[:5]:
+            citations.append(Citation(source=MemorySource.AGENT, ref=str(source)))
+    return citations
