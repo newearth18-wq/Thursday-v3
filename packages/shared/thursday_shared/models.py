@@ -606,6 +606,10 @@ class ToolSpec(Base):
     supports_dry_run: bool = False
     #: PART 60 — a reversible tool registers how to reverse itself.
     supports_undo: bool = False
+    #: ONBOARDING §61, same contract as `AgentSpec`: a sentence for a person, or silence.
+    user_description: str = ""
+    user_examples: list[str] = Field(default_factory=list)
+    safety_notes: str = ""
 
 
 class ToolCall(Base):
@@ -726,6 +730,20 @@ class AgentSpec(Base):
     #: marks a field that may legitimately be absent.
     output_schema: dict[str, str] = Field(default_factory=dict)
     temporary: bool = False
+    #: ONBOARDING §61. What this agent is, in one sentence, for somebody who has never heard
+    #: of an agent. Empty means "not describable to a person yet", and the tutor stays silent
+    #: about it rather than reading `description` out — that field is written for whoever
+    #: wired the thing, and Sprint 65's rule is that an internal never substitutes for a
+    #: sentence nobody wrote.
+    user_description: str = ""
+    #: Things the owner could actually say to reach this. Phrases, not syntax (§28).
+    user_examples: list[str] = Field(default_factory=list)
+    #: What the owner should know before using it — kept apart from `description` because a
+    #: caveat buried in a paragraph is a caveat nobody read.
+    safety_notes: str = ""
+    #: What has to be true for this to work at all, as capability names the tutor can check
+    #: against the live system (§12, §52). Never a claim about what *is* true.
+    requirements: list[str] = Field(default_factory=list)
     system_prompt: str = ""
 
 

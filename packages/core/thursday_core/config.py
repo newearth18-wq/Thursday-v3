@@ -23,6 +23,11 @@ from pydantic import Field, computed_field
 from pydantic_settings import BaseSettings, PydanticBaseSettingsSource, SettingsConfigDict
 from thursday_shared.enums import AutonomyLevel, ProactivityLevel
 
+from thursday_core.learning import TeachingFrequency
+from thursday_core.logging import get_logger
+
+log = get_logger(__name__)
+
 SETTINGS_FILE = Path("settings.yaml")
 
 #: settings.yaml is grouped for humans; Settings is flat for code. This maps one to the
@@ -46,6 +51,7 @@ _YAML_MAP: dict[str, dict[str, str]] = {
         "echo": "debug",
     },
     "edition": {"name": "edition"},
+    "teaching": {"frequency": "teaching"},
     "redis": {"url": "redis_url"},
     "models": {
         "backend": "llm_backend",
@@ -169,6 +175,11 @@ class Settings(BaseSettings):
     proactivity: ProactivityLevel = ProactivityLevel.NORMAL
     #: When Thursday may *act* unasked. Separate axis, separate risk (ADR 0009).
     autonomy: AutonomyLevel = AutonomyLevel.MODERATE
+    #: How often Thursday teaches unprompted (§7, §39): OFF · ON_REQUEST · LOW · NORMAL · HIGH.
+    #: A third axis, and separate from the two above for the same reason they are separate
+    #: from each other: how much Thursday *explains* is not how much it acts or announces.
+    #: OFF and ON_REQUEST are ceilings — no relevance score reaches past them.
+    teaching: str = "NORMAL"
 
     # runtime -------------------------------------------------------------------
     environment: str = "development"
@@ -376,6 +387,21 @@ class Settings(BaseSettings):
     @property
     def is_desktop(self) -> bool:
         return self.edition.lower() == "desktop"
+
+    @property
+    def teaching_frequency(self) -> TeachingFrequency:
+        """`teaching` as the enum the tutor compares against (§7, §39).
+
+        An unrecognised value falls back to OFF rather than to the default. A typo in this
+        setting is somebody trying to turn teaching *down*, and the safe reading of a
+        misspelled instruction is the quiet one — the loud failure mode here is Thursday
+        talking over a person who asked it not to.
+        """
+        try:
+            return TeachingFrequency[self.teaching.strip().upper()]
+        except KeyError:
+            log.warning("unknown_teaching_frequency", value=self.teaching)
+            return TeachingFrequency.OFF
 
     def external_services(self) -> list[str]:
         """What somebody has to install and run before this configuration works.

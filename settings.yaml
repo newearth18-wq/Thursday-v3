@@ -40,6 +40,20 @@ database:
 edition:
   name: desktop
 
+# How often Thursday teaches unprompted (ADAPTIVE ONBOARDING §7, §39).
+#
+#   off         never, not even the first-run introduction
+#   on_request  only when asked — "สอนอะไรใหม่ให้ฉันหน่อย" still works
+#   low         rarely
+#   normal      the shipped default
+#   high        more often, for somebody who wants to be shown around
+#
+# A third axis, separate from `proactivity` and `autonomy` above: how much Thursday
+# *explains* is not how often it speaks up, nor how much it does unasked. `off` and
+# `on_request` are ceilings — no relevance score reaches past them.
+teaching:
+  frequency: normal
+
 redis:
   # Empty on purpose, and this line is the desktop edition.
   #
