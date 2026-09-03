@@ -291,3 +291,243 @@ async def test_a_row_with_no_id_is_refused_rather_than_silently_inserted(databas
 
     with pytest.raises(ValueError, match="no id"):
         await repository.put({"content": "no identity"})
+
+
+# ===========================================================================  the audit log
+
+
+async def audited(container, *actions: str):
+    from thursday_security.audit import AuditEntry
+
+    for action in actions:
+        await container.audit.record(
+            AuditEntry(actor="user", action=action, tool=action, resource=f"~/{action}")
+        )
+
+
+def make_audit_settings(make_settings):
+    return make_settings(persist_memory=False, persist_audit=True)
+
+
+async def test_the_audit_trail_survives_a_restart(make_settings):
+    first = await boot(make_audit_settings(make_settings))
+    await audited(first, "file.write", "app.open", "email.send")
+
+    second = await boot(make_audit_settings(make_settings))
+    assert [e.action for e in second.audit.entries()] == ["file.write", "app.open", "email.send"]
+
+
+async def test_the_chain_still_verifies_after_a_restart(make_settings):
+    first = await boot(make_audit_settings(make_settings))
+    await audited(first, "file.write", "app.open", "email.send")
+
+    second = await boot(make_audit_settings(make_settings))
+    assert second.audit.verify_chain() is True
+
+
+async def test_the_chain_continues_across_the_restart(make_settings):
+    """The property that makes the log tamper-evident across a process boundary, and the one
+    that would quietly not hold if entries were reloaded in the wrong order or re-hashed.
+
+    An entry written after the restart must chain onto the last entry written before it. If
+    it started a fresh chain from GENESIS, everything before the restart could be deleted
+    without `verify_chain` noticing — which is exactly the deletion the chain exists to catch.
+    """
+    first = await boot(make_audit_settings(make_settings))
+    await audited(first, "before.restart")
+    last_hash = first.audit.entries()[-1].hash
+
+    second = await boot(make_audit_settings(make_settings))
+    await audited(second, "after.restart")
+
+    entries = second.audit.entries()
+    assert entries[-1].action == "after.restart"
+    assert entries[-1].prev_hash == last_hash, "the new entry did not chain onto the old one"
+    assert second.audit.verify_chain() is True
+
+
+async def test_deleting_a_stored_entry_is_still_detected_after_a_restart(make_settings):
+    """The whole point of persisting the hashes rather than recomputing them on load."""
+    from sqlalchemy import delete
+    from thursday_shared.db.models import AuditLogRow
+    from thursday_shared.db.session import session_scope
+
+    first = await boot(make_audit_settings(make_settings))
+    await audited(first, "one", "two", "three")
+    middle = first.audit.entries()[1].id
+
+    async with session_scope() as session:
+        await session.execute(delete(AuditLogRow).where(AuditLogRow.id == middle))
+
+    second = await boot(make_audit_settings(make_settings))
+    assert len(second.audit.entries()) == 2
+    assert second.audit.verify_chain() is False, "a removed entry left the chain looking intact"
+
+
+async def test_editing_a_stored_entry_is_detected_after_a_restart(make_settings):
+    from sqlalchemy import update
+    from thursday_shared.db.models import AuditLogRow
+    from thursday_shared.db.session import session_scope
+
+    first = await boot(make_audit_settings(make_settings))
+    await audited(first, "one", "two", "three")
+    middle = first.audit.entries()[1].id
+
+    async with session_scope() as session:
+        await session.execute(
+            update(AuditLogRow).where(AuditLogRow.id == middle).values(resource="~/somewhere-else")
+        )
+
+    second = await boot(make_audit_settings(make_settings))
+    assert second.audit.verify_chain() is False
+
+
+async def test_the_origin_of_a_remote_command_survives(make_settings):
+    """V8 added `origin_device_id` to the entry and not to the table. Persisting without it
+    would have dropped the one field that makes a remote command accountable: "who told my PC
+    to do that, and from where" is unanswerable from an entry recording only the target."""
+    from thursday_security.audit import AuditEntry
+    from thursday_shared.ids import new_id
+
+    origin, target = new_id(), new_id()
+    first = await boot(make_audit_settings(make_settings))
+    await first.audit.record(
+        AuditEntry(actor="user", action="app.open", device_id=target, origin_device_id=origin)
+    )
+
+    second = await boot(make_audit_settings(make_settings))
+    restored = second.audit.entries()[-1]
+    assert restored.origin_device_id == origin
+    assert restored.device_id == target
+
+
+async def test_a_dropped_audit_write_is_never_silent(make_settings):
+    """`verify_chain` catches an entry that was altered or removed. It cannot catch one that
+    was never written — a missing entry leaves a perfectly valid chain — so a swallowed write
+    error would be invisible to the mechanism that exists to catch tampering."""
+    from unittest import mock
+
+    from thursday_security.audit import AuditEntry, AuditWriteError
+
+    container = await boot(make_audit_settings(make_settings))
+    assert container.audit.degraded is False
+
+    with (
+        mock.patch.object(
+            container.audit._repository, "put", side_effect=OSError("the disk is gone")
+        ),
+        pytest.raises(AuditWriteError, match="record of what Thursday did is now incomplete"),
+    ):
+        await container.audit.record(AuditEntry(actor="user", action="file.delete"))
+
+    assert container.audit.degraded is True
+    assert container.audit.lost == 1
+
+
+async def test_a_degraded_log_does_not_go_green_again(make_settings):
+    """The gap does not heal. A flag that cleared on the next success would say the log is
+    complete when it is missing an entry for ever."""
+    from unittest import mock
+
+    from thursday_security.audit import AuditEntry, AuditWriteError
+
+    container = await boot(make_audit_settings(make_settings))
+    with (
+        mock.patch.object(container.audit._repository, "put", side_effect=OSError("gone")),
+        pytest.raises(AuditWriteError),
+    ):
+        await container.audit.record(AuditEntry(actor="user", action="file.delete"))
+
+    await container.audit.record(AuditEntry(actor="user", action="app.open"))
+    assert container.audit.degraded is True
+    assert container.audit.health()["degraded"] is True
+
+
+async def test_a_tool_that_ran_is_not_failed_by_an_unstorable_audit_entry(
+    make_settings, adapter, tmp_path
+):
+    """§194: no external communication silently duplicated. The tool has already run, so
+    reporting failure invites a retry — and a retried email is a second email."""
+    from unittest import mock
+
+    from thursday_devices.hub import LoopbackDeviceSession
+    from thursday_devices.node.executor import NodeExecutor
+    from thursday_shared.ids import new_id
+    from thursday_shared.models import ToolCall
+
+    container = await boot(make_audit_settings(make_settings))
+    session = LoopbackDeviceSession(
+        device_id=new_id(), name="PC", executor=NodeExecutor(adapter, allowed_roots=[tmp_path])
+    )
+    await container.hub.register(session)
+
+    with mock.patch.object(
+        container.audit._repository, "put", side_effect=OSError("the disk is gone")
+    ):
+        result = await container.executor.execute(
+            ToolCall(tool="app.open", args={"app": "chrome"}, device_id=session.device_id)
+        )
+
+    assert result.ok is True, "the tool ran; the audit failure must not rewrite that"
+    assert container.audit.degraded is True
+
+
+async def test_running_without_audit_persistence_is_unchanged(tmp_path):
+    from thursday_security.audit import AuditEntry
+
+    container = build_container(
+        Settings(
+            data_dir=tmp_path / "var",
+            obsidian_vault=tmp_path / "vault",
+            llm_backend="rule",
+            vault_backend="memory",
+            log_level="ERROR",
+        ),
+        configure_logs=False,
+    )
+    await start(container)
+    await container.audit.record(AuditEntry(actor="user", action="file.write"))
+
+    assert container.audit.verify_chain() is True
+    assert container.audit.degraded is False
+    assert container.persistent is False
+
+
+async def test_a_degraded_audit_log_shows_up_in_health(make_settings):
+    """A degraded log is a health *failure*, not a note. What it has lost cannot be recovered
+    and the chain cannot detect it, so if this is not red then nothing says so at all."""
+    from unittest import mock
+
+    from thursday_security.audit import AuditEntry, AuditWriteError
+
+    container = await boot(make_audit_settings(make_settings))
+    before = {c["component"]: c for c in await container.health()}
+    assert before["audit"]["ok"] is True
+
+    with (
+        mock.patch.object(container.audit._repository, "put", side_effect=OSError("gone")),
+        pytest.raises(AuditWriteError),
+    ):
+        await container.audit.record(AuditEntry(actor="user", action="file.delete"))
+
+    after = {c["component"]: c for c in await container.health()}
+    assert after["audit"]["ok"] is False
+    assert "could not be stored" in after["audit"]["detail"]
+
+
+async def test_health_says_whether_state_is_actually_durable(make_settings, tmp_path):
+    durable = {c["component"]: c for c in await (await boot(make_settings())).health()}
+    assert "durable" in durable["database"]["detail"]
+
+    container = build_container(
+        Settings(
+            data_dir=tmp_path / "var2",
+            obsidian_vault=tmp_path / "vault2",
+            llm_backend="rule",
+            vault_backend="memory",
+            log_level="ERROR",
+        ),
+        configure_logs=False,
+    )
+    ephemeral = {c["component"]: c for c in await container.health()}
+    assert "lives for this process" in ephemeral["database"]["detail"]

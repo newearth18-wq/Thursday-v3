@@ -31,6 +31,11 @@ from thursday_devices.actions import CATALOGUE
 from thursday_security.policy import PolicyTable
 from thursday_shared.enums import PolicyDecision
 
+#: A count with or without a thousands separator. The first version was `\d{3,4}`, which read
+#: "1,010 tests" as ten — and then reported that the README claimed fewer tests than there are
+#: test functions. The check was right to fail; it just named the wrong reason.
+TEST_COUNT = r"([\d,]{3,6}) tests"
+
 DOCS = Path("docs")
 DECISIONS = DOCS / "architecture" / "decisions"
 
@@ -156,18 +161,18 @@ def test_the_readme_states_one_test_count_and_the_right_number_of_adrs():
     the cheapest place to keep it honest."""
     readme = Path("README.md").read_text(encoding="utf-8")
 
-    claimed = {int(n) for n in re.findall(r"(\d{3,4}) tests", readme)}
+    claimed = {int(n.replace(",", "")) for n in re.findall(TEST_COUNT, readme)}
     assert len(claimed) == 1, f"the README states more than one test count: {claimed}"
 
+    # Generated rather than listed. The hand-written version ran out at thirty-six and then
+    # matched "thirty" inside "thirty-seven", reporting the wrong number for a README that
+    # was correct — a check that fails for its own reasons is worse than one that does not run.
     words = {
-        "twenty-nine": 29,
-        "thirty": 30,
-        "thirty-one": 31,
-        "thirty-two": 32,
-        "thirty-three": 33,
-        "thirty-four": 34,
-        "thirty-five": 35,
-        "thirty-six": 36,
+        f"{tens}{'-' + unit if unit else ''}": base + n
+        for tens, base in (("twenty", 20), ("thirty", 30), ("forty", 40), ("fifty", 50))
+        for n, unit in enumerate(
+            ["", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine"]
+        )
     }
     # Longest first, and anchored: "thirty" is a prefix of "thirty-four", and matching the
     # short one made this test report 30 for a README that said thirty-four.
@@ -207,7 +212,7 @@ def test_the_readme_has_not_fallen_behind_the_test_suite():
         )
 
     readme = Path("README.md").read_text(encoding="utf-8")
-    claimed = int(re.search(r"(\d{3,4}) tests", readme).group(1))
+    claimed = int(re.search(TEST_COUNT, readme).group(1).replace(",", ""))
     assert claimed >= functions, (
         f"README claims {claimed} tests; there are already {functions} test functions "
         "before parametrisation"

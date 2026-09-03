@@ -58,11 +58,19 @@ restart (ADR 0036): write-through to the database, loaded at startup, with `Cont
 saying whether durability is real for this deployment. Device credentials and backups are on
 disk.
 
+The **audit log** now persists too (ADR 0037): entries load in written order with their
+stored hashes, the chain continues across the restart, and tampering with the stored rows is
+still detected. A write that cannot be stored is never silent — `verify_chain` cannot detect
+an entry that was never written, so the log marks itself degraded and health goes red.
+
 Still in-process: **tasks**, because restoring a `RUNNING` task from a table produces a task
 that looks alive with nothing driving it — worse than losing it, and it needs its resumption
-story designed rather than assumed. And the **audit log** and **spend ledger**, because
-`AuditLog.record` is synchronous and making it async is a change across every call site that
-records anything. *To close:* a task-resumption sprint, and an async audit write path.
+story designed rather than assumed. And the **spend ledger**, which is smaller and follows the
+same pattern. *To close:* a task-resumption sprint, and a repository for `CostMeter`.
+
+The audit table grows without bound. A retention policy is deliberately absent: deleting audit
+rows is what the append-only design forbids, and how long the owner keeps their own record is
+their decision rather than a default.
 
 **Single owner, single tenant.** There is no user model, no login, no per-user isolation.
 Every control assumes one person's machine and one person's data. *This is a design position,

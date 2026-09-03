@@ -44,3 +44,4 @@ done this way?" and have no answer.
 | [0034](0034-a-metric-label-is-an-egress-path.md) | A metric label is an egress path nobody classifies | Monitoring has none of Thursday's privacy controls and keeps data longer |
 | [0035](0035-the-release-gate-is-a-test-not-a-checklist.md) | The release gate is a test, not a checklist | Nine documented-but-untrue claims, none of which failed a test |
 | [0036](0036-the-table-is-the-truth-the-dict-is-an-index.md) | The table is the truth, the dict is an index | Two stores that can disagree are worse than one store and no persistence |
+| [0037](0037-a-missing-audit-entry-leaves-a-valid-chain.md) | A missing audit entry leaves a valid chain | The one failure the hash chain cannot detect, so it must never be silent |

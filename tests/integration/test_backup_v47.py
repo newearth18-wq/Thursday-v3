@@ -46,7 +46,7 @@ async def populate(container) -> dict:
         )
     )
     task = await container.tasks.create(title="write the report", objective="Friday's report")
-    container.audit.record(
+    await container.audit.record(
         __import__("thursday_security.audit", fromlist=["AuditEntry"]).AuditEntry(
             actor="user", action="file.write", resource="~/report.md"
         )
@@ -106,7 +106,9 @@ async def test_the_audit_chain_still_verifies_after_a_restore(container, archive
     from thursday_security.audit import AuditEntry
 
     for i in range(5):
-        container.audit.record(AuditEntry(actor="user", action="file.write", resource=f"f{i}"))
+        await container.audit.record(
+            AuditEntry(actor="user", action="file.write", resource=f"f{i}")
+        )
     container.backups.create(archive)
     container.audit.import_state([])
 
@@ -120,7 +122,9 @@ async def test_an_edited_audit_entry_is_still_caught_after_a_restore(container, 
     from thursday_security.audit import AuditEntry
 
     for i in range(3):
-        container.audit.record(AuditEntry(actor="user", action="file.write", resource=f"f{i}"))
+        await container.audit.record(
+            AuditEntry(actor="user", action="file.write", resource=f"f{i}")
+        )
     container.backups.create(archive)
 
     document = json.loads(archive.read_text())
@@ -209,7 +213,7 @@ async def test_a_backup_carries_no_credential(container, archive):
     await container.memory.write(
         MemoryWrite(layer=MemoryLayer.SEMANTIC, content=f"deploy with {SECRET}", importance=0.9)
     )
-    container.audit.record(
+    await container.audit.record(
         __import__("thursday_security.audit", fromlist=["AuditEntry"]).AuditEntry(
             actor="user", action="http.get", input_summary={"header": f"Bearer {SECRET}"}
         )

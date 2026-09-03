@@ -93,7 +93,11 @@ _YAML_MAP: dict[str, dict[str, str]] = {
         "daily_cost_cap_usd": "daily_cost_cap_usd",
         "monthly_cost_cap_usd": "monthly_cost_cap_usd",
     },
-    "persistence": {"memory": "persist_memory", "owner_id": "owner_id"},
+    "persistence": {
+        "memory": "persist_memory",
+        "audit": "persist_audit",
+        "owner_id": "owner_id",
+    },
     "updates": {
         "channel_url": "update_channel_url",
         "signing_key": "update_signing_key",
@@ -237,6 +241,7 @@ class Settings(BaseSettings):
     #: migrations and the offline path all have to work without it, and a default that
     #: silently created a database file would make "no infrastructure" untrue.
     persist_memory: bool = False
+    persist_audit: bool = False
     #: Thursday is single-tenant. This is the owner row the seeds create.
     owner_id: UUID = UUID("00000000-0000-0000-0000-000000000001")
 

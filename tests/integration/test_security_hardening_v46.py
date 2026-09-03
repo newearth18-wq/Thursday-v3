@@ -113,10 +113,10 @@ async def test_no_credential_is_written_to_memory_or_the_vault_notes(container, 
 
 
 @pytest.mark.parametrize("secret", SECRETS[:3])
-def test_no_credential_survives_into_an_audit_payload(container, secret):
+async def test_no_credential_survives_into_an_audit_payload(container, secret):
     from thursday_security.audit import AuditEntry
 
-    entry = container.audit.record(
+    entry = await container.audit.record(
         AuditEntry(
             actor="agent",
             action="file.write",

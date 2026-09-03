@@ -605,6 +605,11 @@ class AuditLogRow(Base, IdMixin):
     agent: Mapped[str | None] = mapped_column(String(64), nullable=True)
     task_id: Mapped[uuid.UUID | None] = mapped_column(GUID(), nullable=True, index=True)
     device_id: Mapped[uuid.UUID | None] = mapped_column(GUID(), nullable=True)
+    #: The machine the instruction came *from*, when that differs from the one it ran on.
+    #: V8 added this to `AuditEntry` and not to the table, so persisting the log would have
+    #: silently dropped the one field that makes a remote command accountable: "who told my
+    #: PC to do that, and from where" is unanswerable from an entry recording only the target.
+    origin_device_id: Mapped[uuid.UUID | None] = mapped_column(GUID(), nullable=True)
     tool: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
     action: Mapped[str] = mapped_column(String(64), default="")
     resource: Mapped[str] = mapped_column(Text, default="")

@@ -225,7 +225,10 @@ class Container:
             {
                 "component": "database",
                 "ok": True,
-                "detail": _mask(self.settings.resolved_database_url),
+                "detail": (
+                    f"{_mask(self.settings.resolved_database_url)} — "
+                    + ("state is durable" if self.persistent else "state lives for this process")
+                ),
             }
         )
         state_ok, state_detail = await self.state.health()
@@ -237,11 +240,25 @@ class Container:
                 "detail": ", ".join(f"{k}={v}" for k, v in self.memory.stats().items()),
             }
         )
+        audit = self.audit.health()
         checks.append(
             {
                 "component": "audit",
-                "ok": self.audit.verify_chain(),
-                "detail": f"{len(self.audit)} entries, hash chain intact",
+                # Degraded counts as unhealthy, not as a note. What a failed write lost cannot
+                # be recovered and the chain cannot detect it — a missing entry leaves a chain
+                # that verifies — so if this is not red, nothing says so at all.
+                "ok": audit["chain_intact"] and not audit["degraded"],
+                "detail": (
+                    f"{audit['entries']} entries, hash chain "
+                    + ("intact" if audit["chain_intact"] else "BROKEN")
+                    # The previous version said "hash chain intact" unconditionally, so a
+                    # broken chain reported ok=False next to the words "chain intact".
+                    + (
+                        f", {audit['lost']} entries could not be stored"
+                        if audit["degraded"]
+                        else ""
+                    )
+                ),
             }
         )
         checks.append(
@@ -322,7 +339,7 @@ def build_container(settings: Settings | None = None, *, configure_logs: bool = 
     # -- infrastructure -------------------------------------------------------
     c.bus = InProcessEventBus()
     c.redactor = SecretRedactor()
-    c.audit = AuditLog(c.redactor)
+    c.audit = AuditLog(c.redactor, repository=_audit_repository(settings, c))
     c.vault = _build_vault(settings)
 
     # -- security -------------------------------------------------------------
@@ -793,6 +810,30 @@ def _build_updates(settings: Settings, backups: Any) -> UpdateService:
     )
 
 
+def _audit_repository(settings: Settings, container: Container) -> Any:
+    """Where the audit trail is kept between runs.
+
+    Ordered by `ts` on load, because `verify_chain` walks entries comparing each `prev_hash`
+    to the one before: rows in arbitrary order would fail a chain that is perfectly intact.
+    """
+    if not settings.persist_audit:
+        return NullRepository()
+
+    from thursday_security.audit import AuditEntry
+    from thursday_shared.db.models import AuditLogRow
+    from thursday_shared.db.session import init_engine, session_scope
+
+    init_engine(settings)
+    container.persistent = True
+    return SqlRepository(
+        AuditLogRow,
+        session_scope=session_scope,
+        defaults={"user_id": settings.owner_id},
+        order_by="ts",
+        fields=set(AuditEntry.model_fields),
+    )
+
+
 def _memory_repository(settings: Settings, container: Container) -> Any:
     """Where memories are kept between runs (Sprint 51).
 
@@ -828,10 +869,13 @@ async def start(container: Container) -> Container:
     a test. Callers that skip this get exactly the behaviour they had before persistence
     existed, which is why every existing test still passes without calling it.
     """
-    restored = await container.memory.restore()
+    memories = await container.memory.restore()
+    entries = await container.audit.restore()
     log.info(
         "thursday_state_loaded",
         persistent=container.persistent,
-        memories=restored,
+        memories=memories,
+        audit_entries=entries,
+        audit_chain_intact=container.audit.verify_chain(),
     )
     return container

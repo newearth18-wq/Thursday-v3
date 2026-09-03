@@ -127,10 +127,10 @@ def test_a_privacy_zone_matches_only_where_it_applies():
     assert registry.forbids("microphone", location="home") is None
 
 
-def test_the_audit_chain_detects_tampering_and_deletion():
+async def test_the_audit_chain_detects_tampering_and_deletion():
     log = AuditLog()
     for action in ("open_app", "write_file", "send_email"):
-        log.record(AuditEntry(action=action, tool=action))
+        await log.record(AuditEntry(action=action, tool=action))
     assert log.verify_chain()
 
     log._entries[1].action = "something else"
@@ -142,9 +142,9 @@ def test_the_audit_chain_detects_tampering_and_deletion():
     assert not log.verify_chain()
 
 
-def test_audit_payloads_are_redacted_at_write_time():
+async def test_audit_payloads_are_redacted_at_write_time():
     log = AuditLog()
-    entry = log.record(
+    entry = await log.record(
         AuditEntry(
             action="http_post",
             input_summary={"headers": {"authorization": "Bearer abcdefghijklmnopqrst"}},

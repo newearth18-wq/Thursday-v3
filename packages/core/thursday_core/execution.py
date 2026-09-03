@@ -11,7 +11,7 @@ from __future__ import annotations
 import time
 from uuid import UUID
 
-from thursday_security.audit import AuditEntry
+from thursday_security.audit import AuditEntry, AuditWriteError
 from thursday_security.redaction import redact_dict
 from thursday_shared.enums import DataSensitivity, PolicyDecision
 from thursday_shared.errors import ApprovalRequired, PermissionDenied
@@ -98,7 +98,9 @@ class ToolExecutor:
         verdict = self._permissions.decide(request, permissions=permissions)  # type: ignore[attr-defined]
 
         if verdict.decision is PolicyDecision.BLOCK:
-            self._audit.record(  # type: ignore[attr-defined]
+            # Nothing has happened yet, so an unstorable audit entry may fail the call
+            # outright: refusing an action Thursday cannot account for costs nothing.
+            await self._audit.record(  # type: ignore[attr-defined]
                 AuditEntry(
                     actor="agent" if agent else "thursday",
                     agent=agent,
@@ -142,7 +144,7 @@ class ToolExecutor:
                 )
             decided = await self._approvals.wait_for(approval.id, timeout=self._approval_timeout)  # type: ignore[attr-defined]
             if decided.state.value != "approved":
-                self._audit.record(  # type: ignore[attr-defined]
+                await self._audit.record(  # type: ignore[attr-defined]
                     AuditEntry(
                         actor="user",
                         agent=agent,
@@ -165,7 +167,7 @@ class ToolExecutor:
         try:
             result = await tool.run(call, self)
         except Exception as exc:
-            self._audit.record(  # type: ignore[attr-defined]
+            await self._audit.record(  # type: ignore[attr-defined]
                 AuditEntry(
                     actor="agent" if agent else "thursday",
                     agent=agent,
@@ -201,26 +203,39 @@ class ToolExecutor:
                 Spend(tool_calls=1, usd=result.cost_usd, seconds=(time.perf_counter() - started)),
             )
 
-        self._audit.record(  # type: ignore[attr-defined]
-            AuditEntry(
-                actor="agent" if agent else "thursday",
-                agent=agent,
-                tool=call.tool,
-                action=call.tool,
-                resource=resource,
-                task_id=call.task_id,
-                device_id=call.device_id,
-                origin_device_id=call.origin_device_id,
-                input_summary=redact_dict(call.args),
-                output_summary=redact_dict({"evidence": result.evidence}),
-                result="ok"
-                if result.ok and result.verified
-                else ("failed" if not result.ok else "unverified"),
-                permission_decision=verdict.decision.value,
-                approval_id=approval_id,
-                error=result.error,
+        # The one site where the audit failure must not become the caller's failure: the tool
+        # has already run. Raising here would report a failure for something that happened,
+        # and the natural response to a reported failure is a retry — which §194 forbids for
+        # an external communication ("no external communication silently duplicated").
+        #
+        # So the entry stays in this session's chain, the log marks itself degraded, and that
+        # shows up in health and in the brief. What is not acceptable is the third option,
+        # swallowing it in silence: a missing entry leaves a valid chain, so `verify_chain`
+        # would never notice.
+        try:
+            await self._audit.record(  # type: ignore[attr-defined]
+                AuditEntry(
+                    actor="agent" if agent else "thursday",
+                    agent=agent,
+                    tool=call.tool,
+                    action=call.tool,
+                    resource=resource,
+                    task_id=call.task_id,
+                    device_id=call.device_id,
+                    origin_device_id=call.origin_device_id,
+                    input_summary=redact_dict(call.args),
+                    output_summary=redact_dict({"evidence": result.evidence}),
+                    result="ok"
+                    if result.ok and result.verified
+                    else ("failed" if not result.ok else "unverified"),
+                    permission_decision=verdict.decision.value,
+                    approval_id=approval_id,
+                    error=result.error,
+                )
             )
-        )
+        except AuditWriteError as exc:
+            log.error("tool_ran_unaudited", tool=call.tool, error=str(exc))
+
         await self._bus.publish(  # type: ignore[attr-defined]
             Event(
                 kind="tool.executed",
