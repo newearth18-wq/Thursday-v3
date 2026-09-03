@@ -13,9 +13,12 @@ from __future__ import annotations
 import math
 import re
 from datetime import datetime, timedelta
+from typing import Any
 from uuid import UUID
 
+from pydantic import ValidationError
 from thursday_core.logging import get_logger
+from thursday_core.persistence import NullRepository
 from thursday_security.redaction import SecretRedactor
 from thursday_shared.enums import (
     SOURCE_RANK,
@@ -40,6 +43,11 @@ from thursday_shared.models import (
 from thursday_memory.embeddings import cosine
 
 log = get_logger(__name__)
+
+
+class MemoryRestoreError(Exception):
+    """Stored memories exist and none of them could be loaded."""
+
 
 #: Half-life in days for the recency term of the retrieval score (§7.4).
 HALF_LIFE_DAYS: dict[MemoryLayer, float] = {
@@ -116,12 +124,18 @@ class MemoryManager:
         bus: object | None = None,
         redactor: SecretRedactor | None = None,
         working_ttl_hours: int = 24,
+        repository: Any = None,
     ) -> None:
         self._embedder = embedder
         self._vectors = vectors
         self._bus = bus
         self._redactor = redactor or SecretRedactor()
         self._working_ttl = timedelta(hours=working_ttl_hours)
+        #: Where memories live between runs (Sprint 51). `_records` is an index over this,
+        #: not a second store: it is loaded from the repository at startup and written
+        #: through on every change. Two stores that can disagree are worse than one store
+        #: and no persistence, because the disagreement is invisible.
+        self._repository = repository or NullRepository()
         self._records: dict[UUID, MemoryRecord] = {}
         self._conflicts: list[MemoryConflict] = []
         #: PART 41 — typed edges between memories, kept instead of overwrites.
@@ -354,7 +368,13 @@ class MemoryManager:
         return record
 
     async def forget(self, memory_id: UUID) -> None:
+        """Forgetting reaches the table too, or it is not forgetting (ADR 0019).
+
+        A memory dropped from the index and left in storage comes back on the next restart,
+        which is the failure mode the owner would least expect and least easily notice.
+        """
         self._records.pop(memory_id, None)
+        await self._repository.remove(memory_id)
         await self._vectors.delete([memory_id])  # type: ignore[attr-defined]
 
     async def forget_about(
@@ -439,6 +459,42 @@ class MemoryManager:
             record = MemoryRecord.model_validate(row)
             self._records[record.id] = record
         return len(rows)
+
+    async def restore(self) -> int:
+        """Load what was kept, at startup. Returns how many came back.
+
+        Vectors are rebuilt from the stored embeddings rather than recomputed: re-embedding
+        on every boot would be slow, and worse, a change of embedding model would silently
+        re-score every memory the owner has.
+        """
+        rows = await self._repository.load()
+        restored = 0
+        unreadable = 0
+        for row in rows:
+            try:
+                record = MemoryRecord.model_validate(row)
+            except ValidationError as exc:
+                # One unreadable row must not cost the owner every other memory.
+                log.warning("memory_row_unreadable", error=str(exc))
+                unreadable += 1
+                continue
+            self._records[record.id] = record
+            restored += 1
+
+        if restored:
+            await self._vectors.upsert(  # type: ignore[attr-defined]
+                [(r.id, r.embedding or [], {"layer": str(r.layer)}) for r in self._records.values()]
+            )
+            log.info("memory_restored", records=restored)
+        if rows and not restored:
+            # Not "nothing to restore". Every row that was there failed to load, and a
+            # startup line reading `memories=0` looks identical to a first boot — which is
+            # how somebody spends a week not noticing their assistant has amnesia.
+            raise MemoryRestoreError(
+                f"{unreadable} stored memories could not be read; refusing to start as "
+                "though there were none"
+            )
+        return restored
 
     async def get(self, memory_id: UUID) -> MemoryRecord | None:
         return self._records.get(memory_id)
@@ -649,6 +705,14 @@ class MemoryManager:
         return counts
 
     async def _store(self, record: MemoryRecord) -> None:
+        """The one place a memory is kept. Persisted before it is indexed.
+
+        In that order deliberately, and the exception is not caught: a `remember` that
+        returned a record it failed to store is a lie the owner discovers after a restart,
+        when there is nothing to be done about it. Failing here means they hear about it
+        while the thing they said is still on the screen.
+        """
+        await self._repository.put(record.model_dump(mode="python"))
         self._records[record.id] = record
         await self._vectors.upsert(  # type: ignore[attr-defined]
             [(record.id, record.embedding or [], {"layer": str(record.layer)})]

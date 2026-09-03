@@ -53,11 +53,16 @@ key-rotation work.
 wired (ADR 0033). This is deliberate — a half-built installer is worse than none — but it
 means "keep Thursday up to date" is a manual operation today.
 
-**Persistence is partial.** Device credentials and backups are on disk. Memory, tasks, the
-audit log and the spend ledger live in the running process and survive a restart only via a
-backup somebody took. The Postgres schema and migrations exist and are checked in CI; the
-services do not yet read through them. *To close:* repository implementations behind the
-existing manager interfaces.
+**Persistence is partial, and the remaining part is deliberate.** Memories now survive a
+restart (ADR 0036): write-through to the database, loaded at startup, with `Container.persistent`
+saying whether durability is real for this deployment. Device credentials and backups are on
+disk.
+
+Still in-process: **tasks**, because restoring a `RUNNING` task from a table produces a task
+that looks alive with nothing driving it — worse than losing it, and it needs its resumption
+story designed rather than assumed. And the **audit log** and **spend ledger**, because
+`AuditLog.record` is synchronous and making it async is a change across every call site that
+records anything. *To close:* a task-resumption sprint, and an async audit write path.
 
 **Single owner, single tenant.** There is no user model, no login, no per-user isolation.
 Every control assumes one person's machine and one person's data. *This is a design position,

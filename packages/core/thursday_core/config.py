@@ -17,6 +17,7 @@ from __future__ import annotations
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
+from uuid import UUID
 
 from pydantic import computed_field
 from pydantic_settings import BaseSettings, PydanticBaseSettingsSource, SettingsConfigDict
@@ -92,6 +93,7 @@ _YAML_MAP: dict[str, dict[str, str]] = {
         "daily_cost_cap_usd": "daily_cost_cap_usd",
         "monthly_cost_cap_usd": "monthly_cost_cap_usd",
     },
+    "persistence": {"memory": "persist_memory", "owner_id": "owner_id"},
     "updates": {
         "channel_url": "update_channel_url",
         "signing_key": "update_signing_key",
@@ -229,6 +231,14 @@ class Settings(BaseSettings):
     daily_cost_cap_usd: float | None = 5.0
     monthly_cost_cap_usd: float | None = 50.0
     approval_ttl_seconds: float = 300.0
+
+    # persistence ---------------------------------------------------------------
+    #: Whether memories outlive the process (Sprint 51). Off by default: the schema, the
+    #: migrations and the offline path all have to work without it, and a default that
+    #: silently created a database file would make "no infrastructure" untrue.
+    persist_memory: bool = False
+    #: Thursday is single-tenant. This is the owner row the seeds create.
+    owner_id: UUID = UUID("00000000-0000-0000-0000-000000000001")
 
     # updates -------------------------------------------------------------------
     #: Where this deployment looks for updates, and the key it trusts to sign them (§120).

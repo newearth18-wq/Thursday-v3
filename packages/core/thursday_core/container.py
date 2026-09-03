@@ -80,6 +80,7 @@ from thursday_core.logging import configure_logging, get_logger
 from thursday_core.metrics import MetricsCollector, build_registry
 from thursday_core.model_router import ModelRouter
 from thursday_core.orchestrator import AgentOrchestrator
+from thursday_core.persistence import NullRepository, SqlRepository
 from thursday_core.planner import Planner
 from thursday_core.projects import ProjectManager
 from thursday_core.reasoning import ReasoningEngine
@@ -139,7 +140,13 @@ class Container:
     costs: Any = None
     backups: Any = None
     updates: Any = None
+    #: Whether state actually outlives this process (Sprint 51). False is a supported
+    #: configuration and not a degraded one — but it must never be a silent assumption.
+    persistent: bool = False
     metrics: Any = None
+    #: Whether state actually outlives this process (Sprint 51). False is a supported
+    #: configuration and not a degraded one — but it must never be a silent assumption.
+    persistent: bool = False
 
     # devices
     hub: Any = None
@@ -336,6 +343,7 @@ def build_container(settings: Settings | None = None, *, configure_logs: bool = 
         bus=c.bus,
         redactor=c.redactor,
         working_ttl_hours=settings.memory_working_ttl_hours,
+        repository=_memory_repository(settings, c),
     )
     c.obsidian = ObsidianVault(
         settings.obsidian_vault, redactor=c.redactor, enabled=settings.obsidian_enabled
@@ -783,3 +791,47 @@ def _build_updates(settings: Settings, backups: Any) -> UpdateService:
         signing_key=settings.update_signing_key,
         backups=backups,
     )
+
+
+def _memory_repository(settings: Settings, container: Container) -> Any:
+    """Where memories are kept between runs (Sprint 51).
+
+    `NullRepository` unless a database is configured, and that is a real configuration rather
+    than a fallback: the whole test suite and `python -m apps.cli` run on it. What it must not
+    do is claim durability it does not have, which is why it also sets `container.persistent`.
+    """
+    if not settings.persist_memory:
+        return NullRepository()
+
+    from thursday_shared.db.models import Memory
+    from thursday_shared.db.session import init_engine, session_scope
+    from thursday_shared.models import MemoryRecord
+
+    init_engine(settings)
+    container.persistent = True
+    return SqlRepository(
+        Memory,
+        session_scope=session_scope,
+        # Single-tenant: the column exists because the schema was drawn for a world where
+        # Thursday might not be. Deriving it rather than storing a second copy of the truth.
+        defaults={"user_id": settings.owner_id},
+        order_by="created_at",
+        fields=set(MemoryRecord.model_fields),
+    )
+
+
+async def start(container: Container) -> Container:
+    """Bring a built container up: load what was kept, then report what is real.
+
+    Separate from `build_container` because loading is async and construction is not, and
+    because a container that reaches for a database while being assembled cannot be built in
+    a test. Callers that skip this get exactly the behaviour they had before persistence
+    existed, which is why every existing test still passes without calling it.
+    """
+    restored = await container.memory.restore()
+    log.info(
+        "thursday_state_loaded",
+        persistent=container.persistent,
+        memories=restored,
+    )
+    return container

@@ -7,7 +7,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from thursday_core.config import Settings, get_settings
-from thursday_core.container import Container, build_container
+from thursday_core.container import Container, build_container, start
 from thursday_core.logging import get_logger
 from thursday_realtime.gateway import router as realtime_router
 from thursday_shared import __version__
@@ -45,6 +45,10 @@ def create_app(settings: Settings | None = None, container: Container | None = N
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         app.state.container = container or build_container(settings)
+        # Loading what was kept is async, so it happens here rather than in `build_container`
+        # (Sprint 51). Skipping it gives exactly the pre-persistence behaviour, which is why
+        # every test that builds a container directly still works.
+        await start(app.state.container)
         log.info("thursday_started", version=__version__, environment=settings.environment)
         yield
         log.info("thursday_stopping")
