@@ -34,6 +34,7 @@ import websockets
 from thursday_core.logging import configure_logging, get_logger
 from thursday_devices.node.adapters import for_current_platform
 from thursday_devices.node.executor import NodeExecutor
+from thursday_models.local_manager import LocalModelManager
 from thursday_security.device_auth import sign, signing_payload
 from thursday_security.keys import (
     PrivateKey,
@@ -579,6 +580,7 @@ class NodeClient:
         token: str,
         kind: str = "desktop",
         heartbeat_s: float = 15.0,
+        compute: LocalModelManager | None = None,
     ) -> None:
         self.core_url = core_url
         self.name = name
@@ -589,6 +591,10 @@ class NodeClient:
         self.token = token
         self.kind = kind
         self.heartbeat_s = heartbeat_s
+        #: This machine's AI inventory (ADDENDUM §41). Constructed here rather than injected
+        #: because every node has one — a machine with no runtime reports an empty inventory,
+        #: which is an answer the core needs, not a reason to leave the field unset.
+        self.compute = compute or LocalModelManager()
         self._running: dict[uuid.UUID, asyncio.Task] = {}
         #: Read by the diagnostics endpoint. The point of that endpoint is to answer
         #: "why is nothing happening", so the reason a connection failed is kept.
@@ -677,14 +683,22 @@ class NodeClient:
                 # authenticates this node *to* whoever is listening.
                 check_peer(_ssl_object(ws), pin)
             nonce = secrets.token_hex(16)
+            # ADDENDUM §3–§5. Re-read on every connect rather than cached at startup: a
+            # node that has been running for a week and had a model installed yesterday
+            # would otherwise keep telling the core it has nothing.
+            models = await self.compute.refresh()
             hello = Hello(
                 device_id=self.identity.device_id,
                 name=self.name,
                 kind=self.kind,
                 os=self.executor.adapter.os_name,
                 os_version=platform.version(),
-                capabilities=self.executor.adapter.capabilities(),
+                capabilities=self.executor.adapter.capabilities().grant(
+                    *self.compute.capabilities()
+                ),
                 telemetry=await self.executor.adapter.telemetry(),
+                compute=self.compute.profile(),
+                models=models,
                 nonce=nonce,
             )
             hello.signature = self.sign_hello(hello)
@@ -738,7 +752,9 @@ class NodeClient:
         while True:
             await asyncio.sleep(self.heartbeat_s)
             telemetry = await self.executor.adapter.telemetry()
-            await ws.send(Heartbeat(telemetry=telemetry).model_dump_json())
+            await ws.send(
+                Heartbeat(telemetry=telemetry, load=self.compute.load()).model_dump_json()
+            )
 
     async def _handle(self, ws, frame: ActionFrame) -> None:
         result = await self.executor.execute(

@@ -115,6 +115,8 @@ class WebSocketDeviceSession:
         self.os = hello.os
         self.capabilities = hello.capabilities
         self.telemetry = hello.telemetry
+        self.compute = hello.compute
+        self.models = list(hello.models)
         self.connected_at = datetime.now(UTC)
         self.last_seen_at = self.connected_at
         self._pending: dict[UUID, asyncio.Future[DeviceActionResult]] = {}
@@ -235,6 +237,12 @@ class DeviceHub:
                 else (previous.trust_level if previous else TrustLevel.LIMITED)
             ),
             encrypted=bool(getattr(session, "encrypted", True)),
+            # Taken from the session, which took it from HELLO (ADDENDUM §3). Read with a
+            # default so a node built before this existed still registers: it reports no
+            # inventory, and a machine with no inventory is never chosen to run a model,
+            # which is the right answer rather than a compatibility break.
+            compute=getattr(session, "compute", None),
+            models=list(getattr(session, "models", []) or []),
         )
         self._known[session.device_id] = summary
         log.info(
@@ -422,13 +430,20 @@ class DeviceHub:
         await self._emit("device.enrolled", device_id, {"name": name, "os": os})
         return summary
 
-    async def heartbeat(self, device_id: UUID, telemetry: DeviceTelemetry) -> None:
+    async def heartbeat(
+        self, device_id: UUID, telemetry: DeviceTelemetry, *, load: Any = None
+    ) -> None:
         summary = self._known.get(device_id)
         if summary is None:
             return
         summary.telemetry = telemetry
         summary.last_seen_at = datetime.now(UTC)
         summary.status = DeviceStatus.ONLINE
+        if load is not None:
+            # §18. Only when reported: keeping the last known load beats replacing it with
+            # zeros, which would read as "this machine is idle" and attract exactly the work
+            # it should not get.
+            summary.load = load
 
     async def disconnect_all(self, *, reason: str = "emergency stop") -> int:
         """§69 — part of the lockdown path."""

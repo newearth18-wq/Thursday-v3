@@ -12,6 +12,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from thursday_shared.compute import ComputeLoad, ComputeProfile, ModelDescriptor
 from thursday_shared.ids import new_id
 from thursday_shared.models import DeviceCapabilities, DeviceTelemetry, UndoRecord, utcnow
 
@@ -52,6 +53,11 @@ class Hello(Frame):
     node_version: str = "0.1.0"
     capabilities: DeviceCapabilities
     telemetry: DeviceTelemetry
+    #: What this machine can run AI on (ADDENDUM §3). Optional so a node built before this
+    #: existed still connects — an older node reports nothing and is simply never chosen for
+    #: inference, which is the correct outcome rather than a compatibility break.
+    compute: ComputeProfile | None = None
+    models: list[ModelDescriptor] = Field(default_factory=list)
     nonce: str
     signature: str = ""
 
@@ -67,6 +73,10 @@ class Welcome(Frame):
 class Heartbeat(Frame):
     type: Literal["HEARTBEAT"] = "HEARTBEAT"
     telemetry: DeviceTelemetry
+    #: §18, §51. Load changes every few seconds, so it rides the heartbeat rather than the
+    #: HELLO — routing to a machine on the strength of what it looked like at connect time
+    #: is how work lands on the box that is already saturated.
+    load: ComputeLoad | None = None
 
 
 class ActionFrame(Frame):

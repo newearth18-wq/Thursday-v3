@@ -12,6 +12,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from thursday_shared.compute import ComputeLoad, ComputeProfile, ModelDescriptor
 from thursday_shared.enums import (
     AgentVerdict,
     ApprovalScope,
@@ -206,6 +207,14 @@ class DeviceSummary(Base):
     #: the half the owner is asking about when they ask Thursday.
     current_app: str | None = None
     current_task_id: UUID | None = None
+    #: What this machine can run AI on, and what it holds (ADDENDUM §3–§5). None means the
+    #: node never reported any — an older node, or one with no runtime — which is different
+    #: from a machine that reported an empty inventory, and the compute router treats it as
+    #: "cannot run models here" either way.
+    compute: ComputeProfile | None = None
+    models: list[ModelDescriptor] = Field(default_factory=list)
+    #: Refreshed on every heartbeat, unlike `compute`, which changes when hardware does.
+    load: ComputeLoad | None = None
 
     @property
     def may_command_others(self) -> bool:

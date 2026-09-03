@@ -77,6 +77,41 @@ async def list_credentials(
     }
 
 
+# Declared above `/devices/{device_id}` for the same reason `/devices/credentials` is:
+# FastAPI matches in declaration order, and "compute" would otherwise be read as a device id.
+@router.get("/devices/compute")
+async def list_compute(c: Container = Depends(get_container)) -> dict:
+    """Every machine Thursday can run a model on, and what each one holds (ADDENDUM §2–§5).
+
+    This is the acceptance criterion for local AI discovery — "Thursday lists available local
+    models without manual configuration" — answered from what nodes reported at HELLO rather
+    than from a configuration file somebody maintains by hand.
+
+    A device with no `compute` is one that never reported an inventory: an older node, or a
+    machine with no runtime installed. It is listed with `can_run_models: false` rather than
+    omitted, because "this machine cannot run models" and "this machine does not exist" are
+    different answers to "where can Thursday think?".
+    """
+    devices = []
+    for summary in c.hub.all():
+        profile = summary.compute
+        devices.append(
+            {
+                "device_id": str(summary.id),
+                "name": summary.name,
+                "status": summary.status,
+                "can_run_models": bool(summary.models),
+                "compute": profile.model_dump(mode="json") if profile else None,
+                "load": summary.load.model_dump(mode="json") if summary.load else None,
+                "models": [m.model_dump(mode="json") for m in summary.models],
+                "ai_capabilities": sorted(
+                    cap for cap in summary.capabilities.granted if cap.startswith("ai")
+                ),
+            }
+        )
+    return {"devices": devices}
+
+
 @router.get("/devices/{device_id}")
 async def get_device(device_id: UUID, c: Container = Depends(get_container)) -> dict:
     summary = c.hub.summary(device_id)
@@ -475,7 +510,9 @@ async def device_socket(websocket: WebSocket) -> None:
             if isinstance(incoming, ActionResultFrame):
                 session.deliver(incoming)
             elif isinstance(incoming, Heartbeat):
-                await container.hub.heartbeat(session.device_id, incoming.telemetry)
+                await container.hub.heartbeat(
+                    session.device_id, incoming.telemetry, load=incoming.load
+                )
             # EVENT frames from nodes feed the event engine in Phase 2.
 
     except (TimeoutError, WebSocketDisconnect):
