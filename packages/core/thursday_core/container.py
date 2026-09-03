@@ -142,9 +142,6 @@ class Container:
     costs: Any = None
     backups: Any = None
     updates: Any = None
-    #: Whether state actually outlives this process (Sprint 51). False is a supported
-    #: configuration and not a degraded one — but it must never be a silent assumption.
-    persistent: bool = False
     metrics: Any = None
     #: Whether state actually outlives this process (Sprint 51). False is a supported
     #: configuration and not a degraded one — but it must never be a silent assumption.

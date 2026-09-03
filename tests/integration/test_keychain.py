@@ -18,7 +18,6 @@ from __future__ import annotations
 
 import platform
 import subprocess
-from pathlib import Path
 from unittest import mock
 
 import pytest
@@ -144,17 +143,32 @@ def test_a_linux_box_with_a_session_bus_and_the_tool_is_usable():
         assert SecretServiceKeychain().available is True
 
 
-def test_detection_reports_none_on_a_machine_that_has_none():
-    """This container, honestly described."""
-    assert detect().available is (platform.system() != "Linux" or _has_session_bus())
+def test_detection_returns_something_that_works_or_something_that_says_it_does_not():
+    """Behaviour, not a restatement of the implementation.
 
+    The first version of this asserted `detect().available is (not Linux or has_session_bus)`
+    — a copy of the code's conditions, missing one of them. It passed here, where there is no
+    session bus, and failed on CI, where the runner has a bus at /run/user/1001/bus and no
+    `secret-tool`. A test that restates the implementation cannot catch the implementation
+    being wrong; it can only be wrong in a different place.
 
-def _has_session_bus() -> bool:
-    import os
+    So: whatever `detect` returns, `available` must be a true statement about it. Either it
+    can round-trip a secret, or it refuses.
+    """
+    keychain = detect()
 
-    return bool(
-        os.environ.get("DBUS_SESSION_BUS_ADDRESS") or Path(f"/run/user/{os.getuid()}/bus").exists()
-    )
+    if not keychain.available:
+        with pytest.raises(KeychainError):
+            keychain.put("thursday-detection-probe", "value")
+        return
+
+    # Available means available: prove it, and clean up after.
+    account = "thursday-detection-probe"
+    try:
+        keychain.put(account, "a-probe-value")
+        assert keychain.get(account) == "a-probe-value"
+    finally:
+        keychain.delete(account)
 
 
 # --------------------------------------------------------------------------- the commands
