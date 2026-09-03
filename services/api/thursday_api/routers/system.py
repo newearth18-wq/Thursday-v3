@@ -236,6 +236,53 @@ async def undo(action_id: UUID, c: Container = Depends(get_container)) -> dict:
         raise HTTPException(status_code=404, detail=exc.to_dict()) from exc
 
 
+@router.get("/setup/recommendation")
+async def setup_recommendation(
+    preset: str = "BALANCED", advanced: bool = False, c: Container = Depends(get_container)
+) -> dict:
+    """What Thursday proposes for this machine (EASY INSTALL, setup STEP 5).
+
+    Everything the recommendation screen needs and nothing it does not: a sentence, a size, a
+    disk requirement, and the reasons. **No model name unless `advanced` is set** — the
+    requirement is explicit that a normal user never sees one, and the place that rule gets
+    broken is a debugging field somebody left in a response.
+
+    Proposes only. Nothing is downloaded, installed or configured by asking.
+    """
+    from typing import Any
+
+    from thursday_core.recommend import AIPreset, recommend
+    from thursday_models.local_manager import LocalModelManager
+
+    try:
+        wanted = AIPreset(preset.upper())
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=f"unknown preset: {preset}") from exc
+
+    profile = LocalModelManager().profile()
+    result = recommend(profile, preset=wanted, cloud_available=c.settings.allow_cloud)
+
+    body: dict[str, Any] = {
+        "preset": result.preset.value,
+        "summary": result.summary(),
+        "summary_en": result.summary(thai=False),
+        "runs_locally": result.runs_locally,
+        "uses_cloud": result.uses_cloud,
+        "download_bytes": result.download_bytes,
+        "disk_required_bytes": result.disk_required_bytes,
+        "reasons": list(result.reasons),
+        "limits": list(result.limits),
+    }
+    if advanced:
+        # §"Power user can enable Developer Options". The hardware Thursday read, and the
+        # internal class name — the two things a normal user is spared and a developer needs.
+        body["advanced"] = {
+            "model_class": result.model_class.key if result.model_class else None,
+            "detected": profile.model_dump(mode="json"),
+        }
+    return body
+
+
 @router.post("/emergency/stop")
 async def emergency_stop(
     request: EmergencyStopRequest, c: Container = Depends(get_container)

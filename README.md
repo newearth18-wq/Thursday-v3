@@ -20,7 +20,7 @@ ready, what is not, and what closing each gap would take is in
 [docs/23-release-readiness.md](docs/23-release-readiness.md).
 
 **Phase 1 is implemented and runnable**: the vertical slice from
-[docs/15-vertical-slice.md](docs/15-vertical-slice.md) works end to end, with 1,295 tests that
+[docs/15-vertical-slice.md](docs/15-vertical-slice.md) works end to end, with 1,325 tests that
 need no database, no network and no model credentials.
 
 ```
@@ -313,7 +313,7 @@ the verification loop, the audit chain and the device round-trip are all real.
 
 ```bash
 ./scripts/check.sh           # everything CI runs: lint, format, types, tests, migrations
-pytest                       # 1,295 tests, no infrastructure
+pytest                       # 1,325 tests, no infrastructure
 ruff check . && ruff format .
 mypy packages services
 alembic upgrade head && alembic revision --autogenerate -m "what changed"

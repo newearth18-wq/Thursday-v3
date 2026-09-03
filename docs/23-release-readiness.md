@@ -6,7 +6,7 @@ a multi-user or internet-exposed installation.**
 That sentence is the whole document in one line. What follows is the evidence for it, and —
 more usefully — the evidence against.
 
-Written at Sprint 50 and kept current since, against 1,295 tests that need no database, no
+Written at Sprint 50 and kept current since, against 1,325 tests that need no database, no
 network and no model credentials. `./scripts/check.sh` runs lint, format, types, the suite and the migrations.
 
 ---
@@ -40,6 +40,7 @@ container, not a unit test of the class in isolation.
 | Waking a machine, reported only when the machine actually appears | `tests/integration/test_wake_on_lan_v60.py` |
 | Measurement from real calls that cannot damn a model with one bad sample | `tests/integration/test_benchmarks_v61.py` |
 | A desktop install that needs no database server, no Redis and no Docker | `tests/integration/test_desktop_edition_v62.py` |
+| A hardware recommendation where PRIVATE can never quietly become cloud | `tests/integration/test_recommendation_v63.py` |
 | Metrics whose labels cannot carry a path or a secret | `tests/integration/test_metrics_v49.py` |
 
 ## 23.2 What is not ready, and what that would take
