@@ -76,6 +76,7 @@ from thursday_core.config import Settings, get_settings
 from thursday_core.context import ContextEngine
 from thursday_core.cost import CostMeter
 from thursday_core.device_router import DeviceRouter
+from thursday_core.distributed import DistributedRunner
 from thursday_core.execution import ToolExecutor
 from thursday_core.focus import DeviceFocus
 from thursday_core.goals import GoalManager, PriorityQueue
@@ -154,6 +155,8 @@ class Container:
     compute_router: Any = None
     #: Runs what the router chose, walking the fallback chain (ADDENDUM §14, §38).
     compute_executor: Any = None
+    #: Runs one task across several machines, keeping each stage's provenance (ADDENDUM §21).
+    distributed: Any = None
     #: Whether state actually outlives this process (Sprint 51). False is a supported
     #: configuration and not a degraded one — but it must never be a silent assumption.
     persistent: bool = False
@@ -411,6 +414,7 @@ def build_container(settings: Settings | None = None, *, configure_logs: bool = 
     c.device_router = DeviceRouter(c.hub)
     c.compute_router = ComputeRouter(registry=c.model_registry, hub=c.hub)
     c.compute_executor = ComputeExecutor(registry=c.model_registry, hub=c.hub)
+    c.distributed = DistributedRunner(c.compute_router, c.compute_executor)
     c.device_focus = DeviceFocus()
     # Pairings outlive the process. An in-memory registry would mean a restart locks out
     # every paired node — it signs with its key, the core no longer knows the key, and the

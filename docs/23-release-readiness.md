@@ -6,7 +6,7 @@ a multi-user or internet-exposed installation.**
 That sentence is the whole document in one line. What follows is the evidence for it, and —
 more usefully — the evidence against.
 
-Written at Sprint 50 and kept current since, against 1,214 tests that need no database, no
+Written at Sprint 50 and kept current since, against 1,244 tests that need no database, no
 network and no model credentials. `./scripts/check.sh` runs lint, format, types, the suite and the migrations.
 
 ---
@@ -35,6 +35,8 @@ container, not a unit test of the class in isolation.
 | A registry where the owner's correction outlives the node that keeps re-guessing | `tests/integration/test_model_registry_v55.py` |
 | Compute routing where privacy filters rather than scores, so no weighting can outvote it | `tests/integration/test_compute_router_v56.py` |
 | A fallback chain that cannot cross the privacy boundary the first choice respected | `tests/integration/test_compute_fallback_v57.py` |
+| SECRET work never reaching a cloud provider, proved by a spy that records every call | `tests/integration/test_privacy_routing_v58.py` |
+| One task across several machines, where no stage may be less private than the task | `tests/integration/test_distributed_ai_v59.py` |
 | Metrics whose labels cannot carry a path or a secret | `tests/integration/test_metrics_v49.py` |
 
 ## 23.2 What is not ready, and what that would take

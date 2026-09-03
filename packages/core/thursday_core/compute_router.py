@@ -288,12 +288,16 @@ class ComputeRouter:
             1 if request.prefer_device and candidate.device_id == request.prefer_device else 0
         )
 
-        local_first = {
-            RoutingMode.LOCAL_FIRST: 1,
-            RoutingMode.LOCAL_ONLY: 1,
-            RoutingMode.CLOUD_FIRST: 0,
-        }.get(request.mode, 1 if request.profile is RoutingProfile.PRIVATE else 0)
-        locality = local_first if candidate.local else 1 - local_first
+        # Only the two cloud modes prefer the cloud. Everything else — AUTO included —
+        # prefers the owner's own hardware, which is the addendum's premise: Thursday does
+        # not need the cloud for every task. The first version of this used a dict lookup
+        # with a default of "prefer cloud", so AUTO (which is `ComputeRequest`'s own
+        # default) sent work to a cloud provider while a perfectly good local model sat
+        # idle. Deployments were unaffected because the container's default mode is
+        # LOCAL_FIRST — which is exactly why it survived: the wrong branch was never the
+        # one the settings took.
+        prefers_cloud = request.mode in (RoutingMode.CLOUD_FIRST, RoutingMode.CLOUD_ONLY)
+        locality = int(candidate.local != prefers_cloud)
 
         gpu = 1 if (candidate.profile and candidate.profile.has_gpu) else 0
         # §22. A loaded model answers now; an unloaded one may take a minute to page in.

@@ -463,3 +463,33 @@ def test_an_unknown_routing_option_is_refused_rather_than_defaulted(client):
     the one somebody most likely misspelt is LOCAL_ONLY."""
     refused = client.get("/api/v1/compute/route", params={"mode": "LOCAL_ONLYY"})
     assert refused.status_code == 422
+
+
+def test_auto_mode_prefers_the_owners_own_hardware():
+    """Found by Sprint 59: `AUTO` scored cloud above local.
+
+    The scoring used a dict lookup whose default was "prefer cloud", so AUTO — which is
+    `ComputeRequest`'s own default — sent work to a cloud provider while a perfectly good
+    local model sat idle. Deployments were unaffected because the container's default mode
+    is LOCAL_FIRST, which is precisely why it survived: the wrong branch was never the one
+    the settings took, so no configuration anybody ran exercised it.
+
+    The addendum's premise is that Thursday does not need the cloud for every task. Only
+    CLOUD_FIRST and CLOUD_ONLY prefer the cloud.
+    """
+    router = Registry([local(SERVER, "local-model", profile=HEADLESS)]).build()
+
+    target = router.choose(
+        ComputeRequest(mode=RoutingMode.AUTO, sensitivity=DataSensitivity.PUBLIC), cloud=CLOUD
+    )
+
+    assert target.local is True
+    assert target.model == "local-model"
+
+
+@pytest.mark.parametrize(
+    "mode", [RoutingMode.AUTO, RoutingMode.LOCAL_FIRST, RoutingMode.LOCAL_ONLY]
+)
+def test_every_non_cloud_mode_prefers_local(mode):
+    router = Registry([local(SERVER, "local-model", profile=HEADLESS)]).build()
+    assert router.choose(ComputeRequest(mode=mode), cloud=CLOUD).local is True
