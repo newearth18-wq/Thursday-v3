@@ -34,12 +34,40 @@ database:
   pool_size: 10
   echo: false
 
+# Which shape of Thursday this is. `desktop` runs on a machine where nothing has been
+# installed and nothing configured — that is the whole requirement, and `external_services()`
+# reports whether this file still honours it.
+edition:
+  name: desktop
+
 redis:
-  url: redis://localhost:6379/0
-  # Namespaces for the three things Redis holds: queue, realtime state, and locks.
+  # Empty on purpose, and this line is the desktop edition.
+  #
+  # It used to read `redis://localhost:6379/0`. The code default was already null and the
+  # in-process store already existed — but this file is what a fresh install *reads*, so a
+  # normal user got RedisStateStore, and then `ModuleNotFoundError: No module named 'redis'`
+  # on the first state operation, for a service they never chose to need. A shipped
+  # configuration that points at software nobody installed is not a default, it is a bug
+  # with a comment above it.
+  #
+  # Thursday Hub sets this (docker compose does it through the environment, which takes
+  # precedence over this file) and earns the dependency by being multi-process.
+  url: null
+  # Namespaces for the three things Redis holds when a Hub does use it: queue, state, locks.
   queue_prefix: thursday:queue
   state_prefix: thursday:state
   lock_prefix: thursday:lock
+
+persistence:
+  # On, because the desktop edition ships with SQLite and a personal assistant that forgets
+  # everything when the PC restarts is not one. The code defaults are False so the test
+  # suite stays ephemeral by choice rather than by accident; this file is what an install
+  # reads, and an install should remember.
+  memory: true
+  audit: true
+  costs: true
+  tasks: true
+  models: true
 
 models:
   # rule (offline, deterministic) · ollama (local) · anthropic (cloud)

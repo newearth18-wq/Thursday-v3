@@ -27,6 +27,17 @@ __all__ = ["FakeAdapter"]
 
 @pytest.fixture
 def settings(tmp_path: Path) -> Settings:
+    """Settings for a test: everything local, nothing kept.
+
+    The `persist_*` flags are switched off **explicitly** rather than inherited. `settings.yaml`
+    turns them on, because that file is what a real desktop install reads and an assistant that
+    forgets everything when the PC restarts is not one — but a suite where twelve hundred tests
+    each write a database is a slow suite in which unrelated tests are coupled through storage.
+
+    Sprint 51's persistence tests build their own settings with these on, which is the right
+    place for that: the tests about persistence opt in, and everything else opts out here, in
+    one visible line, instead of relying on a default that could change under them.
+    """
     return Settings(
         data_dir=tmp_path / "var",
         obsidian_vault=tmp_path / "vault",
@@ -35,6 +46,11 @@ def settings(tmp_path: Path) -> Settings:
         llm_backend="rule",
         vault_backend="memory",
         approval_ttl_seconds=2.0,
+        persist_memory=False,
+        persist_audit=False,
+        persist_costs=False,
+        persist_tasks=False,
+        persist_models=False,
     )
 
 

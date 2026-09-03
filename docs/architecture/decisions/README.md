@@ -56,3 +56,4 @@ done this way?" and have no answer.
 | [0046](0046-a-privacy-rule-expressed-as-a-score-is-a-preference.md) | A privacy rule expressed as a score is a preference | Exclusions filter, preferences rank, and no score resurrects an excluded candidate |
 | [0047](0047-a-stage-cannot-be-less-private-than-its-task.md) | A stage cannot be less private than its task | An embedding of a secret reaches the same place the secret would |
 | [0048](0048-sending-is-not-waking-and-measuring-changes-what-runs.md) | Sending is not waking, and measuring changes what runs next | A magic packet is unacknowledged; a bad measurement is self-fulfilling |
+| [0049](0049-the-shipped-configuration-is-the-product.md) | The shipped configuration is the product | settings.yaml pointed a fresh install at a Redis nobody installed |

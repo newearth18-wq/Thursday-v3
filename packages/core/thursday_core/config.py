@@ -45,6 +45,7 @@ _YAML_MAP: dict[str, dict[str, str]] = {
         "pool_size": "db_pool_size",
         "echo": "debug",
     },
+    "edition": {"name": "edition"},
     "redis": {"url": "redis_url"},
     "models": {
         "backend": "llm_backend",
@@ -177,6 +178,20 @@ class Settings(BaseSettings):
     data_dir: Path = Path("var")
     log_level: str = "INFO"
     log_json: bool = False
+
+    # edition -------------------------------------------------------------------
+    #: Which shape of Thursday this install is (EASY INSTALL §"Deployment editions").
+    #:
+    #: This is the setting the easy-install requirement turns on. `desktop` must run on a
+    #: machine where nothing has been installed and nothing has been configured — no
+    #: database server, no Redis, no Docker, no terminal. `hub` is the multi-device
+    #: deployment that earns those dependencies by needing them. `developer` is `hub` with
+    #: everything visible.
+    #:
+    #: `external_services()` reports what each one actually demands, and a test asserts
+    #: that `desktop` demands nothing — because "it just works" is a claim, and a claim
+    #: that nothing checks is the class of bug this project keeps finding.
+    edition: str = "desktop"
 
     # storage -------------------------------------------------------------------
     #: Set this to override the composed URL entirely (a managed database, say).
@@ -357,6 +372,25 @@ class Settings(BaseSettings):
     @property
     def uses_postgres(self) -> bool:
         return "postgres" in self.resolved_database_url
+
+    @property
+    def is_desktop(self) -> bool:
+        return self.edition.lower() == "desktop"
+
+    def external_services(self) -> list[str]:
+        """What somebody has to install and run before this configuration works.
+
+        The whole point of the desktop edition is that this list is empty. Returning it —
+        rather than asserting it somewhere — means the installer, the health check and the
+        test suite all ask the same question of the same code, and a future setting that
+        quietly adds a dependency shows up in all three at once.
+        """
+        needed = []
+        if self.uses_postgres:
+            needed.append("PostgreSQL")
+        if self.redis_url:
+            needed.append("Redis")
+        return needed
 
     def ensure_dirs(self) -> None:
         self.data_dir.mkdir(parents=True, exist_ok=True)
