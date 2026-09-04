@@ -7,10 +7,12 @@ import { DevicePanel } from "@/components/DevicePanel";
 import { Hud } from "@/components/Hud";
 import { MemoryPanel } from "@/components/MemoryPanel";
 import { PermissionPanel } from "@/components/PermissionPanel";
+import { ServerConnect } from "@/components/ServerConnect";
 import { TaskPanel } from "@/components/TaskPanel";
 import { useMind } from "@/hooks/useMind";
 import { useRealtime } from "@/hooks/useRealtime";
 import { api } from "@/lib/api";
+import { IS_TAURI } from "@/lib/origin";
 
 const DRAWERS = {
   tasks: { label: "tasks", render: () => <TaskPanel /> },
@@ -41,6 +43,7 @@ export default function App() {
     approvals,
     agents,
     thinking,
+    needsSetup,
     send,
     interrupt,
     setApprovals,
@@ -74,6 +77,16 @@ export default function App() {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [interrupt, drawer]);
+
+  // A phone has no local Thursday to fall back to (ADR 0057) — several failed connection
+  // attempts with nothing configured, or a stored address gone quiet, means asking rather
+  // than leaving the owner looking at a HUD that will never say anything. `IS_TAURI`
+  // guards it for the same reason `origin.ts` only reads the override under Tauri: a plain
+  // browser dev session has its own proxy and a different, unrelated reason to be
+  // unreachable.
+  if (IS_TAURI && needsSetup) {
+    return <ServerConnect />;
+  }
 
   const submit = (event: React.FormEvent) => {
     event.preventDefault();

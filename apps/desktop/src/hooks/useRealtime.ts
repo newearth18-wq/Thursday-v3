@@ -4,6 +4,11 @@ import type { AgentStatus, Approval, Expression, Message, RealtimeMessage } from
 
 const WS_URL = `${WS_ORIGIN}/api/v1/realtime`;
 const RECONNECT_MAX_MS = 15_000;
+/** Close calls this many times in a row before asking whether Thursday is even at this
+ * address — long enough that a sidecar still migrating a fresh install is not mistaken for
+ * "there is nothing here" (Sprint 83's backend can take several seconds to answer), short
+ * enough that a phone with no address configured is not left guessing for a full minute. */
+const SETUP_AFTER_FAILURES = 3;
 
 /**
  * What to show before the server has said anything.
@@ -33,6 +38,13 @@ export const UNKNOWN: Expression = {
  * "how does Thursday look right now" is how the HUD and the avatar window end up showing
  * different faces at the same moment. The wire still carries `avatar_state`; nothing on
  * this screen reads it.
+ *
+ * Sprint 84 added `needsSetup`. A phone has no local Thursday to default to (ADR 0057), and
+ * the signal for that is not "what platform is this" — it is repeated, real connection
+ * failure with nowhere else to try: `SETUP_AFTER_FAILURES` closes in a row, and nothing has
+ * ever been typed into the connect screen. The same signal fires on any platform, which is
+ * the point: desktop's sidecar makes it vanishingly unlikely there, and a phone that has
+ * never been told an address hits it on the very first attempt.
  */
 export function useRealtime() {
   const [connected, setConnected] = useState(false);
@@ -41,10 +53,12 @@ export function useRealtime() {
   const [agents, setAgents] = useState<AgentStatus[]>([]);
   const [thinking, setThinking] = useState(false);
   const [expression, setExpression] = useState<Expression>(UNKNOWN);
+  const [needsSetup, setNeedsSetup] = useState(false);
 
   const socket = useRef<WebSocket | null>(null);
   const backoff = useRef(1000);
   const sessionId = useRef<string | null>(null);
+  const failures = useRef(0);
 
   const connect = useCallback(() => {
     const ws = new WebSocket(WS_URL);
@@ -52,7 +66,9 @@ export function useRealtime() {
 
     ws.onopen = () => {
       setConnected(true);
+      setNeedsSetup(false);
       backoff.current = 1000;
+      failures.current = 0;
     };
 
     ws.onclose = () => {
@@ -60,6 +76,14 @@ export function useRealtime() {
       // A mood outlives its connection otherwise: the last thing the socket said would
       // keep glowing on the screen long after Thursday stopped being able to say it.
       setExpression(UNKNOWN);
+      failures.current += 1;
+      // Fires whether or not an address was already given: a stored override that is
+      // wrong or has gone offline deserves the same screen, pre-filled rather than blank
+      // (`ServerConnect` reads `serverOverride()` itself) — the alternative is a silent
+      // reconnect loop with no way for a person to notice a typo was ever the problem.
+      if (failures.current >= SETUP_AFTER_FAILURES) {
+        setNeedsSetup(true);
+      }
       setTimeout(connect, backoff.current);
       backoff.current = Math.min(backoff.current * 2, RECONNECT_MAX_MS);
     };
@@ -167,6 +191,7 @@ export function useRealtime() {
     approvals,
     agents,
     thinking,
+    needsSetup,
     send,
     interrupt,
     setApprovals,

@@ -6,6 +6,15 @@ authors = ["Thursday"]
 edition = "2021"
 rust-version = "1.77"
 
+# Sprint 84. A mobile build has no `main()` of its own — the Android/iOS launcher calls
+# into a library directly, at the function `tauri::mobile_entry_point` marks (see lib.rs) —
+# so the app has to exist as a library as well as the desktop binary `main.rs` still builds.
+# `staticlib`/`cdylib` are what Android's and iOS's own build systems link against; `rlib` is
+# what lets `main.rs` on desktop keep calling it like any other crate.
+[lib]
+name = "thursday_desktop_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 

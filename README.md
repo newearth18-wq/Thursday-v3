@@ -21,7 +21,7 @@ ready, what is not, and what closing each gap would take is in
 
 **Phase 1 is implemented and runnable**: the vertical slice from
 [docs/15-vertical-slice.md](docs/15-vertical-slice.md) works end to end, with 1,804 tests that
-need no database, no network and no model credentials — plus 43 in the desktop app, which
+need no database, no network and no model credentials — plus 62 in the desktop app, which
 is where the decisions about what a person is actually shown now live.
 
 ```
@@ -201,7 +201,7 @@ nothing completes without passing Verify.** Both are single choke points rather 
 conventions, so neither can be forgotten by a new caller.
 
 Full design in [`docs/`](docs/) — the twenty-four deliverables, written before the code,
-plus the [V2 review](docs/architecture/00-v2-review.md) and fifty-six
+plus the [V2 review](docs/architecture/00-v2-review.md) and fifty-seven
 [architecture decisions](docs/architecture/decisions/) recording what was chosen and what
 each choice cost:
 
@@ -283,6 +283,9 @@ each choice cost:
   ([`installer/`](installer/), ADR 0056) — migrate, seed, then serve, verified by polling
   the real `/api/v1/health` before the window is ever shown, never by trusting that the
   process started
+- The same shell on Android, as a screen onto a Thursday running somewhere else rather than
+  a second backend on the phone (ADR 0057) — a "Connect to Thursday" prompt reached by
+  repeated real connection failure, never by asking what platform this is
 - 80 REST operations, two WebSockets, 29-table schema with working migrations and seeds
 
 **Designed, ported, not yet implemented** — every one has an interface and a Phase in

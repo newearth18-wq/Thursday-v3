@@ -64,3 +64,4 @@ done this way?" and have no answer.
 | [0054](0054-a-mood-is-derived-and-it-is-thursdays-own.md) | A mood is derived, and it is Thursday's own | A feeling that can be assigned reads calm while the audit chain is broken — and §55 forbids reading one off a person |
 | [0055](0055-the-avatar-is-a-second-window-not-a-second-opinion.md) | The avatar is a second window, not a second opinion | "Elsewhere" must mean Thursday's window is not in front — never something learned by watching the owner |
 | [0056](0056-a-packaged-thursday-starts-its-own-backend.md) | A packaged Thursday starts its own backend | Every window before this one assumed a human had already started the API by hand |
+| [0057](0057-a-phone-is-a-screen-not-a-machine-thursday-runs-on.md) | A phone is a screen, not a machine Thursday runs on | Android sandboxing aside, a backend running on the phone itself would be a second, disconnected Thursday |
