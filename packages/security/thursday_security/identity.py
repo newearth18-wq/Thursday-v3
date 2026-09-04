@@ -222,8 +222,19 @@ class AuthenticationSession:
     #: Last time the owner *did* something, as distinct from last time they were checked.
     last_activity_at: datetime = field(default_factory=lambda: datetime.now(UTC))
     session_id: UUID = field(default_factory=uuid4)
-    #: §28. Set when presence is lost; the session survives but stops being fresh.
+    #: §28. Cleared only on *confirmed* absence — the owner gone long enough to lock, or
+    #: somebody else at the machine. Not set for a momentary step out of frame; see
+    #: `presence_cap` for that, and `presence.py` for why the two are different.
     present: bool = True
+    #: A ceiling applied while the owner is not currently observed but has not been gone long
+    #: enough to lock (§28's "Authentication Level ลดลง").
+    #:
+    #: This exists because the two obvious designs are both wrong. Dropping to NONE the moment
+    #: a face leaves the frame re-challenges somebody who reached for a coffee cup, and §24 is
+    #: explicit that a system which asks constantly is one people switch off. Leaving the level
+    #: untouched lets whoever sits down next inherit it. A ceiling degrades honestly: ordinary
+    #: work continues, anything private stops.
+    presence_cap: AuthLevel | None = None
     #: Why the session ended, if it has. Kept for the audit trail (§75).
     ended_reason: str = ""
 
@@ -253,8 +264,11 @@ class AuthenticationSession:
             return AuthLevel.NONE
         level = self.auth_level
         if not self.present:
-            # Somebody who is not there is not authenticated, whatever they were.
+            # Confirmed absent. Somebody who is not there is not authenticated, whatever
+            # they were a moment ago.
             return AuthLevel.NONE
+        if self.presence_cap is not None:
+            level = AuthLevel(min(level, self.presence_cap))
         if (now - self.last_verified_at) >= FRESH_FOR:
             level = AuthLevel(max(AuthLevel.NONE, level - 1))
         if (now - self.last_activity_at) >= IDLE_BEFORE_DEGRADE:
@@ -276,6 +290,8 @@ class AuthenticationSession:
         self.last_verified_at = now
         self.last_activity_at = now
         self.present = True
+        # A fresh check is the thing that lifts a presence ceiling: the owner was observed.
+        self.presence_cap = None
 
     def end(self, reason: str) -> None:
         self.ended_reason = reason
