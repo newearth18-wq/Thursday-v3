@@ -35,6 +35,11 @@ reqwest = { version = "0.12", default-features = false, features = ["json", "rus
 # this listed directly, even though the same tokio is already resolved via tauri itself.
 tokio = { version = "1", features = ["time"] }
 
+# Desktop only, and declared per-target rather than behind a Cargo feature because that is
+# how Tauri ships it: mobile has one Activity per app and no second process to guard against.
+[target.'cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))'.dependencies]
+tauri-plugin-single-instance = "2"
+
 [features]
 # Tauri strips the console window on Windows release builds.
 default = ["custom-protocol"]

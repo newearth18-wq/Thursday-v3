@@ -81,6 +81,11 @@ the local backend answer before the window is even shown.
 - **A permission control that would not stick is not shown.** `can_relax` decides. A
   setting that saves and silently reverts teaches the owner something false about their
   own machine.
+- **Opening Thursday twice opens the one that is already there.** Tauri starts as many
+  copies as it is asked to; without a guard, a second double-click was a second tray icon,
+  a second always-on-top avatar standing somewhere else on the same desktop, and a second
+  sidecar racing the first for port 8000. Found on the first real install, in a screenshot
+  with two robots in it.
 - **Stop is never buried.** Escape closes a drawer, or interrupts the turn; the tray's
   *Stop everything* posts to the API from Rust, so it works when the webview does not.
 - **No class name reaches the screen.** A running job is labelled with the allowlisted
@@ -158,7 +163,9 @@ src/
     MemoryPanel.tsx        PART 69 — search, inspect, confirm, forget
     PermissionPanel.tsx    PART 70 — approval modes, standing grants, autonomy
 src-tauri/
-  src/lib.rs               everything the app does — desktop-only pieces #[cfg(desktop)]
+  src/lib.rs               everything the app does — desktop-only pieces #[cfg(desktop)];
+                            the single-instance guard is registered first, and has to be
+                            (Sprint 88) — after any other plugin it silently does nothing
   src/main.rs              three lines: calls lib.rs's run() (Sprint 84 — mobile needs a lib)
   src/sidecar.rs           Sprint 83, desktop only — spawn the bundled backend, poll, stop
   tauri.conf.json          the main window (ships hidden), CSP, macOSPrivateApi

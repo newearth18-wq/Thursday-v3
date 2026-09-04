@@ -186,6 +186,17 @@ pub fn run() {
     #[cfg(desktop)]
     {
         builder = builder
+            // First, and it has to be first — the plugin works by claiming a lock before
+            // anything else initialises. Sprint 88, found on the first real install: without
+            // it, double-clicking the shortcut a second time started a *whole second
+            // Thursday* — a second tray icon, a second always-on-top avatar window standing
+            // somewhere else on the same desktop, and a second sidecar racing the first for
+            // port 8000. The owner sees two robots and has no way to tell which one is
+            // theirs. Opening an assistant that is already open should bring it to the
+            // front, which is what this does instead.
+            .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
+                show_window(app);
+            }))
             .plugin(tauri_plugin_shell::init())
             .manage(sidecar::SidecarState::default())
             .invoke_handler(tauri::generate_handler![emergency_stop, release_lockdown])
