@@ -7,6 +7,8 @@ the socket and the endpoint — say the same thing.
 
 from __future__ import annotations
 
+import time
+
 import pytest
 from fastapi.testclient import TestClient
 from httpx import ASGITransport, AsyncClient
@@ -14,6 +16,7 @@ from thursday_api.app import create_app
 from thursday_core.expression import Mood
 from thursday_core.plain import leaks
 from thursday_core.world import WorldState, WorldStateProjector
+from thursday_realtime.gateway import client_event
 from thursday_shared.models import Event
 
 
@@ -157,3 +160,61 @@ def test_a_turn_says_it_is_listening_before_it_answers(ws_client, adapter, offic
 
     assert "expression" in order, "the socket never said what it was doing"
     assert order.index("expression") < order.index("assistant.delta")
+
+
+async def test_a_stop_announces_itself(container):
+    """The loudest state Thursday has must not be silent.
+
+    Until Sprint 82 `emergency_stop` published nothing at all. With a task running or a
+    device connected the socket noticed anyway, because *those* emit events — but a stop on
+    an idle Thursday produced no event, and every open window went on showing a calm
+    assistant. Found by pressing the button and watching the avatar keep strolling about.
+    """
+    seen: list[str] = []
+
+    async def note(event: Event) -> None:
+        seen.append(event.kind)
+
+    container.bus.subscribe("system.*", note)
+
+    await container.emergency_stop("all")
+    assert "system.emergency_stop" in seen
+
+    await container.release_lockdown()
+    assert "system.lockdown_released" in seen
+
+    # And both reach a client rather than being dropped in translation.
+    assert client_event("system.emergency_stop") == "notification"
+    assert client_event("system.lockdown_released") == "notification"
+
+
+def test_a_stop_reaches_the_screen_promptly(ws_client):
+    """Not "eventually" — the socket re-reads health every twenty seconds regardless, so a
+    test that only waits would pass on the fallback and prove nothing. This one is timed:
+    the announcement arrives in about a second, and the fallback is twenty."""
+    with ws_client.websocket_connect("/api/v1/realtime") as ws:
+        assert ws.receive_json()["type"] == "ready"
+        assert ws.receive_json()["type"] == "expression"
+
+        started = time.monotonic()
+        ws_client.post("/api/v1/emergency/stop", json={"scope": "all"})
+
+        moods = []
+        for _ in range(12):
+            message = ws.receive_json()
+            if message["type"] == "expression":
+                moods.append(message["mood"])
+                if message["mood"] == Mood.STOPPED.value:
+                    break
+        elapsed = time.monotonic() - started
+
+        assert Mood.STOPPED.value in moods, moods
+        assert elapsed < 5, f"the stop took {elapsed:.1f}s — that is the health tick, not the event"
+
+        ws_client.post("/api/v1/emergency/release")
+        for _ in range(12):
+            message = ws.receive_json()
+            if message["type"] == "expression" and message["mood"] != Mood.STOPPED.value:
+                break
+        else:
+            raise AssertionError("lifting the stop was never announced")

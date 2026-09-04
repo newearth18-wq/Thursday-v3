@@ -31,6 +31,20 @@ has right now: a machine that is connected, a job that is running, a question wa
 the owner, an open task. There are no decorative nodes. When Thursday is idle the graph is
 one point of light, and that is the honest picture.
 
+## And when you are working somewhere else
+
+A second window — transparent, always on top, and ignoring the mouse entirely — holding a
+small robot that walks along the bottom of the screen. It runs when Thursday is busy, sits
+down when everything is stopped, turns to face you and raises a hand when something is
+waiting on your answer, and says what it is doing in a bubble over its head.
+
+"Somewhere else" means one thing and nothing more: Thursday's own window is not the one in
+front. There is no idle timer, no input hook, no list of what you are running and no camera
+(ADR 0055). Opening Thursday puts the robot away.
+
+It is a second window onto the *same* expression, not a second opinion about it — the
+gait is the only thing this window decides.
+
 ## Rules this UI does not break
 
 - **One voice.** Sub-agents never address the owner (§96). The agent strip is a status
@@ -60,6 +74,8 @@ one point of light, and that is the honest picture.
 - **The graph is state, not decoration.** Every node is a real entity. A layout that
   wandered off-screen or produced `NaN` would look fine until the tenth node, so the
   simulation is a plain function and `graph.test.ts` runs it two thousand frames.
+- **The avatar appears because Thursday is not in front, not because of anything it
+  learned about you.** Window focus, and nothing else (ADR 0055).
 
 ## Layout
 
@@ -70,6 +86,8 @@ src/
   index.css                Tailwind layers
   hooks/useRealtime.ts     the single WebSocket, with reconnect backoff
   hooks/useMind.ts         what Thursday consists of — pushed and polled halves
+  Avatar.tsx               the transparent window: a robot that walks about
+  lib/avatar.ts            gaits, faces and the walking, as plain functions
   lib/api.ts               the REST surface, typed
   lib/graph.ts             the nodes, and the layout, as plain functions
   lib/mood.ts              how each mood is drawn: colour and motion, never words
@@ -79,6 +97,7 @@ src/
   components/
     BrainGraph.tsx         Sprint 81 — the core, the rings, and one node per real thing
     Hud.tsx                Sprint 81 — the readable half: clock, meters, devices, activity
+    Robot.tsx              Sprint 82 — one drawing, posed by the step cycle
     Conversation.tsx       PART 64 — the interface, floating over the graph
     AgentStrip.tsx         PART 66 — collapsed status line
     ApprovalDialog.tsx     PART 38/70 — context, then buttons
@@ -87,8 +106,9 @@ src/
     MemoryPanel.tsx        PART 69 — search, inspect, confirm, forget
     PermissionPanel.tsx    PART 70 — approval modes, standing grants, autonomy
 src-tauri/
-  src/main.rs              window, tray, and the emergency stop
-  tauri.conf.json          window and CSP
+  src/main.rs              both windows, the tray, and the emergency stop
+  tauri.conf.json          the main window, CSP, and macOSPrivateApi (transparency)
+  icons/                   generated with `npx tauri icon`; the build needs them
 ```
 
 ## Wiring
@@ -121,10 +141,16 @@ npm run dev          # browser, against the dev proxy on :1420
 npm run tauri dev    # the real window
 ```
 
-`npm run typecheck`, `npm run test` and `npm run build` are what CI runs. All three are
-worth running before a commit: `tsc` and the bundler resolve paths independently, so one
-can pass while the other fails, and the tests are where the decisions about what a person
-is shown are actually checked.
+`npm run typecheck`, `npm run test` and `npm run build` are what CI runs, plus
+`cargo clippy -- -D warnings` in `src-tauri`. All four are worth running before a commit:
+`tsc` and the bundler resolve paths independently, so one can pass while the other fails;
+the tests are where the decisions about what a person is shown are actually checked; and
+until Sprint 82 nothing compiled the Rust, which is how the shell came to reference icons
+that were not in the repository.
+
+The avatar can be worked on in a browser at `http://localhost:1420/#avatar`. In the packaged
+app it is opened by Tauri and marked with an injected flag instead, so nothing depends on a
+URL fragment surviving three platforms.
 
 ## Not built yet
 

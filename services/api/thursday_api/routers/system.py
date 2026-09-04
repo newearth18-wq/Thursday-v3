@@ -538,8 +538,9 @@ async def emergency_stop(
 
 @router.post("/emergency/release")
 async def release_lockdown(c: Container = Depends(get_container)) -> dict:
-    c.permissions.set_lockdown(False)
-    return {"lockdown": False}
+    # Through the container, not straight at the flag: setting and clearing the stop have
+    # to be one pair, or the half that announces itself drifts from the half that does not.
+    return await c.release_lockdown()
 
 
 # ------------------------------------------------------------------ voice (V4)

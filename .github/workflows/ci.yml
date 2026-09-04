@@ -91,3 +91,33 @@ jobs:
 
       - name: Build
         run: npm run build
+
+  # The desktop shell was never compiled by anything, and it did not compile: the icons
+  # `tauri.conf.json` points at were not in the repository, so `tauri::generate_context!`
+  # failed on a clean checkout. Nobody noticed because nothing ever tried.
+  shell:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/desktop/src-tauri
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: System libraries Tauri links against
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev libsoup-3.0-dev \
+                                  libjavascriptcoregtk-4.1-dev
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: apps/desktop/src-tauri
+
+      # check, not build: a full bundle needs signing identities and takes minutes. What
+      # matters here is that the Rust and the config still agree with each other.
+      - name: Check
+        run: cargo clippy -- -D warnings

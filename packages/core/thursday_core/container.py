@@ -56,8 +56,9 @@ from thursday_security.privacy import PrivacyClassifier, PrivacyZoneRegistry
 from thursday_security.redaction import SecretRedactor
 from thursday_security.remote import RemoteCommandGate
 from thursday_security.vault import ChainVault, EnvVault, InMemoryVault, KeychainVault
-from thursday_shared.enums import ModelTier
+from thursday_shared.enums import ModelTier, NotificationPriority
 from thursday_shared.errors import ConfigurationError
+from thursday_shared.models import Event
 from thursday_tools.builtin import register_builtin_tools
 from thursday_tools.registry import ToolRegistry, ToolRouter
 from thursday_vision.camera import CameraManager
@@ -360,7 +361,14 @@ class Container:
 
     async def emergency_stop(self, scope: str = "all") -> dict[str, Any]:
         """§69. Deliberately does not route through the reasoning engine — it must work
-        when the model is down."""
+        when the model is down.
+
+        It also announces itself on the bus. Until Sprint 82 it did not, and the
+        consequence only became visible once a screen started deriving a state from it: a
+        stop with no running tasks and no connected device produced no event at all, so
+        every open window went on showing a calm Thursday until something unrelated
+        happened. The loudest state in the system was the one nothing was told about.
+        """
         actions: dict[str, Any] = {}
         if scope in ("all", "agents"):
             cancelled = 0
@@ -380,7 +388,28 @@ class Container:
             self.permissions.set_lockdown(True)
             actions["lockdown"] = True
         log.warning("emergency_stop", scope=scope, **actions)
+        await self.bus.publish(
+            Event(
+                kind="system.emergency_stop",
+                payload={"scope": scope, **actions},
+                priority=NotificationPriority.CRITICAL,
+            )
+        )
         return actions
+
+    async def release_lockdown(self) -> dict[str, Any]:
+        """Lift the stop, and say so.
+
+        Here rather than in the router because the setting and the clearing have to be one
+        pair: an endpoint that clears the flag directly is an endpoint that forgets to
+        announce it, which is how the stop became silent in the first place.
+        """
+        self.permissions.set_lockdown(False)
+        log.warning("lockdown_released")
+        await self.bus.publish(
+            Event(kind="system.lockdown_released", priority=NotificationPriority.IMPORTANT)
+        )
+        return {"lockdown": False}
 
 
 def build_container(settings: Settings | None = None, *, configure_logs: bool = True) -> Container:

@@ -20,7 +20,8 @@
         "resizable": true,
         "decorations": true,
         "transparent": false,
-        "theme": "Dark"
+        "theme": "Dark",
+        "label": "main"
       }
     ],
     "security": {
@@ -31,12 +32,18 @@
         "media-src": "'self' blob:",
         "connect-src": "'self' http://127.0.0.1:8000 ws://127.0.0.1:8000"
       }
-    }
+    },
+    "macOSPrivateApi": true
   },
   "bundle": {
     "active": true,
     "targets": "all",
-    "icon": ["icons/32x32.png", "icons/128x128.png", "icons/icon.icns", "icons/icon.ico"],
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
     "category": "Productivity",
     "shortDescription": "Thursday",
     "longDescription": "Thursday is one assistant that understands, plans, delegates, acts, verifies and remembers."
