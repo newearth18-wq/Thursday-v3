@@ -138,6 +138,9 @@ def describe(values: list[float]) -> dict[str, float]:
 class DataAgent(BaseAgent):
     spec = AgentSpec(
         name="data",
+        user_description="คำนวณและสรุปข้อมูลจากไฟล์ตาราง แล้วบอกที่มาของทุกตัวเลข",
+        user_examples=["สรุปยอดจากไฟล์นี้ให้หน่อย", "ทำกราฟจากตารางนี้"],
+        requirements=["data"],
         description="Computes statistics over tabular data, with the rows attached.",
         capabilities=["data", "analysis", "statistics", "calculate", "aggregate", "chart"],
         # No tools: it works on what the previous step already read. Giving it file access

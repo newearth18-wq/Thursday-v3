@@ -69,8 +69,74 @@ export interface MemoryRecord {
 }
 
 export interface AgentStatus {
+  /**
+   * Internal, and never rendered. It is the key world state uses (see
+   * `WorldStateProjector.on_agent`), so it is what tells two concurrent jobs apart —
+   * but Sprint 65's rule is that a class name never reaches a screen, and `activity`
+   * is the field that does.
+   */
   name: string;
+  /** The allowlisted phrase from `plain.activity`. This is what a person reads. */
+  activity: string;
   state: "working" | "completed" | "failed" | "waiting";
+}
+
+/** Sprint 80. Thursday's own condition — never a reading of the person (§55). */
+export type Mood =
+  | "STOPPED" | "FAILING" | "CONCERNED" | "WAITING"
+  | "UNSURE" | "WORKING" | "PLEASED" | "ATTENTIVE" | "CALM";
+
+/**
+ * Sprint 85. What Thursday's body is doing, derived on the server alongside the mood.
+ *
+ * §19's `AUTHENTICATING` is absent here because it is absent on the server: nothing in a
+ * running Thursday can currently report that an identity check is in flight, and a pose for
+ * a state that can never arrive is a drawing of a lie.
+ */
+export type Posture =
+  | "SPEAKING" | "THINKING" | "LISTENING" | "WORKING" | "SLEEPING" | "STILL";
+
+/**
+ * Sprint 89. What Thursday is holding while it works (§13).
+ *
+ * The addendum's rule is that Thursday stays the only character: a sub-agent is not a
+ * second robot, it is an object the one robot picks up. Derived on the server from the
+ * agent's *capability* — the same key the caption comes from — so a picture and a sentence
+ * can never describe different work, and no agent name is anywhere near it (§65).
+ */
+export type Prop =
+  | "NONE" | "BOOKS" | "CHART" | "PAPERS" | "CODE" | "SCAN" | "SCREEN" | "CHECKLIST";
+
+/**
+ * What Thursday is doing and how it is going, derived on the server.
+ *
+ * The client never computes a mood of its own. One derivation means the HUD and the
+ * avatar cannot disagree about how Thursday feels, and it means the rule that a mood
+ * cannot be asserted holds on this side of the socket too — there is nothing here to set.
+ */
+export interface Expression {
+  mood: Mood;
+  /** Sprint 85. What the body is doing — a different question from how it is going. */
+  posture: Posture;
+  /**
+   * §10. True exactly when the microphone is capturing.
+   *
+   * Its own field rather than a posture, and deliberately so: a posture can be outranked
+   * (during barge-in the microphone is open while Thursday is still speaking), and a
+   * recording indicator that anything is allowed to outrank is not an indicator. Draw it
+   * from this and from nothing else.
+   */
+  listening: boolean;
+  /** "" when nothing is running. Never an agent name. */
+  activity: string;
+  /** §13. "NONE" whenever nothing is running, and cleared with `activity`. */
+  prop: Prop;
+  because: string;
+  /** 0–1. How much motion to draw with. */
+  intensity: number;
+  running: number;
+  waiting: number;
+  unhealthy: number;
 }
 
 export interface RealtimeMessage {

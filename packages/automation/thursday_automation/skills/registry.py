@@ -31,6 +31,13 @@ class SandboxResult:
         )
 
 
+#: `list` is a method on the class below, and a name in a class body shadows the builtin
+#: for every annotation in that body — so `-> list[X]` there resolves to the *method*, and
+#: the type checker gives up on the whole signature rather than complaining loudly. These
+#: aliases are resolved at module scope, where nothing shadows anything (Sprint 86 audit).
+Skills = list[Skill]
+
+
 class SkillRegistry:
     def __init__(
         self,
@@ -238,10 +245,10 @@ class SkillRegistry:
         needle = _slugify(name_or_slug)
         return next((s for s in self._skills.values() if s.slug == needle), None)
 
-    def list(self, *, status: SkillStatus | None = None) -> list[Skill]:
+    def list(self, *, status: SkillStatus | None = None) -> Skills:
         return [s for s in self._skills.values() if status is None or s.status is status]
 
-    def active(self) -> list[Skill]:
+    def active(self) -> Skills:
         return self.list(status=SkillStatus.ACTIVE)
 
     async def _run_case(self, version: SkillVersion, case: SkillTest) -> None:

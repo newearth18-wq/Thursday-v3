@@ -74,6 +74,14 @@ class ProactivityGate:
         self._recent.append((now or datetime.now(UTC), priority))
 
 
+#: `list` is a method on the class below, and a name in a class body shadows the builtin
+#: for every annotation in that body — so `-> list[X]` there resolves to the *method*, and
+#: the type checker gives up on the whole signature rather than complaining loudly. These
+#: aliases are resolved at module scope, where nothing shadows anything (Sprint 86 audit).
+Automations = list[Automation]
+Outcomes = list[Any]
+
+
 class AutomationEngine:
     def __init__(
         self,
@@ -112,7 +120,7 @@ class AutomationEngine:
     def remove(self, automation_id: UUID) -> None:
         self._automations.pop(automation_id, None)
 
-    def list(self, *, enabled_only: bool = False) -> list[Automation]:
+    def list(self, *, enabled_only: bool = False) -> Automations:
         return [a for a in self._automations.values() if a.enabled or not enabled_only]
 
     # ------------------------------------------------------------------ execution
@@ -123,7 +131,7 @@ class AutomationEngine:
             if automation.should_fire(event, world=world, proactivity=self.gate.level):
                 await self.run(automation, event)
 
-    async def run(self, automation: Automation, event: Event | None = None) -> list[Any]:
+    async def run(self, automation: Automation, event: Event | None = None) -> Outcomes:
         # NB: structlog reserves the keyword "event" for the message itself.
         log.info(
             "automation_triggered",

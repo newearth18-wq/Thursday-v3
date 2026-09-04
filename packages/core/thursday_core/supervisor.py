@@ -299,6 +299,19 @@ class Supervisor:
         return bool(unchecked) or self.is_mandatory(contract, result)[0]
 
     async def _llm_critique(self, contract: JobContract, result: AgentResult) -> dict[str, Any]:
+        # `_needs_judgement` already refuses when there is no model registry, but that is a
+        # guard in a different method, which is a guard the next caller does not get. The
+        # `# type: ignore[attr-defined]` on the call below was suppressing the wrong error
+        # code — mypy was reporting `union-attr`, i.e. "this can be None" — so the one tool
+        # that noticed had been told to be quiet about it (Sprint 86 audit).
+        if self._models is None:
+            return {
+                "name": "llm_critique",
+                "ok": False,
+                "detail": "no model registry is available to judge this",
+                "recoverable": True,
+            }
+
         request = LLMRequest(
             messages=[
                 LLMMessage(

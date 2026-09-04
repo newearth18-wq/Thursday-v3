@@ -10,15 +10,24 @@ const MODE_ACCENT: Record<string, string> = {
   NORMAL: "border-ink-700",
 };
 
-/** PART 64. The conversation is the interface. Everything else is a drawer. */
+/**
+ * PART 64. The conversation is the interface. Everything else is a drawer.
+ *
+ * Sprint 81 floated it over the HUD instead of sitting it in a column. The bubbles are
+ * translucent and the top edge fades into the graph, so what Thursday is doing stays
+ * visible behind what it is saying — the two are the same thing described twice.
+ */
 export function Conversation({ messages, thinking }: { messages: Message[]; thinking: boolean }) {
   const bottom = useRef<HTMLDivElement>(null);
   useEffect(() => bottom.current?.scrollIntoView({ behavior: "smooth" }), [messages, thinking]);
 
   return (
-    <div className="flex-1 space-y-3 overflow-y-auto px-6 py-4">
+    <div
+      className="max-h-[44vh] space-y-3 overflow-y-auto px-1 py-4
+                 [mask-image:linear-gradient(to_bottom,transparent,black_2.5rem)]"
+    >
       {messages.length === 0 && (
-        <p className="mt-8 text-center text-sm text-slate-600">
+        <p className="text-center text-sm text-slate-600">
           Say what you need. Thursday decides how to do it.
         </p>
       )}
@@ -26,16 +35,17 @@ export function Conversation({ messages, thinking }: { messages: Message[]; thin
       {messages.map((message) =>
         message.role === "owner" ? (
           <div key={message.id} className="flex justify-end">
-            <div className="max-w-[78%] rounded-2xl rounded-br-sm bg-thursday-dim/25 px-4 py-2
-                            text-sm text-slate-100">
+            <div className="max-w-[78%] rounded-2xl rounded-br-sm border border-white/10
+                            bg-thursday-dim/25 px-4 py-2 text-sm text-slate-100 backdrop-blur-md">
               {message.text}
             </div>
           </div>
         ) : (
           <div key={message.id} className="flex justify-start">
             <div
-              className={`max-w-[85%] rounded-2xl rounded-bl-sm border bg-ink-900/80 px-4 py-2
-                          text-sm text-slate-200 ${MODE_ACCENT[message.voiceMode ?? "NORMAL"]}`}
+              className={`max-w-[85%] rounded-2xl rounded-bl-sm border bg-ink-900/70 px-4 py-2
+                          text-sm text-slate-200 backdrop-blur-md
+                          ${MODE_ACCENT[message.voiceMode ?? "NORMAL"]}`}
             >
               <p className="whitespace-pre-wrap">{message.text}</p>
 
@@ -60,7 +70,8 @@ export function Conversation({ messages, thinking }: { messages: Message[]; thin
 
       {thinking && (
         <div className="flex justify-start">
-          <div className="rounded-2xl rounded-bl-sm border border-ink-700 bg-ink-900/60 px-4 py-2">
+          <div className="rounded-2xl rounded-bl-sm border border-white/10 bg-ink-900/60 px-4 py-2
+                          backdrop-blur-md">
             <span className="inline-flex gap-1">
               {[0, 150, 300].map((delay) => (
                 <span

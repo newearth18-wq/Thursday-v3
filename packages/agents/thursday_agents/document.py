@@ -45,6 +45,9 @@ def _title_of(contract: JobContract) -> str:
 class DocumentAgent(BaseAgent):
     spec = AgentSpec(
         name="document",
+        user_description="ร่างและจัดรูปแบบเอกสารจากข้อมูลที่มีอยู่",
+        user_examples=["เขียนรายงานจากข้อมูลนี้", "สรุปไฟล์นี้เป็นเอกสารหนึ่งหน้า"],
+        requirements=["document"],
         description="Assembles a report from what earlier steps produced, citing each one.",
         capabilities=["document", "report", "write", "summarize", "format"],
         # It writes into the conversation, not onto a disk. Saving the report is a separate,

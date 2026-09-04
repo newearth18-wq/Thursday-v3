@@ -12,6 +12,9 @@ venv/
 .mypy_cache/
 dist/
 build/
+# Sprint 83. Built per-platform by scripts/build_sidecar.sh (PyInstaller, no cross-compile),
+# never hand-authored — same reason apps/desktop/dist/ is not tracked.
+apps/desktop/src-tauri/binaries/
 *.egg-info/
 node_modules/
 .DS_Store
