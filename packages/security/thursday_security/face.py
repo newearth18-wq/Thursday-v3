@@ -32,7 +32,7 @@ from typing import Any
 from thursday_core.logging import get_logger
 
 from thursday_security.biometrics import BiometricError
-from thursday_security.identity import Factor, IdentityClaim
+from thursday_security.identity import USABLE_CONFIDENCE, Factor, IdentityClaim
 
 log = get_logger(__name__)
 
@@ -305,10 +305,14 @@ class FaceMatcher:
 
         return IdentityClaim(
             factor=Factor.FACE,
-            user_id=user_id if confidence > 0 else None,
+            user_id=user_id if confidence >= USABLE_CONFIDENCE else None,
             confidence=confidence,
             liveness=liveness,
             concerns=concerns,
+            # A living face was in front of the camera and was compared. Whether or not it
+            # matched, its presence is a fact — and one that contradicts any other factor
+            # claiming somebody else is here (§64).
+            observed=True,
         )
 
 

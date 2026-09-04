@@ -45,6 +45,7 @@ container, not a unit test of the class in isolation.
 | Errors and activity in plain language, from a declared list rather than a filter | `tests/integration/test_plain_language_v65.py` |
 | A Repair button that cannot offer a repair the Permission Engine would refuse, and reports what the machine shows rather than what the handler returned | `tests/integration/test_checkup_v66.py` |
 | A tutor whose lessons end when the machine proves it, and whose practice mode has no execution path | `tests/e2e/test_onboarding_acceptance.py` |
+| A photograph, a replayed video and a recorded voice each refused with the matcher reporting a perfect score | `tests/e2e/test_identity_acceptance.py` |
 | Metrics whose labels cannot carry a path or a secret | `tests/integration/test_metrics_v49.py` |
 
 ## 23.2 What is not ready, and what that would take
@@ -184,6 +185,22 @@ V10. Because the outcome is now derived from re-running the health check rather 
 handler returning, pressing one answers "ลองซ่อมแล้ว แต่ยังไม่กลับมาทำงาน", which is true.
 *To close:* three real handlers. The verification step is what makes their absence visible
 instead of reporting success.
+
+**No face or voice has ever been recognised.** Sprints 73-79 built the identity layer:
+the secure template store, enrolment, liveness, the fusion engine, presence, the gate and
+recovery. **This container has no camera, no microphone, no Windows Hello and no depth
+sensor**, so every frame and audio sample in the tests is a Python object and every provider
+returns a number a test chose. What is proved is that the *policy* composes — a perfect match
+with no liveness is refused all the way to the gate, a locked session cannot be inherited, a
+refusal says nothing. What is not proved, at all, is whether a real recogniser distinguishes
+two people.
+
+That gap is why `NoFaceRecognition` and `NoSpeakerRecognition` authenticate nobody rather than
+returning a plausible number: a stub that did would be a lock that opens for everybody while
+reporting itself locked. **Shipping this with biometrics enabled requires installing a real
+provider**; a deployment that has not, has not. *To close:* a machine with a camera and a
+microphone, a real recogniser behind the two ports, and the §52 anti-spoof battery run against
+an actual printed photograph, an actual phone screen and an actual recording.
 
 **The Learning Center has no UI.** Sprints 67-72 built the tutor as API and logic: the
 capability catalogue, lessons with real verification, the tip engine, the Tutor agent, and

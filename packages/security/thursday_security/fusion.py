@@ -40,6 +40,7 @@ from thursday_security.identity import (
     BIOMETRIC_FACTORS,
     KNOWLEDGE_FACTORS,
     POSSESSION_FACTORS,
+    USABLE_CONFIDENCE,
     AuthLevel,
     Factor,
     IdentityClaim,
@@ -48,11 +49,6 @@ from thursday_security.identity import (
 from thursday_security.voice import VOICE_ALONE_CEILING
 
 log = get_logger(__name__)
-
-#: A claim below this confidence is not evidence of anybody. Deliberately not a tuning dial
-#: for "how strict is Thursday" — that is the security mode's job, on the requirement side.
-#: This is the floor below which a match is noise.
-USABLE_CONFIDENCE = 0.5
 
 #: §12/§13. A biometric claim with no liveness contributes nothing, whatever it matched: a
 #: photograph and a recording both match perfectly and neither is a person.
@@ -107,10 +103,18 @@ class IdentityFusionEngine:
         usable: dict[Factor, IdentityClaim] = {}
         subjects: set[str] = set()
 
+        contradicted: list[str] = []
         for claim in claims:
             ok, why = self._usable(claim)
             if not ok:
                 reasons.append(f"{claim.factor.value.lower()}: {why}")
+                # §64. A biometric that was *observed* and matched nobody is not an absence of
+                # evidence — it is somebody who is not the owner, standing there. Discarding it
+                # as "no face" would let a stranger playing a recording of the owner be admitted
+                # on the voice alone, which is the attack §64 describes. Found by the §89
+                # acceptance test, which is what those exist for.
+                if claim.observed and claim.factor in BIOMETRIC_FACTORS:
+                    contradicted.append(claim.factor.value.lower())
                 continue
             usable[claim.factor] = claim
             if claim.user_id:
@@ -121,6 +125,17 @@ class IdentityFusionEngine:
             factors.add(Factor.TRUSTED_DEVICE)
         if os_authenticated:
             factors.add(Factor.OS_BIOMETRIC)
+
+        if contradicted and subjects:
+            # Something that is a person was measured and is not who the other factors claim.
+            log.warning("identity_contradicted", by=",".join(sorted(contradicted)))
+            return Fused(
+                user_id=None,
+                level=AuthLevel.NONE,
+                factors=frozenset(factors),
+                next_factor=Factor.OS_BIOMETRIC,
+                reasons=(f"somebody was here whose {' and '.join(contradicted)} did not match",),
+            )
 
         if len(subjects) > 1:
             # Two factors naming two different people is not two factors — it is a face and a

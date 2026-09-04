@@ -37,7 +37,7 @@ from typing import Any
 from thursday_core.logging import get_logger
 
 from thursday_security.biometrics import BiometricError
-from thursday_security.identity import AuthLevel, Factor, IdentityClaim
+from thursday_security.identity import USABLE_CONFIDENCE, AuthLevel, Factor, IdentityClaim
 
 log = get_logger(__name__)
 
@@ -283,8 +283,10 @@ class SpeakerMatcher:
 
         return IdentityClaim(
             factor=Factor.VOICE,
-            user_id=user_id if confidence > 0 else None,
+            user_id=user_id if confidence >= USABLE_CONFIDENCE else None,
             confidence=confidence,
             liveness=evidence.liveness,
             concerns=concerns,
+            # Somebody was speaking and was compared against the template (§64).
+            observed=True,
         )

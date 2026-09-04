@@ -164,6 +164,13 @@ class AuthContext:
 ANONYMOUS = AuthContext(authenticated=False, user_id=None, auth_level=0, session_fresh=False)
 
 
+#: Below this, a match does not name anybody — the matchers refuse to make the claim and the
+#: fusion engine refuses to count it. One constant rather than one per layer, because two
+#: thresholds for the same question drift, and the drift here is a matcher asserting "this is
+#: the owner, five percent" that a later layer has to remember to discard.
+USABLE_CONFIDENCE = 0.5
+
+
 @dataclass(frozen=True)
 class IdentityClaim:
     """One provider's opinion, before fusion. Never authoritative on its own.
@@ -183,6 +190,15 @@ class IdentityClaim:
     liveness: float = 0.0
     #: What the provider noticed that argues against believing it (§13, §17).
     concerns: tuple[str, ...] = ()
+    #: Whether there was actually something to match — a face in frame, speech in the audio.
+    #:
+    #: This is the difference between *absence of evidence* and *evidence of absence*, and
+    #: §64 is the reason it has to exist. "No face observed" (nobody in frame, camera off) and
+    #: "a face was observed and it is not the owner's" arrive at fusion as the same
+    #: `user_id=None` otherwise — so a stranger sitting at the machine playing a recording of
+    #: the owner would have their mismatching face silently discarded and be admitted on the
+    #: voice alone. An observed biometric that matched nobody must *contradict*, not abstain.
+    observed: bool = False
 
     @property
     def usable(self) -> bool:
