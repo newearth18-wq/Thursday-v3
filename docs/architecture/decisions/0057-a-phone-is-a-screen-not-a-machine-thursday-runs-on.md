@@ -75,10 +75,23 @@ oversight: a second, transparent, always-on-top, click-through OS window is a de
 windowing concept with no equivalent in Android's one-Activity-per-app model. What ships on
 mobile is the HUD only.
 
-**This is source-level readiness, verified no further than a desktop rebuild.** No Android
-SDK, NDK, or emulator exists in the environment this was built in, so `cargo tauri android
-init` — which generates the actual Gradle project `gen/android` — has never been run, and no
-`.apk` has ever been produced or installed on a device or emulator. CI's `android` job is the
-first thing that attempts either, on a runner that has the SDK; a person with a phone or an
-emulator is what closes this gap for good, the same way ADR 0056 named a real Windows machine
-as the thing that closes its own.
+**This was source-level readiness, and CI's `android` job found the gap between that and a
+real build on its very first run** — the same way ADR 0056's `shell` job failed on its own
+first run, and for a related reason. `tauri.conf.json`'s `externalBin` is not itself
+platform-conditional: it is read by `tauri-build`'s build script for *whatever* target
+`cargo build` is currently compiling, desktop or mobile alike, because the JSON file makes
+no distinction. Sprint 83 declared it once, in the base config, correctly for every desktop
+target — and, it turned out, for Android too, where it demanded a sidecar binary that must
+never exist (this ADR's whole argument is that one should not). The fix is Tauri's own
+mechanism for exactly this: `externalBin` moved out of the base config into
+`tauri.linux.conf.json`, `tauri.windows.conf.json` and `tauri.macos.conf.json` — platform
+overlays merged in only for the platform named, so it is present on every desktop build and
+absent on Android without either side needing to ask what platform it is running on, which
+is the same rule the rest of this ADR argues for one layer up. Verified by removing the
+built sidecar and confirming a plain desktop `cargo check` still refuses to proceed without
+it — the overlay is genuinely enforced, not merely absent by coincidence.
+
+No Android SDK, NDK, or emulator exists in the environment this was built in, so no `.apk`
+has been installed on a device or emulator, and this fix's Android half is confirmed only
+by CI, not locally. A person with a phone is what closes that gap for good, the same way
+ADR 0056 named a real Windows machine as the thing that closes its own.
