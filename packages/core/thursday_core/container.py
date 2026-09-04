@@ -397,6 +397,23 @@ class Container:
         )
         return actions
 
+    def microphone_open(self) -> bool:
+        """Whether the microphone is capturing right now — §10's recording indicator.
+
+        Sprint 85, and it lives here for two reasons rather than one.
+
+        Not in `expression.py`, because that module deliberately imports nothing that
+        carries an observation of a person, and `tests/unit/test_expression.py` asserts the
+        import list. Not in either service either, because **both** of them have to answer
+        this identically: the socket and `GET /expression` are two ways out of one process,
+        and a microphone reported open on one and closed on the other is precisely the
+        two-sources-of-truth failure the whole expression was built to avoid.
+
+        One boolean, read from the voice loop, which is the only thing in Thursday that
+        knows. No voice service means no microphone, reported honestly as not capturing.
+        """
+        return bool(getattr(self.voice, "listening", False))
+
     async def release_lockdown(self) -> dict[str, Any]:
         """Lift the stop, and say so.
 

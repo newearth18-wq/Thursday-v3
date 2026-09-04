@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { MIC } from "@/lib/avatar";
 import { APPEARANCE } from "@/lib/mood";
 import type { Device, Expression } from "@/lib/types";
 
@@ -99,7 +100,23 @@ export function Hud({
       </div>
 
       {/* ------------------------------------------------------------------ top right */}
-      <div className="absolute right-8 top-7">
+      <div className="absolute right-8 top-7 flex items-center gap-4">
+        {/* §10, the same recording indicator the avatar draws, from the same field and in
+            the same colour. Both windows or neither: an owner who learns that the red dot
+            means the microphone is open must not find that it only appears on one of them.
+            Drawn straight from `expression.listening` — no mood, no posture, no derivation
+            of any kind on this side. */}
+        {connected && expression.listening && (
+          <span className="flex items-center gap-2" data-listening="true">
+            <span
+              className="h-2.5 w-2.5 rounded-full"
+              style={{ background: MIC, boxShadow: `0 0 12px ${MIC}` }}
+            />
+            <span className="text-[10px] uppercase tracking-[0.2em]" style={{ color: MIC }}>
+              mic
+            </span>
+          </span>
+        )}
         <Clock />
       </div>
 

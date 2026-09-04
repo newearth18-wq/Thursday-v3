@@ -141,8 +141,15 @@ def test_the_socket_says_how_it_is_going_before_being_asked(ws_client):
     assert not leaks(opening["because"]), leaks(opening["because"])
 
 
-def test_a_turn_says_it_is_listening_before_it_answers(ws_client, adapter, office_pc):
-    """ "กำลังฟังอยู่" that arrives with the answer is a caption, not a state."""
+def test_the_socket_says_what_it_is_doing_before_it_answers(ws_client, adapter, office_pc):
+    """ "กำลังฟังอยู่" that arrives with the answer is a caption, not a state.
+
+    Renamed in Sprint 85. It was called `test_a_turn_says_it_is_listening_before_it_answers`
+    and asserted nothing whatsoever about listening — only that an `expression` frame arrives
+    before the first token. The name was a claim the body did not make, which is how
+    `Turn.listening` went five sprints with no producer and a green suite. What actually
+    covers listening is `test_the_microphone_reaches_the_client` below.
+    """
     with ws_client.websocket_connect("/api/v1/realtime") as ws:
         assert ws.receive_json()["type"] == "ready"
         assert ws.receive_json()["type"] == "expression"
@@ -218,3 +225,103 @@ def test_a_stop_reaches_the_screen_promptly(ws_client):
                 break
         else:
             raise AssertionError("lifting the stop was never announced")
+
+
+# ------------------------------------------------------------------- the microphone (§10)
+
+
+class OpenMicrophone:
+    """The one property `ExpressionFeed` is allowed to ask the voice loop about.
+
+    Deliberately not a `VoiceService`: what is under test is the wiring between two modules
+    that were never joined, and a real service would let a passing test mean the state
+    machine happened to be in a listening state rather than that the feed read it.
+    """
+
+    def __init__(self, listening: bool) -> None:
+        self.listening = listening
+
+
+def test_the_microphone_reaches_the_client(ws_client, container):
+    """The regression test for the defect Sprint 85 opened with.
+
+    `Turn.listening` was read by `express()` from Sprint 80 onward and set by nothing at all,
+    while `VoiceService.listening` sat live on the container documented as "the one a UI must
+    trust". Every recording indicator drawn from an expression frame was therefore dark, on
+    every platform, in every state. Nothing failed; the field was simply never true.
+    """
+    container.voice = OpenMicrophone(True)
+
+    with ws_client.websocket_connect("/api/v1/realtime") as ws:
+        assert ws.receive_json()["type"] == "ready"
+        opening = ws.receive_json()
+
+    assert opening["type"] == "expression"
+    assert opening["listening"] is True, "the microphone was open and the client was not told"
+    assert opening["posture"] == "LISTENING"
+
+
+def test_a_closed_microphone_reaches_the_client_too(ws_client, container):
+    """The other half, so the test above cannot pass by hard-coding true."""
+    container.voice = OpenMicrophone(False)
+
+    with ws_client.websocket_connect("/api/v1/realtime") as ws:
+        assert ws.receive_json()["type"] == "ready"
+        opening = ws.receive_json()
+
+    assert opening["listening"] is False
+    assert opening["posture"] != "LISTENING"
+
+
+def test_starting_a_turn_does_not_put_the_microphone_out(ws_client, container, adapter, office_pc):
+    """Why the microphone is read at send time rather than carried on `feed.turn`.
+
+    The receive loop replaces `feed.turn` wholesale at four points, and each replacement is
+    a chance to drop a flag carried on it — the first of them firing the instant a turn
+    begins, which is exactly when the microphone is most likely to be open. Reading it in
+    `payload()` makes that structurally impossible; this is the test that would notice if
+    somebody moved it back.
+    """
+    container.voice = OpenMicrophone(True)
+
+    with ws_client.websocket_connect("/api/v1/realtime") as ws:
+        assert ws.receive_json()["type"] == "ready"
+        assert ws.receive_json()["type"] == "expression"
+
+        ws.send_json(
+            {"type": "turn", "text": "Thursday เปิด chrome", "device_id": str(office_pc.device_id)}
+        )
+
+        expressions = []
+        for _ in range(40):
+            message = ws.receive_json()
+            if message["type"] == "expression":
+                expressions.append(message)
+            if message["type"] == "assistant.delta":
+                break
+
+    assert expressions, "the socket said nothing about what it was doing"
+    assert all(frame["listening"] is True for frame in expressions), (
+        "a turn beginning switched the recording indicator off"
+    )
+
+
+def test_the_socket_and_the_endpoint_report_the_same_microphone(ws_client, container):
+    """The claim `/expression` makes in its own docstring, tested rather than asserted.
+
+    "Both call `express`, so there is one place that decides what Thursday is feeling and no
+    way for the two to disagree" was true when it was written and would have quietly stopped
+    being true the moment §10's field was added — the socket knows about the voice loop and
+    an endpoint that only passes a world snapshot does not. Same machine, same second,
+    different answer about whether the microphone is on.
+    """
+    container.voice = OpenMicrophone(True)
+
+    over_http = ws_client.get("/api/v1/expression").json()
+    with ws_client.websocket_connect("/api/v1/realtime") as ws:
+        assert ws.receive_json()["type"] == "ready"
+        over_socket = ws.receive_json()
+
+    assert over_http["listening"] is True
+    assert over_socket["listening"] is over_http["listening"]
+    assert over_socket["posture"] == over_http["posture"]

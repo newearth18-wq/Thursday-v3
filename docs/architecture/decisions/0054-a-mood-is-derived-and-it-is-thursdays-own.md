@@ -7,6 +7,12 @@ Date: Sprint 80 (FULL-SCREEN HUD & AVATAR)
 Accepted. Applies [0012](0012-verification-before-completion.md)'s rule to a feeling, and sits
 under the interface work in Sprints 81–82.
 
+Extended, not amended, by
+[0058](0058-what-thursday-is-doing-and-how-it-is-going-are-two-questions.md): a mood is still
+derived and still cannot be assigned. What Sprint 85 added is that there is a *second* derived
+thing beside it — what Thursday's body is doing — because a single ordered table let a stale
+failure outrank a live microphone.
+
 ## Context
 
 The request was for an interface that moves, shows feeling, and says what Thursday is doing —

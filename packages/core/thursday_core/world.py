@@ -63,11 +63,25 @@ class WorldStateProjector:
         self.world = world
 
     def attach(self, bus: object) -> None:
+        # `*` first, and deliberately not folded into the five handlers below. "When did
+        # anything last happen" is one fact, and five call sites that each have to remember
+        # to stamp it is five chances to forget — the next handler added would silently be
+        # the one that lets Thursday fall asleep mid-task (Sprint 85).
+        bus.subscribe("*", self.on_any)  # type: ignore[attr-defined]
         bus.subscribe("device.*", self.on_device)  # type: ignore[attr-defined]
         bus.subscribe("task.*", self.on_task)  # type: ignore[attr-defined]
         bus.subscribe("agent.*", self.on_agent)  # type: ignore[attr-defined]
         bus.subscribe("approval.*", self.on_approval)  # type: ignore[attr-defined]
         bus.subscribe("tool.executed", self.on_tool)  # type: ignore[attr-defined]
+
+    async def on_any(self, event: Event) -> None:
+        """Thursday was awake at this moment, whatever the event was.
+
+        Nothing on the bus is periodic — there is no heartbeat kind, and the expression feed
+        publishes nothing — so a genuinely idle Thursday genuinely goes quiet here, which is
+        what makes `SLEEPING` a derived fact rather than a timer somebody set.
+        """
+        self.world.update(last_event_at=datetime.now(UTC))
 
     async def on_device(self, event: Event) -> None:
         if event.kind == "device.connected" and event.device_id:

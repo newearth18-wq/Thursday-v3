@@ -65,3 +65,4 @@ done this way?" and have no answer.
 | [0055](0055-the-avatar-is-a-second-window-not-a-second-opinion.md) | The avatar is a second window, not a second opinion | "Elsewhere" must mean Thursday's window is not in front — never something learned by watching the owner |
 | [0056](0056-a-packaged-thursday-starts-its-own-backend.md) | A packaged Thursday starts its own backend | Every window before this one assumed a human had already started the API by hand |
 | [0057](0057-a-phone-is-a-screen-not-a-machine-thursday-runs-on.md) | A phone is a screen, not a machine Thursday runs on | Android sandboxing aside, a backend running on the phone itself would be a second, disconnected Thursday |
+| [0058](0058-what-thursday-is-doing-and-how-it-is-going-are-two-questions.md) | What Thursday is doing and how it is going are two questions | On one priority table a stale failure outranks a live microphone, and §10 forbids that |

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from dataclasses import replace
 from typing import Any
 from uuid import UUID
 
@@ -69,12 +70,32 @@ class ExpressionFeed:
             return
         self._unhealthy = sum(1 for check in checks if not check["ok"])
 
+    def _microphone(self) -> bool:
+        """Whether the microphone is capturing, read from the voice loop at send time.
+
+        Sprint 85. `Turn.listening` existed from Sprint 80, `express()` read it, and a test
+        asserted the field was there — but **nothing in the repository ever set it**, so the
+        recording indicator §10 requires could not have been right even once. `VoiceService.
+        listening` was live the whole time; the two were simply never joined.
+
+        Read *here*, rather than stored on `self.turn`, and that is the whole of the fix.
+        The receive loop assigns `feed.turn = Turn(...)` wholesale at four points; a
+        microphone flag carried on that object is dropped by whichever assignment forgets
+        it, and the moment it is dropped is the moment a turn begins — which is exactly when
+        the microphone is most likely to be open. One reader, at the one place it is used.
+
+        The reading itself is `Container.microphone_open`, not a second copy of it here:
+        `GET /expression` has to give the same answer, and two implementations of "is the
+        microphone on" is how they come to disagree.
+        """
+        return bool(self._container.microphone_open())
+
     def payload(self) -> dict[str, object]:
         return express(
             self._container.world.snapshot(),
             unhealthy=self._unhealthy,
             lockdown=bool(self._container.permissions.lockdown),
-            turn=self.turn,
+            turn=replace(self.turn, listening=self._microphone()),
         ).payload()
 
     def changed(self) -> dict[str, object] | None:

@@ -1,6 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { WS_ORIGIN } from "@/lib/origin";
-import type { AgentStatus, Approval, Expression, Message, RealtimeMessage } from "@/lib/types";
+import type {
+  AgentStatus,
+  Approval,
+  Expression,
+  Message,
+  Mood,
+  Posture,
+  RealtimeMessage,
+} from "@/lib/types";
 
 const WS_URL = `${WS_ORIGIN}/api/v1/realtime`;
 const RECONNECT_MAX_MS = 15_000;
@@ -18,6 +26,10 @@ const SETUP_AFTER_FAILURES = 3;
  */
 export const UNKNOWN: Expression = {
   mood: "CALM",
+  posture: "STILL",
+  // Never true without the server having said so. An indicator that lights up on no
+  // evidence is worse than one that is late (§10).
+  listening: false,
   activity: "",
   because: "",
   intensity: 0.15,
@@ -25,6 +37,31 @@ export const UNKNOWN: Expression = {
   waiting: 0,
   unhealthy: 0,
 };
+
+/**
+ * One `expression` frame, read field by field.
+ *
+ * The whole-object `as Expression` this replaces (Sprint 85) was a hole: it satisfied the
+ * compiler no matter which fields were present, so `posture` and `listening` could have
+ * been added to the contract and silently never read. Typing the literal instead means a
+ * field added to `Expression` is a build error here until somebody decides what it reads.
+ *
+ * Every narrowing defaults to the quiet answer. A frame that is malformed or from an older
+ * server should under-claim, not invent a microphone that is not on.
+ */
+function readExpression(message: RealtimeMessage): Expression {
+  return {
+    mood: (message.mood as Mood) ?? UNKNOWN.mood,
+    posture: (message.posture as Posture) ?? UNKNOWN.posture,
+    listening: message.listening === true,
+    activity: typeof message.activity === "string" ? message.activity : "",
+    because: typeof message.because === "string" ? message.because : "",
+    intensity: typeof message.intensity === "number" ? message.intensity : UNKNOWN.intensity,
+    running: typeof message.running === "number" ? message.running : 0,
+    waiting: typeof message.waiting === "number" ? message.waiting : 0,
+    unhealthy: typeof message.unhealthy === "number" ? message.unhealthy : 0,
+  };
+}
 
 /**
  * The single connection to Thursday.
@@ -146,15 +183,7 @@ export function useRealtime() {
         case "expression":
           // Taken whole from the server. The client has no opinion about how Thursday
           // feels, which is what stops the HUD and the avatar drifting apart.
-          setExpression({
-            mood: message.mood,
-            activity: message.activity,
-            because: message.because,
-            intensity: message.intensity,
-            running: message.running,
-            waiting: message.waiting,
-            unhealthy: message.unhealthy,
-          } as Expression);
+          setExpression(readExpression(message));
           break;
       }
     };

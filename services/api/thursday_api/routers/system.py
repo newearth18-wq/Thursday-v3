@@ -12,7 +12,7 @@ from thursday_core import catalogue, practice
 from thursday_core import checkup as checkup_module
 from thursday_core.backup import BackupError
 from thursday_core.container import Container
-from thursday_core.expression import express
+from thursday_core.expression import Turn, express
 from thursday_security.policy import HARD_BLOCKED
 from thursday_shared.enums import (
     AutonomyLevel,
@@ -263,6 +263,10 @@ async def expression(c: Container = Depends(get_container)) -> dict:
         c.world.snapshot(),
         unhealthy=sum(1 for check in checks if not check["ok"]),
         lockdown=bool(c.permissions.lockdown),
+        # Sprint 85. Without this the docstring above would have become untrue the moment
+        # §10's field existed: the socket would report an open microphone and this endpoint
+        # a closed one, for the same machine, in the same second.
+        turn=Turn(listening=c.microphone_open()),
     ).payload()
 
 

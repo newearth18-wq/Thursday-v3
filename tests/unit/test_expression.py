@@ -18,11 +18,14 @@ import pytest
 from thursday_core import expression as expression_module
 from thursday_core.expression import (
     BECAUSE,
+    DROWSY,
     FRESH,
     ORDER,
+    POSTURE_ORDER,
     SURE_ENOUGH,
     Expression,
     Mood,
+    Posture,
     Turn,
     express,
 )
@@ -229,3 +232,184 @@ def test_no_input_describes_the_person():
     """The type signature is the guarantee: there is nowhere for a face to go."""
     fields = {f.name for f in dataclasses.fields(Turn)}
     assert fields == {"thinking", "speaking", "listening", "verified", "confidence"}
+
+
+# ------------------------------------------------------------------ the second axis (§7)
+
+
+def test_posture_and_mood_answer_different_questions():
+    """A failure forty seconds old must not be able to hide a live microphone.
+
+    This is the whole argument for two tables rather than one longer one. Flattened onto a
+    single priority order, `FAILING` outranks everything, and the owner watching the avatar
+    would see the failure while the recording indicator §10 requires quietly vanished.
+    """
+    just_failed = world(last_failure_at=datetime.now(UTC))
+    now = express(just_failed, unhealthy=0, lockdown=False, turn=Turn(listening=True))
+
+    assert now.mood is Mood.FAILING, "the failure is still the news"
+    assert now.posture is Posture.LISTENING, "and the body is still listening"
+    assert now.listening is True
+
+
+@pytest.mark.parametrize(
+    "mood_setup",
+    [
+        {"lockdown": True},
+        {"unhealthy": 3},
+        {"world": {"last_failure_at": "now"}},
+        {"world": {"last_success_at": "now"}},
+        {"turn": {"verified": False}},
+        {},
+    ],
+)
+def test_no_mood_can_switch_the_microphone_off(mood_setup):
+    """§10, structurally. `listening` sits outside both tables and answers to nobody.
+
+    Parametrised over the states that outrank almost everything else, because the failure
+    mode is not "the flag is wrong" — it is "the flag is right until something more urgent
+    happens", which is precisely when a person most wants to know the microphone is open.
+    """
+    setup = {"unhealthy": 0, "lockdown": False}
+    setup.update({k: v for k, v in mood_setup.items() if k not in ("world", "turn")})
+    fields = {
+        key: datetime.now(UTC) if value == "now" else value
+        for key, value in mood_setup.get("world", {}).items()
+    }
+    turn = Turn(listening=True, **mood_setup.get("turn", {}))
+
+    seen: set[Mood] = set()
+    for waiting in ([], [new_id()]):
+        result = express(world(pending_approvals=waiting, **fields), turn=turn, **setup)
+        seen.add(result.mood)
+        assert result.listening is True, f"{result.mood} switched off the microphone"
+        assert result.payload()["listening"] is True
+    assert seen, "no mood was exercised at all"
+
+
+def test_barge_in_shows_the_speaking_and_keeps_the_microphone_lit():
+    """The one case where the posture is outranked and the boolean is not.
+
+    During barge-in the microphone is open *while* Thursday is still talking (V4). The body
+    should show the speaking — that is what the owner is interrupting — but the microphone
+    is still capturing, and nothing about the pose is allowed to say otherwise.
+    """
+    both = express(world(), unhealthy=0, lockdown=False, turn=Turn(speaking=True, listening=True))
+    assert both.posture is Posture.SPEAKING
+    assert both.listening is True
+
+
+def test_every_posture_is_reachable():
+    """A member nothing can produce is a claim, not a state — the defect this sprint found.
+
+    Each posture is asserted from the inputs a running Thursday actually supplies, so a
+    member added without a signal behind it has nowhere to come from and fails here.
+    """
+    long_ago = datetime.now(UTC) - DROWSY - timedelta(seconds=1)
+    reached = {
+        express(world(), unhealthy=0, lockdown=False, turn=turn).posture
+        for turn in (Turn(speaking=True), Turn(thinking=True), Turn(listening=True), Turn())
+    }
+    reached.add(
+        express(world(running_agents={"a": "working"}), unhealthy=0, lockdown=False).posture
+    )
+    reached.add(express(world(last_event_at=long_ago), unhealthy=0, lockdown=False).posture)
+
+    assert reached == set(Posture), f"unreachable: {set(Posture) - reached}"
+
+
+def test_posture_order_covers_every_posture_exactly_once():
+    assert set(POSTURE_ORDER) == set(Posture)
+    assert len(POSTURE_ORDER) == len(Posture)
+
+
+def test_authenticating_is_not_a_posture_until_something_can_produce_one():
+    """§19 deferred on purpose, and asserted absent so it cannot be half-added.
+
+    `IdentityGate` and `AuthenticationSession` exist in `thursday_security`, but nothing
+    constructs them on the container — there is no live "verification in flight" signal in a
+    running Thursday. Drawing the face anyway would be this project's oldest bug: a state
+    that is documented, rendered, and permanently false. When the identity layer is wired,
+    this test is what tells whoever wires it that the avatar is waiting for the signal.
+    """
+    assert not hasattr(Posture, "AUTHENTICATING")
+
+
+# ------------------------------------------------------------------------- sleep (§20)
+
+
+def test_thursday_sleeps_only_after_real_quiet():
+    quiet = datetime.now(UTC) - DROWSY - timedelta(seconds=1)
+    recent = datetime.now(UTC) - timedelta(seconds=30)
+
+    assert (
+        express(world(last_event_at=quiet), unhealthy=0, lockdown=False).posture is Posture.SLEEPING
+    )
+    assert (
+        express(world(last_event_at=recent), unhealthy=0, lockdown=False).posture is Posture.STILL
+    )
+
+
+def test_a_thursday_that_has_never_seen_an_event_is_awake():
+    """`None` is "just started", not "asleep since the beginning of time".
+
+    The two mistakes are not equal. Looking awake while idle is unremarkable; looking asleep
+    on a machine that is in fact working is a lie about what the owner's computer is doing.
+    """
+    assert express(world(), unhealthy=0, lockdown=False).posture is Posture.STILL
+
+
+def test_a_question_waiting_on_the_owner_never_falls_asleep():
+    """Standing in front of somebody waiting for an answer is not a reason to doze off."""
+    long_ago = datetime.now(UTC) - DROWSY - timedelta(days=1)
+    asked = express(
+        world(last_event_at=long_ago, pending_approvals=[new_id()]),
+        unhealthy=0,
+        lockdown=False,
+    )
+    assert asked.posture is Posture.STILL
+    assert asked.mood is Mood.WAITING
+
+
+def test_the_microphone_check_actually_reaches_every_mood():
+    """The guard above is only worth as much as the moods it walks through.
+
+    Written after the parametrised case above passed a deliberately broken build: its cases
+    happened to miss `FAILING`, which is the mood most likely to be given a vote, because a
+    recent failure is exactly the signal somebody would think should dominate. A test that
+    covers every state but the dangerous one is the shape of a false negative.
+    """
+    covered: set[Mood] = set()
+    for setup, fields, turn in (
+        ({"lockdown": True, "unhealthy": 0}, {}, Turn(listening=True)),
+        ({"lockdown": False, "unhealthy": 2}, {}, Turn(listening=True)),
+        (
+            {"lockdown": False, "unhealthy": 0},
+            {"last_failure_at": datetime.now(UTC)},
+            Turn(listening=True),
+        ),
+        (
+            {"lockdown": False, "unhealthy": 0},
+            {"last_success_at": datetime.now(UTC)},
+            Turn(listening=True),
+        ),
+        ({"lockdown": False, "unhealthy": 0}, {}, Turn(listening=True, verified=False)),
+        (
+            {"lockdown": False, "unhealthy": 0},
+            {"running_agents": {"a": "working"}},
+            Turn(listening=True),
+        ),
+        (
+            {"lockdown": False, "unhealthy": 0},
+            {"pending_approvals": [new_id()]},
+            Turn(listening=True),
+        ),
+        ({"lockdown": False, "unhealthy": 0}, {}, Turn(listening=True)),
+    ):
+        result = express(world(**fields), turn=turn, **setup)
+        covered.add(result.mood)
+        assert result.listening is True, f"{result.mood} switched off the microphone"
+
+    assert covered == set(Mood) - {Mood.CALM}, (
+        "every mood but CALM, which an open microphone rules out by definition"
+    )

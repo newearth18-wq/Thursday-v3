@@ -467,6 +467,12 @@ class WorldStateSnapshot(Base):
     #: a failure fade instead of becoming Thursday's permanent condition.
     last_failure_at: datetime | None = None
     last_success_at: datetime | None = None
+    #: Sprint 85. When *anything at all* last happened, so that "Thursday has been quiet for
+    #: a while" is a fact rather than a guess. Distinct from the two above, which only move
+    #: when work finishes: a machine connecting or an approval arriving is Thursday being
+    #: awake, and neither is a success or a failure. `None` until the first event, and
+    #: treated as awake rather than asleep — see `expression.Posture.SLEEPING`.
+    last_event_at: datetime | None = None
     updated_at: datetime = Field(default_factory=utcnow)
 
 

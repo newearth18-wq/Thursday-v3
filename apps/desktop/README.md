@@ -31,6 +31,11 @@ has right now: a machine that is connected, a job that is running, a question wa
 the owner, an open task. There are no decorative nodes. When Thursday is idle the graph is
 one point of light, and that is the honest picture.
 
+Its body is a second fact. `posture` says what Thursday is doing — speaking, thinking,
+listening, working, sleeping, standing — and the mood says how that is going, so the two
+are drawn together rather than one of them winning. A blink and the visor's light band run
+off their own clock, because both happen while the robot is standing perfectly still.
+
 ## And when you are working somewhere else
 
 A second window — transparent, always on top, and ignoring the mouse entirely — holding a
@@ -86,6 +91,19 @@ the local backend answer before the window is even shown.
   the server (ADR 0054) and is rendered, not computed. `lib/mood.ts` holds colours and
   motion and has nowhere to put a word, which is what keeps this window and the avatar from
   showing different faces at the same moment.
+- **How Thursday feels and what its body is doing are two fields.** `mood` and `posture`
+  arrive separately (ADR 0058), so a Thursday that is listening while the last job failed
+  draws a worried face on an attentive body. On one priority table it could only have drawn
+  the failure — and would have hidden the microphone to do it.
+- **The recording light answers to nothing.** `listening` is a boolean outside every
+  priority order, `MIC` lives in `lib/avatar.ts` rather than in the mood palette so no mood
+  can recolour it, and it is drawn outside the head group and outside every posture branch,
+  in *both* windows (§10). `Robot.test.tsx` walks all fifty-four mood × posture combinations,
+  because the failure mode is never "the light is wrong" — it is "the light is right until
+  something urgent happens".
+- **There is no mouth.** §14: speech is a band of light across the visor. `Robot.test.tsx`
+  proves it structurally — while Thursday speaks, exactly one element in the drawing changes,
+  and it is on the face plate.
 - **The graph is state, not decoration.** Every node is a real entity. A layout that
   wandered off-screen or produced `NaN` would look fine until the tenth node, so the
   simulation is a plain function and `graph.test.ts` runs it two thousand frames.
@@ -105,7 +123,9 @@ src/
   index.css                Tailwind layers
   hooks/useRealtime.ts     the single WebSocket, reconnect backoff, needsSetup (Sprint 84)
   hooks/useMind.ts         what Thursday consists of — pushed and polled halves
-  lib/avatar.ts            gaits, faces and the walking, as plain functions
+  lib/avatar.ts            gaits, poses, faces and the walking, as plain functions —
+                            plus `beat()`, the clock that runs when the body does not, and
+                            `MIC`, deliberately not in the mood palette (Sprint 85)
   lib/api.ts               the REST surface, typed
   lib/graph.ts             the nodes, and the layout, as plain functions
   lib/mood.ts              how each mood is drawn: colour and motion, never words
@@ -116,7 +136,8 @@ src/
   components/
     BrainGraph.tsx         Sprint 81 — the core, the rings, and one node per real thing
     Hud.tsx                Sprint 81 — the readable half: clock, meters, devices, activity
-    Robot.tsx              Sprint 82 — one drawing, posed by the step cycle
+    Robot.tsx              Sprint 82 — one drawing, posed by the step cycle; Sprint 85
+                             added the posture, the blink, the visor and the mic light
     ServerConnect.tsx      Sprint 84 — "where is Thursday?", reached by connection failure
     Conversation.tsx       PART 64 — the interface, floating over the graph
     AgentStrip.tsx         PART 66 — collapsed status line
@@ -144,7 +165,7 @@ src-tauri/
 | Concern | Where |
 |---|---|
 | Conversation, streaming, expression | `WS /api/v1/realtime` |
-| What Thursday is doing and how it goes | `expression` frames, and `GET /api/v1/expression` for the first paint |
+| What Thursday is doing and how it goes | `expression` frames, and `GET /api/v1/expression` for the first paint — both carry `mood`, `posture` and `listening`, from one `express()` call |
 | Approvals | `approval.required` in, `POST /approvals/{id}/approve` out |
 | Tasks, devices, memory, policies | `GET /api/v1/…`, polled while a drawer is open |
 | Emergency stop (§69) | `POST /api/v1/emergency/stop` — a plain call, bypassing the model |

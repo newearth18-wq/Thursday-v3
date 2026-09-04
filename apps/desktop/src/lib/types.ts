@@ -87,6 +87,16 @@ export type Mood =
   | "UNSURE" | "WORKING" | "PLEASED" | "ATTENTIVE" | "CALM";
 
 /**
+ * Sprint 85. What Thursday's body is doing, derived on the server alongside the mood.
+ *
+ * §19's `AUTHENTICATING` is absent here because it is absent on the server: nothing in a
+ * running Thursday can currently report that an identity check is in flight, and a pose for
+ * a state that can never arrive is a drawing of a lie.
+ */
+export type Posture =
+  | "SPEAKING" | "THINKING" | "LISTENING" | "WORKING" | "SLEEPING" | "STILL";
+
+/**
  * What Thursday is doing and how it is going, derived on the server.
  *
  * The client never computes a mood of its own. One derivation means the HUD and the
@@ -95,6 +105,17 @@ export type Mood =
  */
 export interface Expression {
   mood: Mood;
+  /** Sprint 85. What the body is doing — a different question from how it is going. */
+  posture: Posture;
+  /**
+   * §10. True exactly when the microphone is capturing.
+   *
+   * Its own field rather than a posture, and deliberately so: a posture can be outranked
+   * (during barge-in the microphone is open while Thursday is still speaking), and a
+   * recording indicator that anything is allowed to outrank is not an indicator. Draw it
+   * from this and from nothing else.
+   */
+  listening: boolean;
   /** "" when nothing is running. Never an agent name. */
   activity: string;
   because: string;

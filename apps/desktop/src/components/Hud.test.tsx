@@ -5,6 +5,8 @@ import type { Device, Expression } from "@/lib/types";
 
 const expression = (over: Partial<Expression> = {}): Expression => ({
   mood: "WORKING",
+  posture: "WORKING",
+  listening: false,
   activity: "กำลังค้นข้อมูล",
   because: "กำลังทำงานให้อยู่",
   intensity: 0.6,
@@ -68,5 +70,42 @@ describe("the HUD", () => {
   it("names the machines the owner named", () => {
     render(<Hud expression={expression()} devices={[office]} connected />);
     expect(screen.getByText("Office-PC")).toBeInTheDocument();
+  });
+});
+
+describe("the recording indicator (§10)", () => {
+  it("appears here too, so the owner learns one signal and not two", () => {
+    // The avatar draws it as a red dot beside the head; this window draws it beside the
+    // clock. An owner who has learned what the red dot means must not discover that it
+    // only exists on the window they are not currently looking at.
+    render(<Hud expression={expression({ listening: true })} devices={[]} connected />);
+    expect(screen.getByText("mic")).toBeInTheDocument();
+  });
+
+  it("is not drawn when the microphone is closed", () => {
+    render(<Hud expression={expression({ listening: false })} devices={[]} connected />);
+    expect(screen.queryByText("mic")).not.toBeInTheDocument();
+  });
+
+  it("is not drawn while disconnected, whatever the last frame said", () => {
+    // A socket that has dropped tells you nothing about the microphone now. Leaving the
+    // light on from a stale frame is the one direction §10 must never fail in.
+    render(<Hud expression={expression({ listening: true })} devices={[]} connected={false} />);
+    expect(screen.queryByText("mic")).not.toBeInTheDocument();
+  });
+
+  it("does not change colour with the mood", () => {
+    const shade = (mood: Expression["mood"]) => {
+      const { container, unmount } = render(
+        <Hud expression={expression({ mood, listening: true })} devices={[]} connected />,
+      );
+      const dot = container.querySelector('[data-listening="true"] span');
+      const colour = (dot as HTMLElement).style.background;
+      unmount();
+      return colour;
+    };
+
+    expect(shade("FAILING")).toBe(shade("PLEASED"));
+    expect(shade("STOPPED")).toBe(shade("WORKING"));
   });
 });

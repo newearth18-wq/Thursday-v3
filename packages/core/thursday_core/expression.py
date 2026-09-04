@@ -25,6 +25,27 @@ later reaches for a face.
 **Priority, not a blend.** The moods are an ordered table and the first match wins. Averaging
 would let three cheerful signals wash out one failure, which is exactly the direction that
 must never be possible: something that needs the owner outranks something that looks nice.
+
+**Two axes, because §7 asks two questions** (Sprint 85).
+
+The avatar addendum lists seventeen states — IDLE, LISTENING, THINKING, WORKING, SPEAKING,
+SUCCESS, ERROR, WAITING_APPROVAL, SLEEP and the rest — as though they were one enum. They are
+not. *How Thursday is going* and *what Thursday's body is doing* are independent facts, and
+flattening them forces a choice that must not be made: a job that failed forty seconds ago
+outranks everything on a single ordered table, so a Thursday that is **listening** while a
+recent failure is still fresh would draw the failure and hide the microphone.
+
+So `Mood` keeps its nine values and its ordering, and `Posture` is a second derived table
+answering the other question. Both come out of the same `express()` call over the same
+snapshot, so they cannot drift; neither is a blend of the other.
+
+**And the microphone is not a state at all.** §10 requires that the avatar clearly indicate
+microphone state. `Expression.listening` is therefore a plain boolean copied from the voice
+loop, sitting outside both tables, because anything inside a priority table can be outranked
+— and a recording indicator that a cheerier signal is allowed to hide is worse than no
+indicator at all. `Posture.LISTENING` exists too, for the *pose*, and it genuinely can be
+outranked: during barge-in the microphone is open while Thursday is still speaking, and the
+body should show the speaking. The boolean is what stays true through that.
 """
 
 from __future__ import annotations
@@ -41,6 +62,11 @@ from thursday_core.plain import WORKING
 #: looking up a moment later sees what happened, short enough that Thursday does not sulk
 #: about a failure from an hour ago.
 FRESH = timedelta(seconds=45)
+
+#: How long Thursday has to have been completely quiet before it is asleep rather than merely
+#: idle (§20). Long enough that a pause for coffee is not a nap; short enough that a machine
+#: left running overnight is not drawing a wide-awake robot at nobody.
+DROWSY = timedelta(minutes=10)
 
 
 class Mood(StrEnum):
@@ -82,6 +108,52 @@ ORDER: tuple[Mood, ...] = (
     Mood.PLEASED,
     Mood.ATTENTIVE,
     Mood.CALM,
+)
+
+
+class Posture(StrEnum):
+    """What Thursday's body is doing right now (§8, §10–§12, §14, §20 — Sprint 85).
+
+    Deliberately about *conduct*, not feeling: a posture is what an animator would need to
+    know to pose the figure, and it stays the same whether the news is good or bad. The
+    avatar addendum's own descriptions are body descriptions — head tilt and a hand near the
+    chin for thinking, turn toward the owner and lean in for listening, a visor pulse for
+    speaking — which is the clue that they were never moods.
+
+    §19's `AUTHENTICATING` is **not here**, and its absence is deliberate. `IdentityGate` and
+    `AuthenticationSession` exist in `thursday_security`, but nothing constructs them on the
+    container, so there is no live "verification in flight" signal anywhere in a running
+    Thursday. A member whose only reachable value is "never" is not a state, it is a claim —
+    and this project has now shipped four of those and had to remove each one. It goes in
+    when the identity layer is wired, and `tests/unit/test_expression.py` asserts it is
+    absent until then so that adding the face without the signal fails loudly.
+    """
+
+    #: Composing or voicing a reply. §14: shown as a visor pulse, never a mouth.
+    SPEAKING = "SPEAKING"
+    #: A turn is in flight and Thursday has not started answering.
+    THINKING = "THINKING"
+    #: The microphone is capturing and nothing louder is happening.
+    LISTENING = "LISTENING"
+    #: Agents are running. §12: the motion should correspond to what kind of work it is.
+    WORKING = "WORKING"
+    #: Nothing at all has happened for `DROWSY`. §20.
+    SLEEPING = "SLEEPING"
+    #: Awake, attentive, nothing to do. §8: this must still breathe, blink and shift.
+    STILL = "STILL"
+
+
+#: Nearest the owner first. Speaking outranks working because a reply being delivered is the
+#: thing the owner is in the middle of; listening outranks working for the same reason. Order
+#: alone does most of the work: by the time `SLEEPING` is reached, every busier posture has
+#: already been ruled out, so its own test is only about how long the quiet has lasted.
+POSTURE_ORDER: tuple[Posture, ...] = (
+    Posture.SPEAKING,
+    Posture.THINKING,
+    Posture.LISTENING,
+    Posture.WORKING,
+    Posture.SLEEPING,
+    Posture.STILL,
 )
 
 #: Why the mood is what it is, in one sentence, declared in advance. Not free text: this
@@ -140,6 +212,11 @@ class Expression:
     """One derived view of Thursday's condition. Constructed only by `express()`."""
 
     mood: Mood
+    #: What the body is doing, independently of how it is going (Sprint 85).
+    posture: Posture
+    #: §10. Outside both tables on purpose: a privacy indicator that a priority order is
+    #: allowed to hide is not an indicator. True exactly when the microphone is capturing.
+    listening: bool
     #: The allowlisted phrase from `plain.activity`, or "" when nothing is running. Never an
     #: agent name — there is no code path here that has one.
     activity: str
@@ -154,6 +231,8 @@ class Expression:
         """The shape the socket and the HTTP endpoint both send. One shape, one producer."""
         return {
             "mood": self.mood.value,
+            "posture": self.posture.value,
+            "listening": self.listening,
             "activity": self.activity,
             "because": self.because,
             "intensity": round(self.intensity, 3),
@@ -165,6 +244,17 @@ class Expression:
 
 def _fresh(at: datetime | None, *, now: datetime) -> bool:
     return at is not None and (now - at) <= FRESH
+
+
+def _quiet_since(at: datetime | None, *, now: datetime) -> bool:
+    """Whether nothing has happened for long enough to call it sleep.
+
+    `None` — no event ever seen, which is a Thursday that has only just started — counts as
+    awake. The two errors are not symmetric: a robot that looks awake while idle is merely
+    unremarkable, and one that looks asleep on a machine that is in fact working is a lie
+    about what the owner's computer is doing.
+    """
+    return at is not None and (now - at) > DROWSY
 
 
 def express(
@@ -204,11 +294,30 @@ def express(
     }
     mood = next(candidate for candidate in ORDER if holds[candidate])
 
+    # The second axis. By the time SLEEPING is considered, every busier posture has been
+    # ruled out by the ordering, so the only questions left are how long the quiet has run
+    # and whether anything is still owed to the owner — a Thursday with a question waiting
+    # must not doze off in front of it, however long it has been standing there.
+    stands: dict[Posture, bool] = {
+        Posture.SPEAKING: turn.speaking,
+        Posture.THINKING: turn.thinking,
+        Posture.LISTENING: turn.listening,
+        Posture.WORKING: running > 0,
+        Posture.SLEEPING: waiting == 0 and _quiet_since(world.last_event_at, now=moment),
+        Posture.STILL: True,
+    }
+    posture = next(candidate for candidate in POSTURE_ORDER if stands[candidate])
+
     in_flight = running + waiting + unhealthy
     intensity = min(1.0, FLOOR[mood] + 0.12 * in_flight)
 
     return Expression(
         mood=mood,
+        posture=posture,
+        # Copied, never derived: this is the one field on the whole expression that no table
+        # gets a vote on. If the microphone is open the owner is told so, whatever else
+        # Thursday happens to be feeling about the last job.
+        listening=turn.listening,
         # While work is running the owner is told what it is; otherwise the line is empty
         # rather than stale, because a leftover "กำลังค้นข้อมูล" under a finished job is a
         # lie that looks like a feature.
