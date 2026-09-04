@@ -77,3 +77,34 @@ the database, logs and vault all follow it without any of them knowing why.
 rather than repeating it, and asserts the Rust source sets that name — the only way to keep a
 contract honest when the two halves are in different languages. Renaming the field fails the
 test on the Python side; dropping the `.env()` call fails it on the Rust side.
+
+## Where an installed Thursday is configured
+
+`%APPDATA%\ai.thursday.desktop\settings.yaml` — the same directory as the database, written
+on first launch if it is not already there, and **never overwritten** afterwards.
+
+Before Sprint 90 the answer to "where do I set the AI provider" was *nowhere*.
+`settings.yaml` is not bundled by the installer, and `SETTINGS_FILE` is a relative path, so
+the packaged backend resolved it against wherever Windows started the executable and read no
+file at all. Every value came from the code defaults, and the only channel that could change
+one was a Windows environment variable — which is not a way to configure a product whose
+stated premise is that a normal user never opens a terminal.
+
+`config.settings_path()` now looks in three places, most specific first:
+
+| | |
+|---|---|
+| `$THURSDAY_SETTINGS` | an explicit path, for anybody who wants the file elsewhere |
+| `$THURSDAY_DATA_DIR/settings.yaml` | what a packaged build reads — `sidecar.rs` sets the variable |
+| `./settings.yaml` | the repository's own file, unchanged for a checkout |
+
+The starter file is written **entirely commented out**. An active key in it would become the
+value that runs, and would go on running after the code default beside it changed — which is
+[ADR 0049](../docs/architecture/decisions/0049-the-shipped-configuration-is-the-product.md)'s
+argument in reverse. Commented, it is documentation somebody can act on; the defaults stay in
+charge until a line is deliberately uncommented.
+
+**Secrets are not settings and never go in it.** The file names a *handle*; the value comes
+from the vault, which on a desktop install is the process environment — a handle of
+`anthropic_api_key` is read from `THURSDAY_SECRET_ANTHROPIC_API_KEY`. There is still no
+screen for entering one, which is the next gap in this area.

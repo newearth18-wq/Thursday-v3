@@ -143,3 +143,92 @@ def test_the_shell_points_the_backend_at_a_writable_directory():
     # And it is passed to the child rather than merely named in a comment.
     assert ".env(DATA_DIR_ENV" in source, "the constant is declared but never handed to the sidecar"
     assert "app_data_dir()" in source, "the directory must come from the OS, not be invented"
+
+
+# ------------------------------------------------ where an installed Thursday is configured
+
+
+def test_a_checkout_still_reads_the_repository_settings_file():
+    """The path that has always worked must keep working, untouched."""
+    from thursday_core.config import SETTINGS_FILE, settings_path
+
+    with patch.dict("os.environ", {}, clear=False):
+        import os
+
+        os.environ.pop("THURSDAY_SETTINGS", None)
+        os.environ.pop("THURSDAY_DATA_DIR", None)
+        assert settings_path() == SETTINGS_FILE
+
+
+def test_an_installed_thursday_reads_the_file_in_its_data_directory(tmp_path):
+    """Sprint 90, and the gap it closes.
+
+    A packaged Thursday read **no settings file at all**: `settings.yaml` is not bundled by
+    the installer, and the path it looks for is relative, so it resolved against wherever
+    Windows started the executable. Every value came from the code defaults, and the only
+    channel that could change one was a Windows environment variable — not an answer for a
+    product whose stated premise is that a normal user never opens a terminal.
+    """
+    from thursday_core.config import settings_path
+
+    (tmp_path / "settings.yaml").write_text("identity:\n  owner_name: Nick\n")
+    with patch.dict("os.environ", {"THURSDAY_DATA_DIR": str(tmp_path)}):
+        assert settings_path() == tmp_path / "settings.yaml"
+
+
+def test_the_data_directory_file_actually_changes_what_thursday_does(tmp_path):
+    """Not just "the path resolves" — a value in that file has to reach a live `Settings`.
+
+    A resolver that finds the right path while nothing reads it would be the same
+    documented-but-untrue shape this project keeps removing.
+    """
+    from thursday_core.config import Settings
+
+    (tmp_path / "settings.yaml").write_text(
+        "identity:\n  owner_name: Nick\nmodels:\n  backend: ollama\n"
+    )
+    with patch.dict("os.environ", {"THURSDAY_DATA_DIR": str(tmp_path)}):
+        settings = Settings()
+
+    assert settings.owner_name == "Nick"
+    assert settings.llm_backend == "ollama"
+
+
+def test_the_starter_file_leaves_every_default_in_charge(tmp_path):
+    """It is written entirely commented out, and that is the point.
+
+    An active key would become the value that runs, and would go on running after the code
+    default beside it changed — ADR 0049's argument in reverse. Commented, the file is
+    documentation somebody can act on rather than a second source of truth nobody edited.
+    """
+    from thursday_core.config import Settings
+
+    from installer.sidecar_main import ensure_settings
+
+    target = tmp_path / "settings.yaml"
+    assert ensure_settings(target) is True
+
+    with patch.dict("os.environ", {"THURSDAY_DATA_DIR": str(tmp_path)}):
+        configured = Settings()
+    plain = Settings(_env_file=None)
+
+    assert configured.owner_name == plain.owner_name
+    assert configured.llm_backend == plain.llm_backend
+    assert configured.autonomy == plain.autonomy
+    # And it names the things somebody would actually come looking for.
+    written = target.read_text(encoding="utf-8")
+    for key in ("backend:", "ollama", "anthropic", "THURSDAY_SECRET_ANTHROPIC_API_KEY"):
+        assert key in written, f"the starter file never mentions {key}"
+
+
+def test_an_edited_settings_file_is_never_overwritten(tmp_path):
+    """A person who edited this has said something. A launcher that reverts it on every
+    start is worse than one that never wrote a file at all."""
+    from installer.sidecar_main import ensure_settings
+
+    target = tmp_path / "settings.yaml"
+    ensure_settings(target)
+    target.write_text("identity:\n  owner_name: Nick\n")
+
+    assert ensure_settings(target) is False
+    assert "Nick" in target.read_text(encoding="utf-8")

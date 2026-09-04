@@ -14,6 +14,7 @@ only by handle, so no password is ever written into a tracked file.
 
 from __future__ import annotations
 
+import os
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
@@ -28,7 +29,44 @@ from thursday_core.logging import get_logger
 
 log = get_logger(__name__)
 
+#: The file a *checkout* reads. Correct in the repository and nowhere else — it is relative,
+#: so it resolves against the working directory, which for an installed app is wherever
+#: Windows happened to start the executable.
 SETTINGS_FILE = Path("settings.yaml")
+
+#: An explicit override, for anybody who wants the file somewhere of their choosing.
+SETTINGS_ENV = "THURSDAY_SETTINGS"
+
+#: Where the data directory is named, if it has been. `sidecar.rs` sets this for a packaged
+#: build (Sprint 87); a checkout leaves it unset.
+DATA_DIR_ENV = "THURSDAY_DATA_DIR"
+
+
+def settings_path() -> Path:
+    """Where to read `settings.yaml` from, in order of preference.
+
+    Sprint 90, and the gap it closes: an installed Thursday had **nowhere to configure
+    anything**. `settings.yaml` is not bundled by the installer, and `SETTINGS_FILE` is
+    relative, so the packaged backend read no file at all — every value came from the code
+    defaults, and the only channel that could change one was a Windows environment
+    variable. EASY INSTALL's whole premise is that a normal user never opens a terminal, so
+    "set an environment variable" is not an answer, it is the absence of one.
+
+    The data directory is the right home because it is already the one place a packaged
+    Thursday can write to and a person can find (`%APPDATA%\ai.thursday.desktop`), and
+    because `sidecar.rs` already names it. A checkout, where the variable is unset, keeps
+    reading the repository's own file exactly as before.
+    """
+    explicit = os.environ.get(SETTINGS_ENV)
+    if explicit:
+        return Path(explicit)
+    data_dir = os.environ.get(DATA_DIR_ENV)
+    if data_dir:
+        candidate = Path(data_dir) / SETTINGS_FILE.name
+        if candidate.exists():
+            return candidate
+    return SETTINGS_FILE
+
 
 #: settings.yaml is grouped for humans; Settings is flat for code. This maps one to the
 #: other, so a reader can find any field in either place.
@@ -133,9 +171,12 @@ _YAML_MAP: dict[str, dict[str, str]] = {
 class YamlSettingsSource(PydanticBaseSettingsSource):
     """Reads settings.yaml, flattening the human-facing groups into field names."""
 
-    def __init__(self, settings_cls: type[BaseSettings], path: Path = SETTINGS_FILE) -> None:
+    def __init__(self, settings_cls: type[BaseSettings], path: Path | None = None) -> None:
         super().__init__(settings_cls)
-        self._path = path
+        # Resolved per instance rather than bound at import: the data directory is named by
+        # the environment, and a module-level default would freeze whatever it was when
+        # this file was first imported.
+        self._path = path if path is not None else settings_path()
 
     def get_field_value(self, field: Any, field_name: str) -> tuple[Any, str, bool]:
         return None, field_name, False

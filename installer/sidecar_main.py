@@ -39,6 +39,67 @@ def bundled_root() -> Path:
     return Path(frozen_root) if frozen_root else Path(__file__).resolve().parents[1]
 
 
+#: Written into the data directory on first launch, with **everything commented out**.
+#:
+#: That is the whole design. An active key here would become the value that runs, and would
+#: then go on running after the code default beside it changed — ADR 0049's argument in
+#: reverse. Commented, the file is documentation a person can act on: the defaults still
+#: govern until somebody deliberately uncomments a line.
+STARTER_SETTINGS = """\
+# Thursday's settings.
+#
+# Everything here is commented out, so Thursday is running on its built-in defaults.
+# Uncomment a line to change one. Restart Thursday afterwards (tray icon -> Quit, then
+# open it again) — this file is read once, at startup.
+#
+# Secrets are NOT settings and never belong in this file. Where a key is needed, this
+# file names its *handle*, and the value comes from the vault. On this machine that is
+# the process environment: a handle of `anthropic_api_key` is read from the variable
+# THURSDAY_SECRET_ANTHROPIC_API_KEY.
+
+# identity:
+#   owner_name: Owner
+#   locale: th-TH
+#   timezone: Asia/Bangkok
+#   # 0 off - 1 low - 2 normal - 3 high. How often Thursday speaks up unprompted.
+#   proactivity: 2
+#   # 0 suggest-only - 1 safe actions - 2 moderate - 3 high. How much it does unasked.
+#   # Raising this never relaxes the ASK_ALWAYS set (ADR 0009).
+#   autonomy: 2
+
+# models:
+#   # rule    - offline and deterministic. The default, and what ships working.
+#   # ollama  - a model running on this machine. Install Ollama first.
+#   # anthropic - the cloud. Needs THURSDAY_SECRET_ANTHROPIC_API_KEY in the environment.
+#   backend: rule
+#   allow_cloud: true
+#   ollama_url: http://127.0.0.1:11434
+#   ollama_model: llama3.1:8b
+#   anthropic_key_handle: anthropic_api_key
+
+# teaching: normal      # off | on_request | low | normal | high
+"""
+
+
+def ensure_settings(path: Path) -> bool:
+    """Put a settings file where an installed Thursday can find it, if there is not one.
+
+    Sprint 90. Until this existed, a packaged Thursday read **no settings file at all**:
+    `settings.yaml` is not bundled by the installer, and the path it looks for is relative,
+    so it resolved against wherever Windows started the executable. Every value came from
+    the code defaults and the only way to change one was a Windows environment variable —
+    which is not a way to configure a product whose stated premise is that a normal user
+    never opens a terminal.
+
+    Never overwrites. A person who has edited this file has said something, and a launcher
+    that quietly reverts it is worse than one that never wrote it.
+    """
+    if path.exists():
+        return False
+    path.write_text(STARTER_SETTINGS, encoding="utf-8")
+    return True
+
+
 def migrate() -> None:
     """Bring the schema to head. A no-op on a database already there."""
     from alembic import command
@@ -86,6 +147,10 @@ def main() -> None:
     # this executable happens to be installed — which on Windows is Program Files, and not
     # writable by a normal user (see sidecar.rs).
     settings.ensure_dirs()
+    # After `ensure_dirs`, which is what makes the directory exist, and before anything
+    # reads a setting — though nothing this launch does will pick up an edit made now, which
+    # is why the file itself says to restart.
+    ensure_settings(settings.data_dir / "settings.yaml")
     migrate()
     seed()
     serve()
