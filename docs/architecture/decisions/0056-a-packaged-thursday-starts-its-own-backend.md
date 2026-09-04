@@ -64,6 +64,22 @@ needs.
 
 ## Consequences
 
+**The first real install found the layer below this one** (Sprint 87). Everything above is
+about *when* the window appears; none of it helps if the backend cannot write to disk.
+`settings.yaml` leaves `data_dir` at its code default of `var` — a relative path, resolved
+against the sidecar's working directory. In the repository that is right. Installed by NSIS
+it is `C:\Program Files\Thursday`, which a normal user cannot write to, so `ensure_dirs()`
+raised `PermissionError` before a single migration ran and the window appeared after the
+full 45-second timeout to say "reconnecting…" — this ADR's own failure mode, reached by a
+different road.
+
+`sidecar_main.py` had described the fix as though it were already there — *"wherever the
+Rust side pointed `THURSDAY_DATA_DIR`"* — and that comment was the only occurrence of the
+name in the repository. `sidecar.rs` now sets it from Tauri's `app_data_dir()` and creates
+the directory before spawning. It is the same lesson [0049](0049-the-shipped-configuration-is-the-product.md)
+draws: the default that runs is the one that ships, and a relative path is a different
+default on every machine that starts the process somewhere new.
+
 PyInstaller does not cross-compile, so the sidecar has to be built once per platform whose
 installer needs one — `scripts/build_sidecar.sh` is that step, and CI now runs it before
 `cargo clippy` for exactly the reason stated in its own comment: `tauri-build`'s build script

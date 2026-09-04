@@ -57,6 +57,47 @@ pub fn should_spawn(is_dev_build: bool, api_url_override: Option<&str>) -> bool 
     api_url_override.is_none() && !is_dev_build
 }
 
+/// The environment variable the backend reads its data directory from.
+///
+/// `Settings` in `thursday_core.config` is a pydantic-settings model with
+/// `env_prefix="THURSDAY_"`, so the field `data_dir` is configured by exactly this name.
+/// `tests/unit/test_sidecar_entrypoint.py` derives it from the model rather than repeating
+/// it, so renaming the field on the Python side fails there instead of here, silently.
+pub const DATA_DIR_ENV: &str = "THURSDAY_DATA_DIR";
+
+/// Where a packaged Thursday keeps its database, logs and vault.
+///
+/// **This is the bug Sprint 87 found by trying to install the thing.** `settings.yaml`
+/// leaves `data_dir` at its code default of `var` — a *relative* path, which resolves
+/// against the sidecar's working directory. In development that is the repository and it is
+/// exactly right. Installed, it is wherever Windows started the executable, which for an
+/// NSIS install is `C:\Program Files\Thursday` — not writable by a normal user. So
+/// `ensure_dirs()` raised `PermissionError`, the backend never served, and the window
+/// appeared after the 45-second timeout to say "reconnecting…" forever: the precise failure
+/// ADR 0056 exists to prevent, reintroduced one layer below it.
+///
+/// `sidecar_main.py` already documented the fix as though it were in place — *"wherever the
+/// Rust side pointed THURSDAY_DATA_DIR"* — and nothing anywhere in the repository set it.
+/// The comment was the only occurrence of the name.
+///
+/// A temp directory is a poor home for an assistant's memory and it is the fallback anyway:
+/// refusing to start would leave the owner with the same silent "reconnecting…" window and
+/// nothing to read, whereas this at least runs and says loudly where it went. On a real
+/// desktop `app_data_dir()` does not fail.
+fn data_dir(app: &AppHandle) -> std::path::PathBuf {
+    let chosen = match app.path().app_data_dir() {
+        Ok(dir) => dir,
+        Err(error) => {
+            eprintln!("[thursday] no app-data directory ({error}); falling back to temp");
+            std::env::temp_dir().join("thursday")
+        }
+    };
+    if let Err(error) = std::fs::create_dir_all(&chosen) {
+        eprintln!("[thursday] could not create {}: {error}", chosen.display());
+    }
+    chosen
+}
+
 /// Start the bundled backend and hand back its handle.
 ///
 /// stdout/stderr are drained rather than dropped: a sidecar that never starts should say
@@ -65,7 +106,13 @@ pub fn should_spawn(is_dev_build: bool, api_url_override: Option<&str>) -> bool 
 /// also what the API requires: an unread `Receiver` here would eventually block the child's
 /// own writes.
 pub fn spawn(app: &AppHandle) -> Result<CommandChild, tauri_plugin_shell::Error> {
-    let (mut events, child) = app.shell().sidecar(SIDECAR_NAME)?.spawn()?;
+    let (mut events, child) = app
+        .shell()
+        .sidecar(SIDECAR_NAME)?
+        // Absolute, and somewhere the owner can actually write. Without this the backend
+        // resolves `var` against Program Files and never starts — see `data_dir`.
+        .env(DATA_DIR_ENV, data_dir(app))
+        .spawn()?;
     tauri::async_runtime::spawn(async move {
         use tauri_plugin_shell::process::CommandEvent;
         while let Some(event) = events.recv().await {

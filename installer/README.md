@@ -61,3 +61,19 @@ container this was built in — a pre-existing, unrelated fault in headless X �
 thing genuinely unverified is Tauri's window and tray rendering on a real machine. See ADR
 0055 and ADR 0056 for what that leaves unproven, and CI's `windows-installer` job for the
 first automated step toward closing it.
+
+## Where an installed Thursday keeps its data
+
+Not next to the executable. `Settings.data_dir` defaults to `var`, a **relative** path, which
+is correct in a checkout and wrong everywhere else — under an NSIS install it resolves to
+`C:\Program Files\Thursday\var`, which a normal user cannot create.
+
+`sidecar.rs` therefore sets `THURSDAY_DATA_DIR` to the OS's per-user app-data directory
+(`%APPDATA%\ai.thursday.desktop` on Windows) and creates it before spawning the sidecar.
+`sidecar_main.py` reads it through the same pydantic settings model everything else does, so
+the database, logs and vault all follow it without any of them knowing why.
+
+`tests/unit/test_sidecar_entrypoint.py` derives the variable's name from the settings model
+rather than repeating it, and asserts the Rust source sets that name — the only way to keep a
+contract honest when the two halves are in different languages. Renaming the field fails the
+test on the Python side; dropping the `.env()` call fails it on the Rust side.
