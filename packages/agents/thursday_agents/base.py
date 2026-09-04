@@ -12,7 +12,7 @@ from abc import ABC, abstractmethod
 from typing import Any
 
 from thursday_core.logging import get_logger
-from thursday_core.plain import activity, friendly
+from thursday_core.plain import activity, friendly, prop
 from thursday_shared.errors import ThursdayError
 from thursday_shared.models import AgentResult, AgentSpec, Event, JobContract
 
@@ -48,6 +48,10 @@ class BaseAgent(ABC):
                     # operator wants it. `activity` is the only field a screen renders.
                     "agent": self.spec.name,
                     "activity": activity(capabilities=self.spec.capabilities),
+                    # §13. What Thursday holds while this runs — derived from the same
+                    # capabilities as the phrase above, at the same moment, so a picture
+                    # and a caption can never describe different work.
+                    "prop": prop(capabilities=self.spec.capabilities).value,
                 },
             )
         )

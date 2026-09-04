@@ -97,6 +97,17 @@ export type Posture =
   | "SPEAKING" | "THINKING" | "LISTENING" | "WORKING" | "SLEEPING" | "STILL";
 
 /**
+ * Sprint 89. What Thursday is holding while it works (§13).
+ *
+ * The addendum's rule is that Thursday stays the only character: a sub-agent is not a
+ * second robot, it is an object the one robot picks up. Derived on the server from the
+ * agent's *capability* — the same key the caption comes from — so a picture and a sentence
+ * can never describe different work, and no agent name is anywhere near it (§65).
+ */
+export type Prop =
+  | "NONE" | "BOOKS" | "CHART" | "PAPERS" | "CODE" | "SCAN" | "SCREEN" | "CHECKLIST";
+
+/**
  * What Thursday is doing and how it is going, derived on the server.
  *
  * The client never computes a mood of its own. One derivation means the HUD and the
@@ -118,6 +129,8 @@ export interface Expression {
   listening: boolean;
   /** "" when nothing is running. Never an agent name. */
   activity: string;
+  /** §13. "NONE" whenever nothing is running, and cleared with `activity`. */
+  prop: Prop;
   because: string;
   /** 0–1. How much motion to draw with. */
   intensity: number;

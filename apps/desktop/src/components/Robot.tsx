@@ -1,5 +1,6 @@
 import {
   EYES,
+  type Flourish,
   MIC,
   POSE,
   SPEED,
@@ -8,7 +9,7 @@ import {
   type Gait,
 } from "@/lib/avatar";
 import { APPEARANCE, withAlpha } from "@/lib/mood";
-import type { Mood, Posture } from "@/lib/types";
+import type { Mood, Posture, Prop } from "@/lib/types";
 
 /**
  * The robot (Sprint 82). One drawing, posed by a number.
@@ -36,6 +37,9 @@ import type { Mood, Posture } from "@/lib/types";
  *    group, outside every posture branch, and in a colour that is not in the mood table,
  *    so no feeling and no pose can take it away.
  */
+
+/** Two decimals is more than a 152-pixel drawing can show, and keeps the markup readable. */
+const round = (value: number) => Math.round(value * 100) / 100;
 
 /** The eyes, as paths. Shapes only — the bubble does the talking. */
 function Eyes({ mood, glow, shut }: { mood: Mood; glow: string; shut?: boolean }) {
@@ -89,10 +93,101 @@ function Eyes({ mood, glow, shut }: { mood: Mood; glow: string; shut?: boolean }
   );
 }
 
+/**
+ * What Thursday is holding (§13). Objects, never characters.
+ *
+ * Drawn at the end of the forward arm and rotated with it, so the prop moves as one thing
+ * with the hand rather than floating beside it. Each is a few shapes at most: it is read at
+ * thumbnail size on a desktop, and detail at that scale is noise.
+ */
+function Held({ prop, glow }: { prop: Prop; glow: string }) {
+  const shell = { fill: "#eef2f8", stroke: "#9aa7ba", strokeWidth: 0.9 };
+
+  switch (prop) {
+    case "BOOKS":
+      return (
+        <g>
+          <rect x="-9" y="-6" width="18" height="5" rx="1" {...shell} />
+          <rect x="-8" y="-11" width="16" height="5" rx="1" {...shell} fill="#dbe2ec" />
+          <circle cx="6" cy="-15" r="4" fill="none" stroke={glow} strokeWidth="1.6" />
+          <path d="M9 -12 l4 4" stroke={glow} strokeWidth="1.6" strokeLinecap="round" />
+        </g>
+      );
+    case "CHART":
+      return (
+        <g>
+          <rect x="-10" y="-14" width="20" height="15" rx="1.5" {...shell} />
+          <g fill={glow}>
+            <rect x="-7" y="-6" width="3.4" height="5" />
+            <rect x="-2" y="-10" width="3.4" height="9" />
+            <rect x="3" y="-12.5" width="3.4" height="11.5" />
+          </g>
+        </g>
+      );
+    case "PAPERS":
+      return (
+        <g>
+          <rect x="-8" y="-13" width="16" height="19" rx="1.2" {...shell} />
+          <g stroke="#9aa7ba" strokeWidth="1.1" strokeLinecap="round">
+            <path d="M-5 -9 h10" />
+            <path d="M-5 -5 h10" />
+            <path d="M-5 -1 h6" />
+          </g>
+        </g>
+      );
+    case "CODE":
+      return (
+        <g>
+          <rect x="-11" y="-13" width="22" height="16" rx="1.8" fill="#1b2434" stroke="#9aa7ba" />
+          <g stroke={glow} strokeWidth="1.5" strokeLinecap="round" fill="none">
+            <path d="M-5 -8 l-3 3 l3 3" />
+            <path d="M5 -8 l3 3 l-3 3" />
+          </g>
+        </g>
+      );
+    case "SCAN":
+      return (
+        <g fill="none" stroke={glow} strokeWidth="1.7" strokeLinecap="round">
+          <path d="M-10 -12 v-4 h5" />
+          <path d="M10 -12 v-4 h-5" />
+          <path d="M-10 2 v4 h5" />
+          <path d="M10 2 v4 h-5" />
+          <path d="M-10 -5 h20" opacity="0.85" />
+        </g>
+      );
+    case "SCREEN":
+      return (
+        <g>
+          <rect x="-11" y="-14" width="22" height="15" rx="1.8" fill="#1b2434" stroke="#9aa7ba" />
+          <rect x="-8" y="-11" width="16" height="9" rx="1" fill={glow} opacity="0.45" />
+          <path d="M0 -1 v4" stroke="#9aa7ba" strokeWidth="1.6" />
+          <path d="M-5 3 h10" stroke="#9aa7ba" strokeWidth="1.6" strokeLinecap="round" />
+        </g>
+      );
+    case "CHECKLIST":
+      return (
+        <g>
+          <rect x="-8" y="-13" width="16" height="19" rx="1.2" {...shell} />
+          <g stroke={glow} strokeWidth="1.5" strokeLinecap="round" fill="none">
+            <path d="M-5 -8 l1.8 1.8 l3.2 -3.6" />
+            <path d="M-5 -2 l1.8 1.8 l3.2 -3.6" />
+          </g>
+          <path d="M1 -8 h5" stroke="#9aa7ba" strokeWidth="1.1" strokeLinecap="round" />
+          <path d="M1 -2 h5" stroke="#9aa7ba" strokeWidth="1.1" strokeLinecap="round" />
+        </g>
+      );
+    default:
+      return null;
+  }
+}
+
 export function Robot({
   mood,
   posture,
   listening,
+  prop = "NONE",
+  flourish = "NONE",
+  flourishAt = 0,
   gait,
   phase,
   clock = 0,
@@ -104,6 +199,12 @@ export function Robot({
   posture: Posture;
   /** §10. Drawn unconditionally, because a recording light answers to nothing. */
   listening: boolean;
+  /** §13. What Thursday is holding. Derived on the server from the agent's capability. */
+  prop?: Prop;
+  /** §9. A brief bit of character when there is genuinely nothing to report. */
+  flourish?: Flourish;
+  /** 0–1 through that flourish. */
+  flourishAt?: number;
   gait: Gait;
   phase: number;
   /** Seconds, from `beat()`. Runs when `phase` does not, so a still robot still blinks. */
@@ -131,6 +232,10 @@ export function Robot({
   // Leaning into it. A body that stays vertical at speed reads as sliding.
   const lean = gait === "RUN" ? 7 : gait === "WALK" ? 2.5 : 0;
 
+  // §9. One arc, up and back down, over the whole flourish. The shadow shrinks with it,
+  // which is what makes it read as leaving the ground rather than the picture sliding.
+  const hop = flourish === "JUMP" ? Math.sin(flourishAt * Math.PI) * 22 : 0;
+
   const legFront = Math.sin(cycle) * swing;
   const legBack = -legFront;
   const armFront = -legFront * 0.8;
@@ -145,7 +250,25 @@ export function Robot({
       : gait === "ALERT" && (mood === "WAITING" || mood === "ATTENTIVE")
         ? "raised"
         : "none";
-  const armAngle = hand === "chin" ? -152 : hand === "raised" ? -118 : armFront;
+
+  // §9. The wave is a hand, so it competes with everything else that wants the arm — and it
+  // only ever happens while Thursday is CALM and STILL, which is precisely when nothing
+  // else is asking for it. Resolved here rather than in four places that could each claim
+  // the same limb.
+  const waving = flourish === "WAVE";
+  const wave = waving ? Math.sin(flourishAt * Math.PI * 5) * 16 : 0;
+  // §13. A held object needs the arm down and forward, not swinging with the walk.
+  const holding = prop !== "NONE";
+
+  const armAngle = waving
+    ? -150 + wave
+    : hand === "chin"
+      ? -152
+      : hand === "raised"
+        ? -118
+        : holding
+          ? -28
+          : armFront;
 
   return (
     <svg
@@ -181,14 +304,17 @@ export function Robot({
       <ellipse
         cx="50"
         cy="116"
-        rx={sitting ? 26 : 20 - bob}
-        ry={4 - bob * 0.4}
+        rx={(sitting ? 26 : 20 - bob) - hop * 0.35}
+        ry={4 - bob * 0.4 - hop * 0.06}
         fill="#000000"
-        opacity="0.35"
+        opacity={0.35 - hop * 0.008}
       />
 
       <g
-        transform={`translate(0 ${-bob}) rotate(${lean * -1 + pose.lean} 50 100)`}
+        // Rounded, because a sine that lands on zero lands on 2.7e-15 instead, and an SVG
+        // attribute reading `translate(0 -2.6942229581241772e-15)` is both noise in the
+        // output and a value nothing downstream can sensibly compare against.
+        transform={`translate(0 ${round(-bob - hop)}) rotate(${round(lean * -1 + pose.lean)} 50 100)`}
         opacity={sitting ? 0.85 : 1}
       >
         {/* ------------------------------------------------------------------- the legs */}
@@ -208,13 +334,15 @@ export function Robot({
           </g>
         )}
 
-        {/* ------------------------------------------------------------------- the arms */}
+        {/* --------------------------------------------------------------- the far arm */}
+        {/* Behind the torso, which is where the arm on the far side of a body belongs. The
+            near arm is drawn after the body instead — see below. Both were in one group
+            until Sprint 89, which meant anything the near hand held was rendered *under*
+            the chest: the books came out as a sliver and a magnifier, and it took looking
+            at a rendered sheet of them to notice. */}
         <g fill="url(#shell)" stroke="#b8c2d2" strokeWidth="1">
           <g transform={`rotate(${armBack} 30 72)`}>
             <rect x="25.5" y="69" width="9" height="23" rx="4.5" />
-          </g>
-          <g transform={`rotate(${armAngle} 70 72)`}>
-            <rect x="65.5" y="69" width="9" height="23" rx="4.5" />
           </g>
         </g>
 
@@ -233,6 +361,21 @@ export function Robot({
             the whole point: one mood, drawn in three places. */}
         <circle cx="50" cy="80" r="5.5" fill={withAlpha(glow, 0.28)} />
         <circle cx="50" cy="80" r="3" fill={glow} filter="url(#eyeGlow)" />
+
+        {/* -------------------------------------------------------------- the near arm */}
+        {/* After the body, so it and whatever it is holding are in front of the chest. */}
+        <g fill="url(#shell)" stroke="#b8c2d2" strokeWidth="1">
+          <g transform={`rotate(${round(armAngle)} 70 72)`}>
+            <rect x="65.5" y="69" width="9" height="23" rx="4.5" />
+            {/* At the hand and inside the arm's own rotation, so the prop and the hand move
+                as one thing rather than the object floating beside the limb. */}
+            {holding && (
+              <g transform="translate(70 97)" data-prop={prop}>
+                <Held prop={prop} glow={glow} />
+              </g>
+            )}
+          </g>
+        </g>
 
         {/* ------------------------------------------------------------------- the head */}
         <g transform={`rotate(${(moving ? Math.sin(cycle) * 2 : 0) + pose.tilt} 50 46)`}>

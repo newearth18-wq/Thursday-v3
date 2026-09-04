@@ -413,3 +413,80 @@ def test_the_microphone_check_actually_reaches_every_mood():
     assert covered == set(Mood) - {Mood.CALM}, (
         "every mood but CALM, which an open microphone rules out by definition"
     )
+
+
+# ------------------------------------------------------------------ §13, what it holds
+
+
+def test_a_prop_and_a_caption_always_describe_the_same_work():
+    """Both come from the capability, so neither can drift from the other.
+
+    The tempting shortcut was to key the picture off `activity` — the client already has
+    that string. It is wrong twice: it makes a drawing depend on the exact wording of a Thai
+    sentence, so rephrasing a caption silently removes a prop; and it gives the client a
+    second vocabulary to keep in step. One key, two tables.
+    """
+    from thursday_core.plain import PROP_BY_CAPABILITY, Prop, activity, prop
+
+    for capability, expected in PROP_BY_CAPABILITY.items():
+        assert prop(capabilities=[capability]) is expected
+        assert activity(capabilities=[capability]) in ACTIVITY_BY_CAPABILITY.values()
+
+    # Every capability that has a prop also has a phrase — the reverse is allowed, because
+    # §13 names props for only some kinds of work.
+    assert set(PROP_BY_CAPABILITY) <= set(ACTIVITY_BY_CAPABILITY)
+    assert prop(capabilities=["memory"]) is Prop.NONE
+    assert prop(capabilities=[]) is Prop.NONE
+
+
+def test_nothing_running_means_nothing_in_hand():
+    """A robot still holding a book after the search finished is the same lie as a caption
+    that still says it is searching — which is the bug Sprint 80 fixed for the caption."""
+    from thursday_core.plain import Prop
+
+    finished = express(
+        world(current_activity="กำลังค้นข้อมูล", current_prop="BOOKS"),
+        unhealthy=0,
+        lockdown=False,
+    )
+    assert finished.activity == ""
+    assert finished.prop is Prop.NONE
+
+    running = express(
+        world(
+            running_agents={"a": "working"},
+            current_activity="กำลังค้นข้อมูล",
+            current_prop="BOOKS",
+        ),
+        unhealthy=0,
+        lockdown=False,
+    )
+    assert running.prop is Prop.BOOKS
+    assert running.payload()["prop"] == "BOOKS"
+
+
+def test_a_prop_this_build_does_not_know_is_simply_not_drawn():
+    """Permissive on purpose. The value arrives over the bus from an emitter that may be an
+    older or newer build, and refusing to describe Thursday's *condition* because a drawing
+    was unrecognised would trade something that matters for something that does not."""
+    from thursday_core.plain import Prop
+
+    result = express(
+        world(running_agents={"a": "working"}, current_prop="TROMBONE"),
+        unhealthy=0,
+        lockdown=False,
+    )
+    assert result.prop is Prop.NONE
+    assert result.mood is Mood.WORKING, "an unknown prop must not disturb the mood"
+
+
+def test_no_prop_stands_for_an_agent():
+    """§13's actual rule: Thursday stays the only character.
+
+    A member called AGENT, ASSISTANT or HELPER would be a second actor smuggled in as an
+    object, which is the one thing the section is written to prevent.
+    """
+    from thursday_core.plain import Prop
+
+    forbidden = {"AGENT", "ASSISTANT", "HELPER", "WORKER", "BOT", "ROBOT"}
+    assert not forbidden & {member.name for member in Prop}

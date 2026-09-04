@@ -3,18 +3,24 @@ import {
   BLINK_EVERY,
   BLINK_FOR,
   BUBBLE,
+  FLOURISH_FOR,
   EYES,
   MARGIN,
+  PLAYFUL_EVERY,
   POSE,
   POSTURES,
+  PROPS,
   RUN_ABOVE,
   SPEED,
   START,
   beat,
   blinking,
   bubbleAt,
+  flourish,
+  flourishProgress,
   gaitFor,
   knownPosture,
+  knownProp,
   stride,
   visorPulse,
   type Gait,
@@ -287,5 +293,79 @@ describe("a posture this build has never heard of", () => {
 
   it("agrees with the table it guards", () => {
     expect([...POSTURES].sort()).toEqual(Object.keys(POSE).sort());
+  });
+});
+
+// ---------------------------------------------------------------------- §9, the playful bits
+
+describe("a brief bit of character when there is nothing to report", () => {
+  it("never happens while Thursday has anything at all going on", () => {
+    // §9's own condition is "the user is inactive", which ADR 0055 forbids this window from
+    // knowing. What it checks instead is that *Thursday* has nothing to do — and that must
+    // hold strictly: a robot doing a little dance while a job is failing is the avatar
+    // equivalent of reporting success on no evidence.
+    for (const clock of [0, 5, 12, 25.5, 25.9, 51.9, 77.9]) {
+      for (const mood of MOODS) {
+        for (const posture of EXPECTED_POSTURES) {
+          const playing = flourish(clock, mood, posture);
+          if (mood !== "CALM" || posture !== "STILL") {
+            expect(playing, `${mood}/${posture}@${clock}`).toBe("NONE");
+          }
+        }
+      }
+    }
+  });
+
+  it("does nothing at the resting value of the clock", () => {
+    // The same rule the blink learned the hard way: `Avatar.tsx` freezes this clock under
+    // `prefers-reduced-motion`, so a flourish active at zero is not playfulness, it is a
+    // robot stuck mid-jump for the entire session.
+    expect(flourish(0, "CALM", "STILL")).toBe("NONE");
+    expect(flourishProgress(0)).toBe(0);
+  });
+
+  it("reaches all three, in a fixed order rather than at random", () => {
+    const seen = [0, 1, 2, 3].map((n) =>
+      flourish(PLAYFUL_EVERY * n + PLAYFUL_EVERY - 0.5, "CALM", "STILL"),
+    );
+    expect(seen).toEqual(["JUMP", "WAVE", "SIT", "JUMP"]);
+  });
+
+  it("is rare — §9 says do not constantly move", () => {
+    let playing = 0;
+    const frames = 60 * 60 * 5; // five minutes at 60Hz
+    for (let frame = 0; frame < frames; frame += 1) {
+      if (flourish(frame / 60, "CALM", "STILL") !== "NONE") playing += 1;
+    }
+    expect(playing / frames).toBeLessThan(0.12);
+    expect(playing).toBeGreaterThan(0);
+  });
+
+  it("runs a flourish from nothing to nothing, without leaving the range", () => {
+    for (let frame = 0; frame < 60 * 60; frame += 1) {
+      const at = flourishProgress(frame / 60);
+      expect(at).toBeGreaterThanOrEqual(0);
+      expect(at).toBeLessThanOrEqual(1);
+    }
+    expect(flourishProgress(PLAYFUL_EVERY - FLOURISH_FOR)).toBe(0);
+    expect(flourishProgress(PLAYFUL_EVERY - 0.001)).toBeGreaterThan(0.99);
+  });
+});
+
+// ---------------------------------------------------------------------- §13, what it holds
+
+describe("a prop this build has never heard of", () => {
+  it("is simply not drawn, rather than crashing the window", () => {
+    for (const rubbish of ["TROMBONE", "", "books", "__proto__", "0"]) {
+      expect(PROPS, rubbish).toContain(knownProp(rubbish));
+    }
+    expect(knownProp(null)).toBe("NONE");
+    expect(knownProp(undefined)).toBe("NONE");
+    // "" is what the world snapshot uses for "nothing is running", and it is not a prop.
+    expect(knownProp("")).toBe("NONE");
+  });
+
+  it("passes every prop it does know through untouched", () => {
+    for (const prop of PROPS) expect(knownProp(prop)).toBe(prop);
   });
 });

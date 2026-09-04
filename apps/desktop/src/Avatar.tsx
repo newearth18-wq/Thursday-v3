@@ -7,6 +7,8 @@ import {
   START,
   beat,
   bubbleAt,
+  flourish,
+  flourishProgress,
   gaitFor,
   stride,
   type Gait,
@@ -42,9 +44,15 @@ export default function Avatar() {
 
   // A disconnected Thursday sits down. Wandering cheerfully around a screen while unable
   // to hear anything is the avatar equivalent of reporting success on no evidence.
-  const gait: Gait = connected
-    ? gaitFor(expression.mood, expression.intensity, expression.posture)
-    : "SIT";
+  // §9. Sitting down is the one flourish that is also a way of standing still, so it is
+  // resolved here where the gait is decided rather than drawn over the top of a walk — a
+  // robot sitting while its legs keep striding is not sitting.
+  const playing = connected ? flourish(clock, expression.mood, expression.posture) : "NONE";
+  const gait: Gait = !connected
+    ? "SIT"
+    : playing === "SIT"
+      ? "SIT"
+      : gaitFor(expression.mood, expression.intensity, expression.posture);
   const latest = useRef(gait);
   latest.current = gait;
 
@@ -105,6 +113,9 @@ export default function Avatar() {
           // the machine is doing with the microphone, and nothing this window computes is
           // allowed a say in it.
           listening={connected && expression.listening}
+          prop={expression.prop}
+          flourish={playing}
+          flourishAt={flourishProgress(clock)}
           gait={gait}
           phase={walker.phase}
           clock={clock}

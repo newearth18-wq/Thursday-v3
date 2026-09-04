@@ -16,7 +16,7 @@
  * server said.
  */
 
-import type { Mood, Posture } from "@/lib/types";
+import type { Mood, Posture, Prop } from "@/lib/types";
 
 /** What the body is doing. Five, because a person can tell five apart at thumbnail size. */
 export type Gait = "SIT" | "ALERT" | "IDLE" | "WALK" | "RUN";
@@ -217,6 +217,78 @@ export function knownPosture(value: unknown): Posture {
 /** 0–1, the visor's light band while speaking. §14 — a pulse, never a mouth. */
 export function visorPulse(clock: number): number {
   return (Math.sin(clock * 9) + 1) / 2;
+}
+
+/**
+ * Every prop this build can draw, and the guard that keeps an unknown one from reaching a
+ * table lookup (ADR 0059 — the server may be newer than the app).
+ */
+export const PROPS: Prop[] = [
+  "NONE",
+  "BOOKS",
+  "CHART",
+  "PAPERS",
+  "CODE",
+  "SCAN",
+  "SCREEN",
+  "CHECKLIST",
+];
+
+export function knownProp(value: unknown): Prop {
+  // `includes`, not a `Record` — this is already a list, and `Object.hasOwn` on an array
+  // would be asking a different question. The empty-string case matters: the world snapshot
+  // uses "" for "nothing is running", which is not a prop name.
+  return typeof value === "string" && (PROPS as string[]).includes(value)
+    ? (value as Prop)
+    : "NONE";
+}
+
+// ------------------------------------------------------------------ §9, the playful bits
+
+/**
+ * A brief bit of character, for when there is genuinely nothing to report.
+ *
+ * §9 asks for walking, running, jumping, sitting at the screen edge and waving "when the
+ * user is inactive and policy allows". **The first half of that condition cannot be
+ * honoured and must not be faked.** ADR 0055 fixed what this window is allowed to know
+ * about the person — Thursday's own window is not in front, and nothing else: no idle
+ * timer, no input hook, no camera. So "the user is inactive" is replaced by the one thing
+ * that is actually true and actually knowable: *Thursday* has nothing to do. Nothing
+ * running, nothing waiting, nothing broken, no turn in flight — `CALM` and `STILL` together
+ * are exactly that, and they are already derived on the server.
+ *
+ * The rest of §9 is "do not constantly move", which is the reason this is a rare, short
+ * window rather than a loop: a few seconds every half-minute, in a fixed cycle so that all
+ * three are reachable and none is random.
+ */
+export type Flourish = "NONE" | "JUMP" | "WAVE" | "SIT";
+
+/** Seconds between flourishes, and how long one lasts. */
+export const PLAYFUL_EVERY = 26;
+export const FLOURISH_FOR = 2.4;
+
+const CYCLE: Flourish[] = ["JUMP", "WAVE", "SIT"];
+
+/**
+ * Which flourish is happening this instant, if any.
+ *
+ * The window sits at the **end** of each period, for the reason the blink does: `Avatar.tsx`
+ * freezes this clock entirely under `prefers-reduced-motion`, so zero is the value those
+ * owners are drawn at forever. A flourish that were active at zero would not be playful, it
+ * would be a robot stuck mid-jump for the whole session (Sprint 86 learned this the hard
+ * way with the eyes).
+ */
+export function flourish(clock: number, mood: Mood, posture: Posture): Flourish {
+  if (mood !== "CALM" || posture !== "STILL") return "NONE";
+  const phase = clock % PLAYFUL_EVERY;
+  if (phase < PLAYFUL_EVERY - FLOURISH_FOR) return "NONE";
+  return CYCLE[Math.floor(clock / PLAYFUL_EVERY) % CYCLE.length];
+}
+
+/** 0–1 through the current flourish, for the jump arc and the wave. 0 when there is none. */
+export function flourishProgress(clock: number): number {
+  const into = (clock % PLAYFUL_EVERY) - (PLAYFUL_EVERY - FLOURISH_FOR);
+  return into <= 0 ? 0 : Math.min(1, into / FLOURISH_FOR);
 }
 
 /** What the face does. Shapes, not words — `Robot.tsx` draws them. */

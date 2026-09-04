@@ -123,6 +123,7 @@ class WorldStateProjector:
             # The allowlisted phrase, never the name. `plain.activity` already produced it
             # at the emitting end (Sprint 65); reading anything else here would be the leak.
             fields["current_activity"] = str(event.payload.get("activity", ""))
+            fields["current_prop"] = str(event.payload.get("prop", ""))
         else:
             running.pop(agent, None)
             if event.kind == "agent.completed":
@@ -133,6 +134,7 @@ class WorldStateProjector:
                 # Nothing is running, so there is nothing being done. A leftover phrase
                 # under a finished job reads as work still in progress.
                 fields["current_activity"] = ""
+                fields["current_prop"] = ""
 
         self.world.update(running_agents=running, **fields)
 

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { WS_ORIGIN } from "@/lib/origin";
-import { knownPosture } from "@/lib/avatar";
+import { knownPosture, knownProp } from "@/lib/avatar";
 import { knownMood } from "@/lib/mood";
 import type {
   AgentStatus,
@@ -31,6 +31,7 @@ export const UNKNOWN: Expression = {
   // evidence is worse than one that is late (§10).
   listening: false,
   activity: "",
+  prop: "NONE",
   because: "",
   intensity: 0.15,
   running: 0,
@@ -57,6 +58,7 @@ function readExpression(message: RealtimeMessage): Expression {
     posture: knownPosture(message.posture),
     listening: message.listening === true,
     activity: typeof message.activity === "string" ? message.activity : "",
+    prop: knownProp(message.prop),
     because: typeof message.because === "string" ? message.because : "",
     intensity: typeof message.intensity === "number" ? message.intensity : UNKNOWN.intensity,
     running: typeof message.running === "number" ? message.running : 0,

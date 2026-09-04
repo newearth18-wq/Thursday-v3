@@ -106,6 +106,17 @@ the local backend answer before the window is even shown.
   in *both* windows (§10). `Robot.test.tsx` walks all fifty-four mood × posture combinations,
   because the failure mode is never "the light is wrong" — it is "the light is right until
   something urgent happens".
+- **A sub-agent is an object, not a second character.** §13's rule, and the reason the robot
+  picks up books, a chart or a checklist rather than a second robot appearing beside it. The
+  prop is derived on the server from the agent's *capability* — the same key the caption
+  comes from — so a picture and a sentence can never describe different work, and no agent
+  name is anywhere near the drawing (§65). `Prop` has no member that stands for "an agent",
+  and a test asserts it never gains one.
+- **Playing is only ever allowed when there is nothing to report.** §9 asks for jumping,
+  waving and sitting "when the user is inactive", which ADR 0055 forbids this window from
+  knowing. What it checks instead is that *Thursday* has nothing to do — `CALM` and `STILL`
+  together — which is true, knowable, and derived on the server. A few seconds every half
+  minute, never while anything is running, waiting or broken.
 - **There is no mouth.** §14: speech is a band of light across the visor. `Robot.test.tsx`
   proves it structurally — while Thursday speaks, exactly one element in the drawing changes,
   and it is on the face plate.

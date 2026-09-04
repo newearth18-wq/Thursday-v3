@@ -56,7 +56,7 @@ from enum import StrEnum
 
 from thursday_shared.models import WorldStateSnapshot
 
-from thursday_core.plain import WORKING
+from thursday_core.plain import WORKING, Prop
 
 #: How long a finished piece of work still colours the mood. Long enough that the owner
 #: looking up a moment later sees what happened, short enough that Thursday does not sulk
@@ -220,6 +220,10 @@ class Expression:
     #: The allowlisted phrase from `plain.activity`, or "" when nothing is running. Never an
     #: agent name — there is no code path here that has one.
     activity: str
+    #: §13. What Thursday is holding, from `plain.prop` — the same closed vocabulary, keyed
+    #: on the same capability as `activity`, so the picture and the caption can never
+    #: describe different work. `NONE` whenever nothing is running.
+    prop: Prop
     because: str
     #: 0–1. How much motion to draw with. Derived from the mood floor and what is in flight.
     intensity: float
@@ -234,6 +238,7 @@ class Expression:
             "posture": self.posture.value,
             "listening": self.listening,
             "activity": self.activity,
+            "prop": self.prop.value,
             "because": self.because,
             "intensity": round(self.intensity, 3),
             "running": self.running,
@@ -244,6 +249,19 @@ class Expression:
 
 def _fresh(at: datetime | None, *, now: datetime) -> bool:
     return at is not None and (now - at) <= FRESH
+
+
+def _prop(name: str) -> Prop:
+    """The prop a snapshot names, or none at all.
+
+    Permissive on purpose. The value arrives over the bus from an emitter that may be an
+    older build, and refusing to describe Thursday's condition at all because a *drawing*
+    was unrecognised would trade something that matters for something that does not.
+    """
+    try:
+        return Prop(name)
+    except ValueError:
+        return Prop.NONE
 
 
 def _quiet_since(at: datetime | None, *, now: datetime) -> bool:
@@ -322,6 +340,11 @@ def express(
         # rather than stale, because a leftover "กำลังค้นข้อมูล" under a finished job is a
         # lie that looks like a feature.
         activity=(world.current_activity or WORKING) if running else "",
+        # Cleared with the activity, and for the same reason: a robot still holding a book
+        # after the search finished is the same lie as a caption that says it is searching.
+        # An unrecognised value collapses to NONE rather than raising — the wire is not the
+        # place to be strict about a drawing.
+        prop=_prop(world.current_prop) if running else Prop.NONE,
         because=BECAUSE[mood],
         intensity=intensity,
         running=running,

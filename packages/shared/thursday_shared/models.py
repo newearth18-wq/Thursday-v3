@@ -458,6 +458,10 @@ class WorldStateSnapshot(Base):
     last_referenced_task_id: UUID | None = None
     people_present: int = 1
     lockdown: bool = False
+    #: Sprint 89. What Thursday is holding while it works (§13), from `plain.prop` — a
+    #: closed vocabulary of objects, keyed on the same capability as the phrase below. "" when
+    #: nothing is running, and cleared by the same code that clears `current_activity`.
+    current_prop: str = ""
     #: Sprint 80. What is happening now, as `plain.activity` already phrases it for a screen.
     #: The allowlisted phrase and not the agent name: the projector reads both from the same
     #: event and only this one is ever rendered.

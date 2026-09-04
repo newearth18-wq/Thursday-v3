@@ -7,6 +7,7 @@ const expression = (over: Partial<Expression> = {}): Expression => ({
   mood: "WORKING",
   posture: "WORKING",
   listening: false,
+  prop: "NONE",
   activity: "กำลังค้นข้อมูล",
   because: "กำลังทำงานให้อยู่",
   intensity: 0.6,

@@ -1,7 +1,17 @@
 import { render } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { Robot } from "@/components/Robot";
-import { BLINK_EVERY, MARGIN, MIC, POSE, REACH, ROBOT, blinking, gaitFor } from "@/lib/avatar";
+import {
+  BLINK_EVERY,
+  MARGIN,
+  MIC,
+  POSE,
+  PROPS,
+  REACH,
+  ROBOT,
+  blinking,
+  gaitFor,
+} from "@/lib/avatar";
 import type { Mood, Posture } from "@/lib/types";
 
 const MOODS: Mood[] = [
@@ -232,5 +242,108 @@ describe("how wide the drawing actually is", () => {
     // And REACH is not padded into meaninglessness: something really does reach that far.
     expect(widest).toBeGreaterThan(REACH - 4);
     expect(MARGIN).toBeGreaterThanOrEqual((widest / 100) * ROBOT);
+  });
+});
+
+// ------------------------------------------------------------------ §13, what it holds
+
+describe("the prop", () => {
+  it("draws exactly one object, and only when there is something to hold", () => {
+    const empty = draw({ prop: "NONE", posture: "WORKING" }).container;
+    expect(empty.querySelector("[data-prop]")).toBeNull();
+
+    for (const prop of PROPS.filter((p) => p !== "NONE")) {
+      const { container, unmount } = draw({ prop, posture: "WORKING" });
+      const held = container.querySelectorAll("[data-prop]");
+      expect(held.length, prop).toBe(1);
+      expect(held[0].getAttribute("data-prop"), prop).toBe(prop);
+      expect(held[0].children.length, `${prop} is declared but draws nothing`).toBeGreaterThan(0);
+      unmount();
+    }
+  });
+
+  it("gives every prop a drawing of its own", () => {
+    // A table with two entries that render identically is a table with one entry and a
+    // misleading name — the owner cannot tell searching from checking.
+    const drawings = new Map<string, string>();
+    for (const prop of PROPS.filter((p) => p !== "NONE")) {
+      const { container, unmount } = draw({ prop, posture: "WORKING" });
+      const held = container.querySelector("[data-prop]")!.innerHTML;
+      for (const [other, seen] of drawings) {
+        expect(held, `${prop} is drawn the same as ${other}`).not.toBe(seen);
+      }
+      drawings.set(prop, held);
+      unmount();
+    }
+    expect(drawings.size).toBe(PROPS.length - 1);
+  });
+
+  it("is held by the hand, inside the arm's own rotation", () => {
+    // Outside it, the prop floats beside a limb that swings without it. The check is that
+    // the prop lives *within* the rotated group rather than as a sibling of it.
+    const { container } = draw({ prop: "BOOKS", posture: "WORKING" });
+    const arm = [...container.querySelectorAll("g")].find((g) =>
+      /rotate\(-?[\d.]+ 70 72\)/.test(g.getAttribute("transform") ?? ""),
+    );
+    expect(arm).toBeTruthy();
+    expect(arm!.querySelector("[data-prop]")).not.toBeNull();
+  });
+
+  it("brings the arm down to carry something rather than leaving it swinging", () => {
+    const angle = (over: Partial<Parameters<typeof Robot>[0]>) =>
+      Number(
+        draw(over).container.innerHTML.match(/rotate\((-?[\d.]+) 70 72\)/)?.[1] ?? NaN,
+      );
+
+    expect(angle({ prop: "CHART", posture: "WORKING" })).not.toBe(
+      angle({ prop: "NONE", posture: "WORKING" }),
+    );
+  });
+});
+
+// ------------------------------------------------------------------------ §9, playful
+
+describe("the playful flourishes", () => {
+  it("lifts the robot off the ground to jump, and shrinks its shadow with it", () => {
+    const shadow = (over: Partial<Parameters<typeof Robot>[0]>) => {
+      const el = draw(over).container.querySelector("ellipse")!;
+      return Number(el.getAttribute("rx"));
+    };
+    const body = (over: Partial<Parameters<typeof Robot>[0]>) =>
+      draw(over).container.innerHTML.match(/translate\(0 (-?[\d.]+)\)/)?.[1];
+
+    const grounded = { flourish: "NONE" as const, flourishAt: 0 };
+    const airborne = { flourish: "JUMP" as const, flourishAt: 0.5 };
+
+    expect(shadow(airborne)).toBeLessThan(shadow(grounded));
+    expect(Number(body(airborne))).toBeLessThan(Number(body(grounded)));
+  });
+
+  it("starts and ends a jump on the ground", () => {
+    const lift = (at: number) =>
+      Number(draw({ flourish: "JUMP", flourishAt: at }).container.innerHTML.match(
+        /translate\(0 (-?[\d.]+)\)/,
+      )?.[1]);
+
+    expect(lift(0)).toBe(0);
+    expect(lift(1)).toBeCloseTo(0, 5);
+    expect(lift(0.5)).toBeLessThan(-10);
+  });
+
+  it("moves the arm to wave, and moves it differently as the wave goes on", () => {
+    const angle = (at: number) =>
+      Number(draw({ flourish: "WAVE", flourishAt: at }).container.innerHTML.match(
+        /rotate\((-?[\d.]+) 70 72\)/,
+      )?.[1]);
+
+    expect(angle(0.1)).not.toBe(angle(0.3));
+    // Up, not down — a wave below the waist is not a wave.
+    expect(angle(0.1)).toBeLessThan(-90);
+  });
+
+  it("does nothing at all when there is no flourish", () => {
+    const still = draw({ flourish: "NONE", flourishAt: 0.5 }).container.innerHTML;
+    const same = draw({ flourish: "NONE", flourishAt: 0.9 }).container.innerHTML;
+    expect(still).toBe(same);
   });
 });

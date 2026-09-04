@@ -34,6 +34,7 @@ sanitise itself.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from enum import StrEnum
 from typing import Any
 
 #: What the owner is told while Thursday works, keyed on capability rather than on agent
@@ -62,6 +63,65 @@ ACTIVITY_BY_CAPABILITY: dict[str, str] = {
 #: What anything unrecognised becomes. Vague on purpose: it is always true, and it is what
 #: keeps an unnamed capability from arriving as an agent id.
 WORKING = "กำลังทำงาน"
+
+
+class Prop(StrEnum):
+    """What Thursday is holding while it works (§13 of the avatar addendum) — Sprint 89.
+
+    The addendum's rule is that **Thursday stays the only character**: a sub-agent does not
+    become a second robot on the screen, it becomes something the one robot is holding. So
+    these are objects, not actors, and there is deliberately no member that stands for "an
+    agent" in the abstract.
+
+    Keyed on capability, exactly like `ACTIVITY_BY_CAPABILITY` and for the same reason. The
+    tempting shortcut is to key the picture off `activity` — the client already has that
+    string — and it is wrong twice: it makes a *drawing* depend on the exact wording of a
+    Thai sentence, so rephrasing a caption silently removes a prop; and it gives the client
+    a second vocabulary to keep in step with the server. One key, two tables, one choke
+    point (§65).
+
+    §13 also names a palette for a design agent and a magnifier alongside the books. There
+    is no `design` capability in `ACTIVITY_BY_CAPABILITY`, so there is no palette here: a
+    prop nothing can ever be holding is the same claim-without-a-producer this project has
+    removed five times. It goes in when the capability does.
+    """
+
+    #: Working, with nothing in particular in hand. Every unmapped capability lands here.
+    NONE = "NONE"
+    #: Research, search, browsing the web.
+    BOOKS = "BOOKS"
+    #: Numbers.
+    CHART = "CHART"
+    #: Writing something up.
+    PAPERS = "PAPERS"
+    #: Code.
+    CODE = "CODE"
+    #: Looking at an image or reading text out of one.
+    SCAN = "SCAN"
+    #: Driving another machine.
+    SCREEN = "SCREEN"
+    #: Checking that work actually did what it claimed (§76, ADR 0012).
+    CHECKLIST = "CHECKLIST"
+
+
+#: Capability → what Thursday holds. Same keys as `ACTIVITY_BY_CAPABILITY` wherever §13
+#: names a prop for that kind of work, and deliberately absent where it does not: a
+#: capability with no entry draws no prop rather than a vague one, because a picture that
+#: means nothing in particular is worse than no picture.
+PROP_BY_CAPABILITY: dict[str, Prop] = {
+    "research": Prop.BOOKS,
+    "search": Prop.BOOKS,
+    "browse": Prop.BOOKS,
+    "data": Prop.CHART,
+    "document": Prop.PAPERS,
+    "code": Prop.CODE,
+    "vision": Prop.SCAN,
+    "ocr": Prop.SCAN,
+    "device": Prop.SCREEN,
+    "automation": Prop.SCREEN,
+    "verify": Prop.CHECKLIST,
+    "supervise": Prop.CHECKLIST,
+}
 
 #: The words the requirement's own list forbids in front of a normal user, plus the shapes a
 #: leaked internal usually takes. Used by `leaks()` and by the test that walks live responses.
@@ -140,6 +200,20 @@ def activity(*, capabilities: Any = (), fallback: str = WORKING) -> str:
         if head in ACTIVITY_BY_CAPABILITY:
             return ACTIVITY_BY_CAPABILITY[head]
     return fallback
+
+
+def prop(*, capabilities: Any = ()) -> Prop:
+    """What Thursday holds while an agent with these capabilities works.
+
+    Takes capabilities and nothing else, the same signature `activity` has and for the same
+    reason: there is no parameter an agent's identity could arrive through, so it cannot
+    reach the screen even by accident.
+    """
+    for capability in capabilities or ():
+        head = str(capability).split(".")[0].strip().lower()
+        if head in PROP_BY_CAPABILITY:
+            return PROP_BY_CAPABILITY[head]
+    return Prop.NONE
 
 
 def friendly(exc: BaseException | str) -> Friendly:

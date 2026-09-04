@@ -325,3 +325,80 @@ def test_the_socket_and_the_endpoint_report_the_same_microphone(ws_client, conta
     assert over_http["listening"] is True
     assert over_socket["listening"] is over_http["listening"]
     assert over_socket["posture"] == over_http["posture"]
+
+
+# ------------------------------------------------------ §13, from the agent to the screen
+
+
+async def test_a_running_agent_puts_a_prop_on_the_world_beside_its_phrase():
+    world = WorldState()
+    projector = WorldStateProjector(world)
+
+    await projector.on_agent(agent_event("agent.started", activity="กำลังค้นข้อมูล", prop="BOOKS"))
+
+    snapshot = world.snapshot()
+    assert snapshot.current_prop == "BOOKS"
+    assert snapshot.current_activity == "กำลังค้นข้อมูล"
+
+
+async def test_the_prop_is_put_down_with_the_phrase():
+    """One clear, not two — the pair that describes work has to end together."""
+    world = WorldState()
+    projector = WorldStateProjector(world)
+
+    await projector.on_agent(agent_event("agent.started", activity="กำลังเขียนโค้ด", prop="CODE"))
+    await projector.on_agent(agent_event("agent.completed", ok=True))
+
+    snapshot = world.snapshot()
+    assert snapshot.current_prop == ""
+    assert snapshot.current_activity == ""
+
+
+async def test_a_real_agent_emits_the_prop_its_capabilities_earn():
+    """The whole path, from what an agent *is* to what the robot holds.
+
+    Not a hand-written payload: this runs a real `BaseAgent` and captures what it actually
+    emits, so the capability → prop table is exercised by the code that will use it. A prop
+    table nothing emits into is the shape of the defect this project keeps finding — and
+    `agent` being in the same payload is the reason the assertion below is not merely "a
+    prop arrived" but "the prop came from the capability, and the name did not come at all".
+    """
+    from thursday_agents.base import BaseAgent
+    from thursday_shared.ids import new_id
+    from thursday_shared.models import AgentResult, AgentSpec, JobContract, Spend
+
+    emitted: list[Event] = []
+
+    class Ctx:
+        spend = Spend()
+
+        async def emit(self, event: Event) -> None:
+            emitted.append(event)
+
+    class Researcher(BaseAgent):
+        spec = AgentSpec(
+            name="ResearchAgent",
+            description="finds things",
+            capabilities=["research", "search"],
+        )
+
+        async def execute(self, contract, ctx):
+            return AgentResult(agent="ResearchAgent", ok=True, output={"found": 1})
+
+    contract = JobContract(
+        task_id=new_id(),
+        step_id=new_id(),
+        agent="research",
+        objective="find the budget file",
+        output_schema={"found": "int"},
+        success_criteria=["output.found is present"],
+    )
+    result = await Researcher().run(contract=contract, ctx=Ctx())  # type: ignore[arg-type]
+    assert result.ok, result.error
+
+    started = next(e for e in emitted if e.kind == "agent.started")
+    assert started.payload["prop"] == "BOOKS"
+    assert started.payload["activity"] == "กำลังค้นข้อมูล"
+    # The name is present for the projector and the log, and is not a rendered field —
+    # `graph.test.ts` and `AgentStrip.test.tsx` hold the other end of that rule.
+    assert started.payload["agent"] == "ResearchAgent"
