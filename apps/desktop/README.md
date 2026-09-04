@@ -5,27 +5,31 @@ API like any other; nothing here decides anything (PART 64).
 
 ## What it is
 
-A conversation and an orb — not a dashboard. The machinery is Thursday's business; the
-owner sees one assistant.
+A conversation over a mind — not a dashboard. The machinery is Thursday's business; the
+owner sees one assistant, and can watch it think.
 
 ```
-┌──────────────────────────────────┬──────────────┐
-│                ◍                 │ tasks        │  Orb: one state field, one animation
-│             thinking             │ devices      │
-├──────────────────────────────────┤ memory       │
-│  you>  Thursday เปิด chrome       │ permissions  │  Drawers, closed by default
-│  Thursday> เปิด chrome เรียบร้อย   │              │
-│            (ยืนยันแล้ว)           │              │
-├──────────────────────────────────┤              │
-│  computer · done                 │              │  Agent strip, collapsed
-├──────────────────────────────────┤              │
-│  ⚠ delete thesis.docx?           │              │  Full context above the buttons
-│    what happens · what if not    │              │
-│    [delete] [no]                 │              │
-├──────────────────────────────────┴──────────────┤
-│  Say what you need…                    [send]   │  esc stops whatever is running
-└─────────────────────────────────────────────────┘
+ ● THURSDAY                                              02:20:07
+ ว่างอยู่ พร้อมรับงาน                                  วันศุกร์ที่ 4 ก.ย.
+                        ╭───────────────╮
+                   ╭────┤    ◯ ◯ ◯      ├────╮              DEVICES
+  WORKING   1     │     │   ((  ●  ))   │     │            Office-PC ●
+  ▬▬▬▬▬            │    ╰───────┬───────╯    │
+  WAITING   0       ╰────────────┼───────────╯
+  ▬                       กำลังจัดการไฟล์
+  FAULTS    0        ●
+  ▬                  Office-PC
+
+           you>  ช่วยหาไฟล์งบประมาณล่าสุดใน Downloads
+           Thursday>  ···
+
+  tasks devices memory permissions   [ Say what you need…      ] [stop]
 ```
+
+The core breathes, the rings turn, and every dot around it is something Thursday actually
+has right now: a machine that is connected, a job that is running, a question waiting on
+the owner, an open task. There are no decorative nodes. When Thursday is idle the graph is
+one point of light, and that is the honest picture.
 
 ## Rules this UI does not break
 
@@ -43,23 +47,39 @@ owner sees one assistant.
 - **A permission control that would not stick is not shown.** `can_relax` decides. A
   setting that saves and silently reverts teaches the owner something false about their
   own machine.
-- **Stop is never buried.** Escape interrupts the turn; the tray's *Stop everything* posts
-  to the API from Rust, so it works when the webview does not.
+- **Stop is never buried.** Escape closes a drawer, or interrupts the turn; the tray's
+  *Stop everything* posts to the API from Rust, so it works when the webview does not.
+- **No class name reaches the screen.** A running job is labelled with the allowlisted
+  phrase from `plain.activity` — "กำลังค้นข้อมูล" — never with the agent that produced it
+  (Sprint 65). `AgentStatus.name` exists to tell two concurrent jobs apart and is never
+  rendered; `graph.test.ts` and `AgentStrip.test.tsx` assert it.
+- **The client has no opinion about how Thursday feels.** `expression` arrives derived from
+  the server (ADR 0054) and is rendered, not computed. `lib/mood.ts` holds colours and
+  motion and has nowhere to put a word, which is what keeps this window and the avatar from
+  showing different faces at the same moment.
+- **The graph is state, not decoration.** Every node is a real entity. A layout that
+  wandered off-screen or produced `NaN` would look fine until the tenth node, so the
+  simulation is a plain function and `graph.test.ts` runs it two thousand frames.
 
 ## Layout
 
 ```
 src/
-  App.tsx                  one window: conversation + drawers
+  App.tsx                  one window: the HUD, the conversation over it, drawers
   main.tsx                 entry point
   index.css                Tailwind layers
   hooks/useRealtime.ts     the single WebSocket, with reconnect backoff
+  hooks/useMind.ts         what Thursday consists of — pushed and polled halves
   lib/api.ts               the REST surface, typed
+  lib/graph.ts             the nodes, and the layout, as plain functions
+  lib/mood.ts              how each mood is drawn: colour and motion, never words
+  lib/plain.ts             the one fallback phrase this side needs
   lib/origin.ts            where the API lives (dev proxy vs. packaged app)
   lib/types.ts             the contracts this UI renders
   components/
-    Orb.tsx                PART 63/65 — avatar state as colour and motion
-    Conversation.tsx       PART 64 — the interface
+    BrainGraph.tsx         Sprint 81 — the core, the rings, and one node per real thing
+    Hud.tsx                Sprint 81 — the readable half: clock, meters, devices, activity
+    Conversation.tsx       PART 64 — the interface, floating over the graph
     AgentStrip.tsx         PART 66 — collapsed status line
     ApprovalDialog.tsx     PART 38/70 — context, then buttons
     TaskPanel.tsx          PART 67 — progress, pause, cancel
@@ -75,7 +95,8 @@ src-tauri/
 
 | Concern | Where |
 |---|---|
-| Conversation, streaming, avatar state | `WS /api/v1/realtime` |
+| Conversation, streaming, expression | `WS /api/v1/realtime` |
+| What Thursday is doing and how it goes | `expression` frames, and `GET /api/v1/expression` for the first paint |
 | Approvals | `approval.required` in, `POST /approvals/{id}/approve` out |
 | Tasks, devices, memory, policies | `GET /api/v1/…`, polled while a drawer is open |
 | Emergency stop (§69) | `POST /api/v1/emergency/stop` — a plain call, bypassing the model |
@@ -100,9 +121,10 @@ npm run dev          # browser, against the dev proxy on :1420
 npm run tauri dev    # the real window
 ```
 
-`npm run typecheck` and `npm run build` are what CI runs. Both are worth running before a
-commit: `tsc` and the bundler resolve paths independently, so one can pass while the other
-fails.
+`npm run typecheck`, `npm run test` and `npm run build` are what CI runs. All three are
+worth running before a commit: `tsc` and the bundler resolve paths independently, so one
+can pass while the other fails, and the tests are where the decisions about what a person
+is shown are actually checked.
 
 ## Not built yet
 

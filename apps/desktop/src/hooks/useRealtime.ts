@@ -1,13 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { WS_ORIGIN } from "@/lib/origin";
-import type {
-  AgentStatus,
-  Approval,
-  AvatarState,
-  Expression,
-  Message,
-  RealtimeMessage,
-} from "@/lib/types";
+import type { AgentStatus, Approval, Expression, Message, RealtimeMessage } from "@/lib/types";
 
 const WS_URL = `${WS_ORIGIN}/api/v1/realtime`;
 const RECONNECT_MAX_MS = 15_000;
@@ -33,11 +26,17 @@ export const UNKNOWN: Expression = {
  *
  * Reconnects with backoff, because a desktop app sleeps with the laptop lid and must come
  * back without the owner restarting it.
+ *
+ * Sprint 81 removed the client-side avatar state machine that used to live here. It set
+ * SPEAKING on a reply, WORKING on a task event and IDLE on a 1.2-second timer — a second,
+ * guessed answer to a question the server now derives and pushes (ADR 0054). Two answers to
+ * "how does Thursday look right now" is how the HUD and the avatar window end up showing
+ * different faces at the same moment. The wire still carries `avatar_state`; nothing on
+ * this screen reads it.
  */
 export function useRealtime() {
   const [connected, setConnected] = useState(false);
   const [messages, setMessages] = useState<Message[]>([]);
-  const [avatar, setAvatar] = useState<AvatarState>("IDLE");
   const [approvals, setApprovals] = useState<Approval[]>([]);
   const [agents, setAgents] = useState<AgentStatus[]>([]);
   const [thinking, setThinking] = useState(false);
@@ -75,7 +74,6 @@ export function useRealtime() {
 
         case "assistant.delta": {
           setThinking(false);
-          setAvatar((message.avatar_state as AvatarState) ?? "SPEAKING");
           setMessages((prior) => [
             ...prior,
             {
@@ -91,13 +89,10 @@ export function useRealtime() {
           if (Array.isArray(message.approvals) && message.approvals.length) {
             setApprovals(message.approvals as Approval[]);
           }
-          // Settle back to idle once Thursday has finished speaking.
-          setTimeout(() => setAvatar("IDLE"), 1200);
           break;
         }
 
         case "approval.required":
-          setAvatar("WAITING_APPROVAL");
           setApprovals((prior) => {
             const incoming = message.payload as Approval;
             return prior.some((a) => a.id === incoming.id) ? prior : [...prior, incoming];
@@ -137,12 +132,6 @@ export function useRealtime() {
             unhealthy: message.unhealthy,
           } as Expression);
           break;
-
-        case "task.updated":
-          if (message.kind === "task.running" || message.kind === "task.planning") {
-            setAvatar("WORKING");
-          }
-          break;
       }
     };
   }, []);
@@ -159,7 +148,6 @@ export function useRealtime() {
       { id: crypto.randomUUID(), role: "owner", text, at: new Date().toISOString() },
     ]);
     setThinking(true);
-    setAvatar("THINKING");
     setAgents([]);
     socket.current.send(
       JSON.stringify({ type: "turn", text, session_id: sessionId.current, device_id: deviceId }),
@@ -170,13 +158,11 @@ export function useRealtime() {
   const interrupt = useCallback(() => {
     socket.current?.send(JSON.stringify({ type: "interrupt" }));
     setThinking(false);
-    setAvatar("IDLE");
   }, []);
 
   return {
     connected,
     messages,
-    avatar,
     expression,
     approvals,
     agents,
