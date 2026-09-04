@@ -35,6 +35,10 @@ browser = ["playwright>=1.47"]
 # WakeWord port is what the code depends on. See packages/voice/thursday_voice/providers.py.
 voice = ["faster-whisper>=1.0", "sounddevice>=0.4"]
 vision = ["opencv-python>=4.10", "mediapipe>=0.10", "onnxruntime>=1.19"]
+# Sprint 83 (EASY INSTALL). What builds `installer/sidecar_main.py` into the single binary
+# Tauri embeds as its sidecar — not something the running app or its tests need, so it is
+# its own extra rather than folded into `dev`.
+installer = ["pyinstaller>=6.10"]
 dev = [
     "pytest>=8.3",
     "pytest-asyncio>=0.24",

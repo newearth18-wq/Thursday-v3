@@ -12,13 +12,22 @@
 // actually working in, and no element inside another window can be — so it is a real
 // window: transparent, undecorated, always on top, and ignoring the mouse entirely, which
 // is the difference between a companion and something in the way.
+//
+// Sprint 83 added the third thing this file owns: starting Thursday's own backend. Every
+// run of this app before it assumed 127.0.0.1:8000 was already answering, started by hand
+// or by `scripts/dev.sh` — a fine assumption for a developer and a false one for whoever
+// double-clicks an installer. `sidecar.rs` is the mechanism; the two decisions of *whether*
+// to spawn one and *when* to stop hiding the window live here, next to everything else this
+// app decides about its own windows.
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+
+mod sidecar;
 
 use tauri::{
     menu::{Menu, MenuItem},
     tray::TrayIconBuilder,
-    AppHandle, Emitter, Manager, WebviewUrl, WebviewWindowBuilder, WindowEvent,
+    AppHandle, Emitter, Manager, RunEvent, WebviewUrl, WebviewWindowBuilder, WindowEvent,
 };
 
 /// The main window's label, and the avatar's. Used rather than typed at each call site so
@@ -39,13 +48,20 @@ fn api_base() -> String {
 /// actually stopped, not merely that something was attempted.
 #[tauri::command]
 async fn emergency_stop() -> Result<serde_json::Value, String> {
-    post(&format!("{}/api/v1/emergency/stop", api_base()), serde_json::json!({"scope": "all"}))
-        .await
+    post(
+        &format!("{}/api/v1/emergency/stop", api_base()),
+        serde_json::json!({"scope": "all"}),
+    )
+    .await
 }
 
 #[tauri::command]
 async fn release_lockdown() -> Result<serde_json::Value, String> {
-    post(&format!("{}/api/v1/emergency/release", api_base()), serde_json::json!({})).await
+    post(
+        &format!("{}/api/v1/emergency/release", api_base()),
+        serde_json::json!({}),
+    )
+    .await
 }
 
 async fn post(url: &str, body: serde_json::Value) -> Result<serde_json::Value, String> {
@@ -74,7 +90,11 @@ fn show_window(app: &AppHandle) {
 /// transparent window could not be created, everything else must still work.
 fn set_avatar(app: &AppHandle, visible: bool) {
     if let Some(window) = app.get_webview_window(AVATAR) {
-        let _ = if visible { window.show() } else { window.hide() };
+        let _ = if visible {
+            window.show()
+        } else {
+            window.hide()
+        };
     }
 }
 
@@ -107,9 +127,34 @@ fn build_avatar(app: &AppHandle) -> tauri::Result<()> {
     Ok(())
 }
 
+/// Bring the backend up, then bring the window up — never the other way round.
+///
+/// `installer/sidecar_main.py` migrates and seeds before it serves, which on a fresh
+/// install is real work, not a formality; showing the window first would put the owner in
+/// front of a Thursday that answers every turn with "reconnecting…" for however long that
+/// takes, which is indistinguishable from broken. A failed or slow start still shows the
+/// window rather than hanging indefinitely — `useRealtime`'s reconnect-with-backoff already
+/// renders that state honestly (Sprint 80), which is a better failure mode than an app that
+/// never opens.
+async fn start_backend_then_show(app: AppHandle) {
+    match sidecar::spawn(&app) {
+        Ok(child) => {
+            if let Some(state) = app.try_state::<sidecar::SidecarState>() {
+                *state.0.lock().unwrap() = Some(child);
+            }
+        }
+        Err(error) => eprintln!("Thursday's backend could not be started: {error}"),
+    }
+    if !sidecar::wait_healthy(&api_base()).await {
+        eprintln!("Thursday's backend did not answer within the startup window");
+    }
+    show_window(&app);
+}
+
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
+        .manage(sidecar::SidecarState::default())
         .invoke_handler(tauri::generate_handler![emergency_stop, release_lockdown])
         .setup(|app| {
             // The avatar is best-effort: a machine whose compositor cannot give us a
@@ -117,6 +162,20 @@ fn main() {
             // robot. Failing to start over a decoration would be the wrong trade.
             if let Err(error) = build_avatar(app.handle()) {
                 eprintln!("the avatar window could not be created: {error}");
+            }
+
+            // The main window ships `"visible": false` (tauri.conf.json) precisely so this
+            // decision — show it now, or hold it for a backend that has not proven itself
+            // yet — is made once, here, rather than the window flashing on and then having
+            // nothing to say.
+            let override_url = std::env::var("THURSDAY_API_URL").ok();
+            if sidecar::should_spawn(cfg!(debug_assertions), override_url.as_deref()) {
+                tauri::async_runtime::spawn(start_backend_then_show(app.handle().clone()));
+            } else {
+                // The documented dev workflow (`scripts/dev.sh`) or an explicit
+                // `THURSDAY_API_URL` already has a backend — show immediately, exactly the
+                // behaviour this app had before Sprint 83.
+                show_window(app.handle());
             }
 
             let show = MenuItem::with_id(app, "show", "Open Thursday", true, None::<&str>)?;
@@ -147,7 +206,14 @@ fn main() {
                             let _ = handle.emit("emergency.stopped", outcome.ok());
                         });
                     }
-                    "quit" => app.exit(0),
+                    "quit" => {
+                        // Called directly here as well as from `RunEvent::Exit` below —
+                        // the same redundant-path posture the emergency stop already uses.
+                        // Quitting is the one moment nothing should be relying on the other
+                        // path having fired first.
+                        sidecar::stop(app);
+                        app.exit(0);
+                    }
                     _ => {}
                 })
                 .build(app)?;
@@ -175,6 +241,14 @@ fn main() {
                 _ => {}
             }
         })
-        .run(tauri::generate_context!())
-        .expect("Thursday failed to start");
+        .build(tauri::generate_context!())
+        .expect("Thursday failed to start")
+        .run(|app, event| {
+            // The general path: OS shutdown, Cmd+Q, anything that is not the tray's own
+            // "quit" item. A leaked child process here is not merely untidy — it is a
+            // second Thursday backend still bound to the port the next launch needs.
+            if let RunEvent::Exit = event {
+                sidecar::stop(app);
+            }
+        });
 }

@@ -63,3 +63,4 @@ done this way?" and have no answer.
 | [0053](0053-identity-permission-and-approval-are-three-systems.md) | Identity, permission and approval are three systems | Merged, they become one number that means neither thing |
 | [0054](0054-a-mood-is-derived-and-it-is-thursdays-own.md) | A mood is derived, and it is Thursday's own | A feeling that can be assigned reads calm while the audit chain is broken — and §55 forbids reading one off a person |
 | [0055](0055-the-avatar-is-a-second-window-not-a-second-opinion.md) | The avatar is a second window, not a second opinion | "Elsewhere" must mean Thursday's window is not in front — never something learned by watching the owner |
+| [0056](0056-a-packaged-thursday-starts-its-own-backend.md) | A packaged Thursday starts its own backend | Every window before this one assumed a human had already started the API by hand |

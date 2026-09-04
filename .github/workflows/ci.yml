@@ -95,11 +95,12 @@ jobs:
   # The desktop shell was never compiled by anything, and it did not compile: the icons
   # `tauri.conf.json` points at were not in the repository, so `tauri::generate_context!`
   # failed on a clean checkout. Nobody noticed because nothing ever tried.
+  # No `defaults.run.working-directory` on this job, unlike `desktop` above — its steps are
+  # a genuine mix of repo-root (the backend, the sidecar) and apps/desktop (the frontend,
+  # the Rust), and a shared default would make each step's actual directory a fact you have
+  # to hold in your head rather than one you can read off the step itself.
   shell:
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: apps/desktop
     steps:
       - uses: actions/checkout@v4
 
@@ -117,9 +118,22 @@ jobs:
       # has to exist before the Rust is compiled — the same order a real build uses. The
       # first version of this job skipped it and failed here, which is the job working.
       - name: Build the frontend the shell embeds
+        working-directory: apps/desktop
         run: |
           npm ci --no-audit --no-fund
           npm run build
+
+      - uses: astral-sh/setup-uv@v5
+      - name: Set up Python
+        run: uv python install 3.12
+
+      # Sprint 83: once `bundle.externalBin` is set, `tauri-build`'s build script copies
+      # whatever it names on *every* `cargo build` — not only `tauri build` — so a missing
+      # sidecar now fails compilation here, the same way the missing icons failed it before.
+      - name: Install the backend, to build its sidecar from
+        run: |
+          uv venv --python 3.12
+          uv pip install -e ".[installer]"
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -129,8 +143,72 @@ jobs:
         with:
           workspaces: apps/desktop/src-tauri
 
+      - name: Build the sidecar the shell embeds
+        run: |
+          source .venv/bin/activate
+          bash scripts/build_sidecar.sh
+
       # check, not build: a full bundle needs signing identities and takes minutes. What
-      # matters here is that the Rust, the config and the frontend still agree.
+      # matters here is that the Rust, the config, the frontend and the sidecar all agree.
+      # `cargo test` alongside it: `sidecar::should_spawn`'s three unit tests, cheap enough
+      # to run beside a check that was already compiling everything.
       - name: Check
         working-directory: apps/desktop/src-tauri
-        run: cargo clippy -- -D warnings
+        run: |
+          cargo fmt --check
+          cargo clippy -- -D warnings
+          cargo test
+
+  # What Sprint 83 actually ships: the packaged .exe an owner double-clicks, built and
+  # bundled on a real Windows runner because PyInstaller does not cross-compile — this is
+  # the one job that can prove `bundle.externalBin` resolves and a real NSIS installer comes
+  # out the other end.
+  windows-installer:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+      - name: Set up Python
+        run: uv python install 3.12
+
+      - name: Install the backend, to build its sidecar from
+        run: |
+          uv venv --python 3.12
+          uv pip install -e ".[installer]"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Build the frontend
+        working-directory: apps/desktop
+        run: |
+          npm ci --no-audit --no-fund
+          npm run build
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: apps/desktop/src-tauri
+
+      # PyInstaller does not cross-compile, so this is the one job that can build it.
+      - name: Build the sidecar
+        shell: bash
+        run: |
+          source .venv/Scripts/activate
+          bash scripts/build_sidecar.sh
+
+      # NSIS is what a normal user runs: one .exe, no separate Python or Node install step,
+      # no terminal — the whole claim EASY INSTALL makes, produced by CI rather than
+      # asserted by a README.
+      - name: Build the installer
+        working-directory: apps/desktop
+        run: npx tauri build --bundles nsis
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: thursday-windows-installer
+          path: apps/desktop/src-tauri/target/release/bundle/nsis/*.exe
+          if-no-files-found: error

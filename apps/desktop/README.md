@@ -107,8 +107,10 @@ src/
     PermissionPanel.tsx    PART 70 — approval modes, standing grants, autonomy
 src-tauri/
   src/main.rs              both windows, the tray, and the emergency stop
-  tauri.conf.json          the main window, CSP, and macOSPrivateApi (transparency)
+  src/sidecar.rs           Sprint 83 — spawn the bundled backend, poll it healthy, stop it
+  tauri.conf.json          the main window (ships hidden), CSP, externalBin, macOSPrivateApi
   icons/                   generated with `npx tauri icon`; the build needs them
+  binaries/                gitignored — built per-platform by scripts/build_sidecar.sh
 ```
 
 ## Wiring
@@ -128,7 +130,7 @@ resolve to the bundle. Override with `VITE_THURSDAY_API` or `THURSDAY_API_URL`.
 
 ## Running it
 
-The API must be up first — this app renders it, it does not host it.
+In development, the API must be up first — this app renders it, it does not host it.
 
 ```bash
 # terminal 1
@@ -141,12 +143,21 @@ npm run dev          # browser, against the dev proxy on :1420
 npm run tauri dev    # the real window
 ```
 
+A **packaged** build is the opposite: it starts its own backend and shows the window only
+once that backend answers `/api/v1/health` (Sprint 83, ADR 0056) — see
+[`installer/`](../../installer/) at the repo root for the sidecar that makes that true, and
+`src-tauri/src/sidecar.rs` for the Rust half that spawns and health-polls it.
+`sidecar::should_spawn` is what tells the two modes apart (a dev build, or `THURSDAY_API_URL`
+being set), so nothing above changes: `tauri dev` behaves exactly as it always has.
+
 `npm run typecheck`, `npm run test` and `npm run build` are what CI runs, plus
-`cargo clippy -- -D warnings` in `src-tauri`. All four are worth running before a commit:
-`tsc` and the bundler resolve paths independently, so one can pass while the other fails;
-the tests are where the decisions about what a person is shown are actually checked; and
-until Sprint 82 nothing compiled the Rust, which is how the shell came to reference icons
-that were not in the repository.
+`cargo fmt --check` and `cargo clippy -- -D warnings` in `src-tauri`. All five are worth
+running before a commit: `tsc` and the bundler resolve paths independently, so one can pass
+while the other fails; the tests are where the decisions about what a person is shown are
+actually checked; and until Sprint 82 nothing compiled the Rust, which is how the shell came
+to reference icons that were not in the repository. Once `bundle.externalBin` was set
+(Sprint 83), even `cargo check` needs the sidecar built first —
+`bash scripts/build_sidecar.sh` from the repo root, or see `installer/README.md`.
 
 The avatar can be worked on in a browser at `http://localhost:1420/#avatar`. In the packaged
 app it is opened by Tauri and marked with an injected flag instead, so nothing depends on a

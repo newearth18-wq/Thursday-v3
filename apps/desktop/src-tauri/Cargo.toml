@@ -21,6 +21,10 @@ serde_json = "1"
 # Used only by the tray's emergency stop, which must not depend on the webview being
 # responsive to reach the API.
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+# `tauri::async_runtime` re-exports tokio's channels but not its timer — Cargo does not
+# make a transitive dependency's API nameable, so the sidecar's health-poll interval needs
+# this listed directly, even though the same tokio is already resolved via tauri itself.
+tokio = { version = "1", features = ["time"] }
 
 [features]
 # Tauri strips the console window on Windows release builds.
