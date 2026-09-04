@@ -12,6 +12,7 @@ from thursday_core import catalogue, practice
 from thursday_core import checkup as checkup_module
 from thursday_core.backup import BackupError
 from thursday_core.container import Container
+from thursday_core.expression import express
 from thursday_security.policy import HARD_BLOCKED
 from thursday_shared.enums import (
     AutonomyLevel,
@@ -247,6 +248,22 @@ async def world_state(c: Container = Depends(get_container)) -> dict:
 @router.get("/world")
 async def world(c: Container = Depends(get_container)) -> dict:
     return c.world.snapshot().model_dump(mode="json")
+
+
+@router.get("/expression")
+async def expression(c: Container = Depends(get_container)) -> dict:
+    """Sprint 80. What Thursday is doing and how it is going, derived.
+
+    The socket pushes the same shape the moment anything changes; this exists for the first
+    paint and for a client that has been asleep. Both call `express`, so there is one place
+    that decides what Thursday is feeling and no way for the two to disagree.
+    """
+    checks = await c.health()
+    return express(
+        c.world.snapshot(),
+        unhealthy=sum(1 for check in checks if not check["ok"]),
+        lockdown=bool(c.permissions.lockdown),
+    ).payload()
 
 
 @router.get("/autonomy")

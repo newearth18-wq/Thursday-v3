@@ -89,17 +89,38 @@ class WorldStateProjector:
                 self.world.update(active_task_id=None, last_referenced_task_id=event.task_id)
 
     async def on_agent(self, event: Event) -> None:
+        """Keep `running_agents` to agents that are running, and remember how work ended.
+
+        It used to keep finished agents in the dict with a "completed" or "failed" value,
+        which made the field's name untrue and — once Sprint 80 derived a mood from it —
+        would have left Thursday visibly sorry about a failure from an hour ago, forever.
+        So an agent leaves the dict when it stops, and the *time* it stopped is recorded
+        instead, which is what lets the feeling fade.
+        """
         agent = str(event.payload.get("agent", ""))
         if not agent:
             return
-        running = dict(self.world.snapshot().running_agents)
+        snapshot = self.world.snapshot()
+        running = dict(snapshot.running_agents)
+        fields: dict[str, object] = {}
+
         if event.kind == "agent.started":
             running[agent] = "working"
-        elif event.kind == "agent.completed":
-            running[agent] = "completed"
-        elif event.kind == "agent.failed":
-            running[agent] = "failed"
-        self.world.update(running_agents=running)
+            # The allowlisted phrase, never the name. `plain.activity` already produced it
+            # at the emitting end (Sprint 65); reading anything else here would be the leak.
+            fields["current_activity"] = str(event.payload.get("activity", ""))
+        else:
+            running.pop(agent, None)
+            if event.kind == "agent.completed":
+                fields["last_success_at"] = datetime.now(UTC)
+            elif event.kind == "agent.failed":
+                fields["last_failure_at"] = datetime.now(UTC)
+            if not running:
+                # Nothing is running, so there is nothing being done. A leftover phrase
+                # under a finished job reads as work still in progress.
+                fields["current_activity"] = ""
+
+        self.world.update(running_agents=running, **fields)
 
     async def on_approval(self, event: Event) -> None:
         snap = self.world.snapshot()

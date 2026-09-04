@@ -1,9 +1,32 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { WS_ORIGIN } from "@/lib/origin";
-import type { AgentStatus, Approval, AvatarState, Message, RealtimeMessage } from "@/lib/types";
+import type {
+  AgentStatus,
+  Approval,
+  AvatarState,
+  Expression,
+  Message,
+  RealtimeMessage,
+} from "@/lib/types";
 
 const WS_URL = `${WS_ORIGIN}/api/v1/realtime`;
 const RECONNECT_MAX_MS = 15_000;
+
+/**
+ * What to show before the server has said anything.
+ *
+ * Deliberately the quietest state rather than a cheerful one: until Thursday has reported
+ * its condition, the honest thing to draw is "nothing is happening", not "all is well".
+ */
+export const UNKNOWN: Expression = {
+  mood: "CALM",
+  activity: "",
+  because: "",
+  intensity: 0.15,
+  running: 0,
+  waiting: 0,
+  unhealthy: 0,
+};
 
 /**
  * The single connection to Thursday.
@@ -18,6 +41,7 @@ export function useRealtime() {
   const [approvals, setApprovals] = useState<Approval[]>([]);
   const [agents, setAgents] = useState<AgentStatus[]>([]);
   const [thinking, setThinking] = useState(false);
+  const [expression, setExpression] = useState<Expression>(UNKNOWN);
 
   const socket = useRef<WebSocket | null>(null);
   const backoff = useRef(1000);
@@ -34,6 +58,9 @@ export function useRealtime() {
 
     ws.onclose = () => {
       setConnected(false);
+      // A mood outlives its connection otherwise: the last thing the socket said would
+      // keep glowing on the screen long after Thursday stopped being able to say it.
+      setExpression(UNKNOWN);
       setTimeout(connect, backoff.current);
       backoff.current = Math.min(backoff.current * 2, RECONNECT_MAX_MS);
     };
@@ -84,16 +111,32 @@ export function useRealtime() {
           break;
 
         case "agent.updated": {
-          const payload = message.payload as { agent?: string; ok?: boolean };
+          const payload = message.payload as { agent?: string; activity?: string; ok?: boolean };
           if (!payload?.agent) break;
           setAgents((prior) => {
             const state: AgentStatus["state"] =
               message.kind === "agent.started" ? "working" : payload.ok ? "completed" : "failed";
             const rest = prior.filter((a) => a.name !== payload.agent);
-            return [...rest, { name: payload.agent!, state }];
+            // `activity` is what gets drawn; `name` only tells two jobs apart. Both are
+            // in the payload for exactly that reason (see `BaseAgent.run`).
+            return [...rest, { name: payload.agent!, activity: payload.activity ?? "", state }];
           });
           break;
         }
+
+        case "expression":
+          // Taken whole from the server. The client has no opinion about how Thursday
+          // feels, which is what stops the HUD and the avatar drifting apart.
+          setExpression({
+            mood: message.mood,
+            activity: message.activity,
+            because: message.because,
+            intensity: message.intensity,
+            running: message.running,
+            waiting: message.waiting,
+            unhealthy: message.unhealthy,
+          } as Expression);
+          break;
 
         case "task.updated":
           if (message.kind === "task.running" || message.kind === "task.planning") {
@@ -130,5 +173,16 @@ export function useRealtime() {
     setAvatar("IDLE");
   }, []);
 
-  return { connected, messages, avatar, approvals, agents, thinking, send, interrupt, setApprovals };
+  return {
+    connected,
+    messages,
+    avatar,
+    expression,
+    approvals,
+    agents,
+    thinking,
+    send,
+    interrupt,
+    setApprovals,
+  };
 }

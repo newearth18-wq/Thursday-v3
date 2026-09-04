@@ -458,6 +458,15 @@ class WorldStateSnapshot(Base):
     last_referenced_task_id: UUID | None = None
     people_present: int = 1
     lockdown: bool = False
+    #: Sprint 80. What is happening now, as `plain.activity` already phrases it for a screen.
+    #: The allowlisted phrase and not the agent name: the projector reads both from the same
+    #: event and only this one is ever rendered.
+    current_activity: str = ""
+    #: When work last finished, either way. Two timestamps rather than a "last outcome"
+    #: string because a mood built on the outcome alone never stops being sorry — these let
+    #: a failure fade instead of becoming Thursday's permanent condition.
+    last_failure_at: datetime | None = None
+    last_success_at: datetime | None = None
     updated_at: datetime = Field(default_factory=utcnow)
 
 

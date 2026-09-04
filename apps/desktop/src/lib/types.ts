@@ -69,8 +69,40 @@ export interface MemoryRecord {
 }
 
 export interface AgentStatus {
+  /**
+   * Internal, and never rendered. It is the key world state uses (see
+   * `WorldStateProjector.on_agent`), so it is what tells two concurrent jobs apart —
+   * but Sprint 65's rule is that a class name never reaches a screen, and `activity`
+   * is the field that does.
+   */
   name: string;
+  /** The allowlisted phrase from `plain.activity`. This is what a person reads. */
+  activity: string;
   state: "working" | "completed" | "failed" | "waiting";
+}
+
+/** Sprint 80. Thursday's own condition — never a reading of the person (§55). */
+export type Mood =
+  | "STOPPED" | "FAILING" | "CONCERNED" | "WAITING"
+  | "UNSURE" | "WORKING" | "PLEASED" | "ATTENTIVE" | "CALM";
+
+/**
+ * What Thursday is doing and how it is going, derived on the server.
+ *
+ * The client never computes a mood of its own. One derivation means the HUD and the
+ * avatar cannot disagree about how Thursday feels, and it means the rule that a mood
+ * cannot be asserted holds on this side of the socket too — there is nothing here to set.
+ */
+export interface Expression {
+  mood: Mood;
+  /** "" when nothing is running. Never an agent name. */
+  activity: string;
+  because: string;
+  /** 0–1. How much motion to draw with. */
+  intensity: number;
+  running: number;
+  waiting: number;
+  unhealthy: number;
 }
 
 export interface RealtimeMessage {

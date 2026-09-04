@@ -83,5 +83,11 @@ jobs:
       - name: Typecheck
         run: npm run typecheck
 
+      # What a person is shown is decided in these files, so the decisions are tested
+      # rather than eyeballed: which face goes with which state, and whether an internal
+      # name can reach the screen.
+      - name: Test
+        run: npm run test
+
       - name: Build
         run: npm run build
