@@ -177,8 +177,41 @@ export function beat(previous: number, dt = 1): number {
 export const BLINK_EVERY = 4.2;
 export const BLINK_FOR = 0.13;
 
+/**
+ * Whether the eyes are shut this instant.
+ *
+ * The blink sits at the *end* of each cycle, not the start, and that is a correctness
+ * requirement rather than a preference. `Avatar.tsx` stops advancing the clock entirely
+ * when the owner has asked for reduced motion, so zero is not merely the first frame — it
+ * is the resting value the robot is drawn at forever on those machines. The first version
+ * blinked at `clock % BLINK_EVERY < BLINK_FOR`, which is true at zero, so
+ * `prefers-reduced-motion` did not calm the robot down: it blinded it, permanently, and
+ * flashed a shut-eyed robot on every mount besides.
+ *
+ * **A frozen animation clock has to render the pose at rest.** `Robot.test.tsx` asserts it
+ * for this and for the visor, so the next thing driven from `clock` has to answer for its
+ * zero too.
+ */
 export function blinking(clock: number): boolean {
-  return clock % BLINK_EVERY < BLINK_FOR;
+  return clock % BLINK_EVERY >= BLINK_EVERY - BLINK_FOR;
+}
+
+/** Every posture, as data — so a runtime value can be checked against what can be drawn. */
+export const POSTURES = Object.keys(POSE) as Posture[];
+
+/**
+ * A posture this client can actually draw, or the quietest one.
+ *
+ * The server is not always this build. ADR 0057 makes a phone a screen onto a Thursday
+ * running somewhere else, which is precisely the arrangement where the two are different
+ * versions — and `POSE[posture]` on an unrecognised string is `undefined`, whose `.resting`
+ * throws and takes the whole window with it. So the tables are the allowlist, checked once
+ * here, rather than nine call sites each hoping.
+ */
+export function knownPosture(value: unknown): Posture {
+  // `Object.hasOwn` rather than `in`, for the reason spelled out on `knownMood`: `in`
+  // walks the prototype chain, so `"__proto__"` and `"constructor"` both pass it.
+  return typeof value === "string" && Object.hasOwn(POSE, value) ? (value as Posture) : "STILL";
 }
 
 /** 0–1, the visor's light band while speaking. §14 — a pulse, never a mouth. */

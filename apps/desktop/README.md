@@ -109,6 +109,17 @@ the local backend answer before the window is even shown.
   simulation is a plain function and `graph.test.ts` runs it two thousand frames.
 - **The avatar appears because Thursday is not in front, not because of anything it
   learned about you.** Window focus, and nothing else (ADR 0055).
+- **The client renders only what it can draw.** A mood or posture this build does not
+  recognise is checked against the tables that define what it can paint, once, in
+  `readExpression` — not cast and hoped for. `Record` types protect the build being
+  compiled; the build that meets a newer server is the one already on somebody's phone
+  (ADR 0059). The fallback is CONCERNED rather than CALM: a client too old to read its
+  server really is a part of Thursday that is not working.
+- **Less motion means a still robot, not a different one.** `Avatar.tsx` freezes the clock
+  under `prefers-reduced-motion`, so `clock: 0` is the pose those owners see for the whole
+  session — and the blink used to be *true* at zero, which blinded the robot rather than
+  calming it. Anything new driven from that clock has to answer for its own zero;
+  `Robot.test.tsx` asks.
 - **Nothing here asks what platform it is running on.** The connect screen is reached by
   counting real connection failures, the same way on a phone or a desktop alike (ADR
   0057) — never by sniffing the OS to decide whether to show it.

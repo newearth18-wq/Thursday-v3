@@ -6,6 +6,7 @@ import {
   EYES,
   MARGIN,
   POSE,
+  POSTURES,
   RUN_ABOVE,
   SPEED,
   START,
@@ -13,6 +14,7 @@ import {
   blinking,
   bubbleAt,
   gaitFor,
+  knownPosture,
   stride,
   visorPulse,
   type Gait,
@@ -32,7 +34,7 @@ const MOODS: Mood[] = [
   "CALM",
 ];
 
-const POSTURES: Posture[] = [
+const EXPECTED_POSTURES: Posture[] = [
   "SPEAKING",
   "THINKING",
   "LISTENING",
@@ -147,7 +149,7 @@ describe("walking", () => {
 
 describe("what the body does (Sprint 85)", () => {
   it("has a pose for every posture the server can send", () => {
-    expect(Object.keys(POSE).sort()).toEqual([...POSTURES].sort());
+    expect(Object.keys(POSE).sort()).toEqual([...EXPECTED_POSTURES].sort());
   });
 
   it("stops wandering for every posture that faces the owner", () => {
@@ -202,9 +204,18 @@ describe("the clock that runs when the body does not", () => {
     }
     expect(shut).toBeGreaterThan(0);
     expect(shut / (open + shut)).toBeLessThan(0.1);
-    expect(blinking(0)).toBe(true);
-    expect(blinking(BLINK_FOR + 0.01)).toBe(false);
-    expect(blinking(BLINK_EVERY)).toBe(true);
+    expect(blinking(BLINK_EVERY - BLINK_FOR / 2)).toBe(true);
+    expect(blinking(BLINK_EVERY * 2 - BLINK_FOR / 2)).toBe(true);
+  });
+
+  it("has its eyes OPEN at the resting value of the clock", () => {
+    // Not a detail. `Avatar.tsx` stops advancing the clock entirely under
+    // `prefers-reduced-motion`, so zero is not the first frame — it is the value the robot
+    // is drawn at forever on those machines. The first version blinked at
+    // `clock % BLINK_EVERY < BLINK_FOR`, true at zero, so asking for less motion did not
+    // calm the robot down: it blinded it. Any future thing driven from `clock` has to
+    // answer for its own zero the same way.
+    expect(blinking(0)).toBe(false);
   });
 
   it("clamps a long gap so a laptop waking up does not fire a hundred blinks", () => {
@@ -254,5 +265,27 @@ describe("the bubble stays where it can be read", () => {
     const parked = stride({ x: 0, facing: -1, phase: 0 }, "WALK", WIDTH);
     expect(parked.x).toBe(MARGIN);
     expect(bubbleAt(parked.x, WIDTH)).toBeGreaterThan(parked.x);
+  });
+});
+
+describe("a posture this build has never heard of", () => {
+  it("does not reach a table lookup that would throw", () => {
+    // `POSE[posture].resting` is the first thing `gaitFor` touches, so an unrecognised
+    // posture crashes before a single pixel is drawn.
+    for (const rubbish of ["DANCING", "", "still", "__proto__", "toString"]) {
+      const posture = knownPosture(rubbish);
+      expect(POSTURES, rubbish).toContain(posture);
+      expect(() => gaitFor("CALM", 0.5, posture), rubbish).not.toThrow();
+    }
+    expect(knownPosture(null)).toBe("STILL");
+    expect(knownPosture(42)).toBe("STILL");
+  });
+
+  it("passes every posture it does know through untouched", () => {
+    for (const posture of POSTURES) expect(knownPosture(posture)).toBe(posture);
+  });
+
+  it("agrees with the table it guards", () => {
+    expect([...POSTURES].sort()).toEqual(Object.keys(POSE).sort());
   });
 });

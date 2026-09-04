@@ -26,6 +26,14 @@ class InvalidTransition(ThursdayError):
     code = "invalid_task_transition"
 
 
+#: `list` is a method on the class below, and a name in a class body shadows the builtin
+#: for every annotation in that body — so `-> list[X]` there resolves to the *method*, and
+#: the type checker gives up on the whole signature rather than complaining loudly. These
+#: aliases are resolved at module scope, where nothing shadows anything (Sprint 86 audit).
+Rows = list[dict]
+Tasks = list[Task]
+
+
 class TaskManager:
     """Owns task lifecycle and the (in-memory here, Postgres in production) task table."""
 
@@ -193,10 +201,10 @@ class TaskManager:
 
     # ------------------------------------------------------------------ backup (Sprint 47)
 
-    def export_state(self) -> list[dict]:
+    def export_state(self) -> Rows:
         return [task.model_dump(mode="json") for task in self._tasks.values()]
 
-    def import_state(self, rows: list[dict], *, replace: bool = True) -> int:
+    def import_state(self, rows: Rows, *, replace: bool = True) -> int:
         """Restore tasks exactly as they were, terminal states included.
 
         No transition validation on the way in. These states were already reached legally,

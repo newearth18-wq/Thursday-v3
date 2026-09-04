@@ -181,8 +181,19 @@ describe("the body language the addendum asks for", () => {
     // §8. `phase` is zero throughout: if anything here moved because of the step cycle, the
     // robot would be still and this would pass for the wrong reason.
     const open = draw({ posture: "STILL", clock: 1.0 }).container.innerHTML;
-    const shut = draw({ posture: "STILL", clock: BLINK_EVERY }).container.innerHTML;
+    const shut = draw({ posture: "STILL", clock: BLINK_EVERY - 0.05 }).container.innerHTML;
     expect(open).not.toBe(shut);
+  });
+
+  it("is drawn awake when the clock is frozen for reduced motion", () => {
+    // `Avatar.tsx` never advances `clock` when the owner has asked for less motion, so the
+    // robot they see is the one at `clock: 0` — for the entire session. It used to be drawn
+    // with its eyes shut, which is not less motion, it is a different robot: asking for a
+    // calmer animation blinded it permanently and there was no way back.
+    const resting = draw({ posture: "STILL", clock: 0 }).container;
+    // SHUT is two straight strokes; every other eye shape draws ellipses.
+    expect(resting.innerHTML).not.toContain('d="M34 52 h9"');
+    expect(resting.querySelectorAll("ellipse").length).toBeGreaterThan(1);
   });
 
   it("does not blink while asleep", () => {

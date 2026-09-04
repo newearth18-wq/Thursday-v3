@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { WS_ORIGIN } from "@/lib/origin";
+import { knownPosture } from "@/lib/avatar";
+import { knownMood } from "@/lib/mood";
 import type {
   AgentStatus,
   Approval,
   Expression,
   Message,
-  Mood,
-  Posture,
   RealtimeMessage,
 } from "@/lib/types";
 
@@ -51,8 +51,10 @@ export const UNKNOWN: Expression = {
  */
 function readExpression(message: RealtimeMessage): Expression {
   return {
-    mood: (message.mood as Mood) ?? UNKNOWN.mood,
-    posture: (message.posture as Posture) ?? UNKNOWN.posture,
+    // Checked against what this build can draw, not cast to it. A cast is a promise the
+    // wire cannot keep — see `knownMood` for what an unrecognised one used to do.
+    mood: knownMood(message.mood),
+    posture: knownPosture(message.posture),
     listening: message.listening === true,
     activity: typeof message.activity === "string" ? message.activity : "",
     because: typeof message.because === "string" ? message.because : "",

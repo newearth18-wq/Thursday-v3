@@ -102,7 +102,6 @@ class VoiceService:
 
         self.machine = VoiceStateMachine(on_change=self._on_state_change)
         self.bargein = BargeInController(tts=tts)
-        self._state_events: list[tuple[VoiceState, VoiceState]] = []
         #: Strong references to in-flight publishes; without these the garbage
         #: collector can cancel a task mid-flight and the event silently vanishes.
         self._pending: set[asyncio.Task] = set()
@@ -119,7 +118,6 @@ class VoiceService:
         return self.machine.listening
 
     def _on_state_change(self, previous: VoiceState, current: VoiceState) -> None:
-        self._state_events.append((previous, current))
         log.debug("voice_state", **{"from": str(previous), "to": str(current)})
         if self._bus is None:
             return

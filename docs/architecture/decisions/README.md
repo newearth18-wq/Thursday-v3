@@ -66,3 +66,4 @@ done this way?" and have no answer.
 | [0056](0056-a-packaged-thursday-starts-its-own-backend.md) | A packaged Thursday starts its own backend | Every window before this one assumed a human had already started the API by hand |
 | [0057](0057-a-phone-is-a-screen-not-a-machine-thursday-runs-on.md) | A phone is a screen, not a machine Thursday runs on | Android sandboxing aside, a backend running on the phone itself would be a second, disconnected Thursday |
 | [0058](0058-what-thursday-is-doing-and-how-it-is-going-are-two-questions.md) | What Thursday is doing and how it is going are two questions | On one priority table a stale failure outranks a live microphone, and §10 forbids that |
+| [0059](0059-a-client-may-not-assume-it-understands-its-server.md) | A client may not assume it understands its server | A `Record` type protects the build being compiled, never the one already on somebody's phone |
