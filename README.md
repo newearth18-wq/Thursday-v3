@@ -20,7 +20,7 @@ ready, what is not, and what closing each gap would take is in
 [docs/23-release-readiness.md](docs/23-release-readiness.md).
 
 **Phase 1 is implemented and runnable**: the vertical slice from
-[docs/15-vertical-slice.md](docs/15-vertical-slice.md) works end to end, with TESTCOUNT tests that
+[docs/15-vertical-slice.md](docs/15-vertical-slice.md) works end to end, with 1,980 tests that
 need no database, no network and no model credentials — plus 62 in the desktop app, which
 is where the decisions about what a person is actually shown now live.
 
@@ -134,7 +134,7 @@ Paths below are relative to `packages/<name>/thursday_<name>/`.
 | 6 | **Everything is audited and, where possible, reversible.** | `security/audit.py`, `core/undo.py` |
 | 7 | **Providers are swappable.** Every port has a real adapter and an offline one. | `shared/interfaces.py`, `core/container.py` |
 | 8 | **Thursday proposes; the owner decides.** Learned routines arrive disabled; risky skills cannot self-activate. | `automation/routines.py`, `automation/skills/registry.py` |
-| 9 | **An edit never writes over its input.** A render is reported from the finished file, never from an exit code. | `media/ffmpeg.py`, `media/quality.py`, [ADR 0048](docs/architecture/decisions/0048-an-edit-never-writes-over-its-input.md) |
+| 9 | **An edit never writes over its input.** A render is reported from the finished file, never from an exit code. | `media/ffmpeg.py`, `media/quality.py`, [ADR 0060](docs/architecture/decisions/0060-an-edit-never-writes-over-its-input.md) |
 | 10 | **Untrusted content is data, never instruction.** A page or a file cannot widen what Thursday may do. | `agents/browser.py`, [ADR 0010](docs/architecture/decisions/0010-untrusted-content-is-data.md) |
 
 Rule 1, concretely:
@@ -320,7 +320,7 @@ each choice cost:
 - Real calendar and mail accounts. `CalendarProvider` and `MessageProvider` are ports with
   local adapters — real behaviour, nothing leaving the machine, and *not* the owner's actual
   calendar or inbox. A Google or Outlook adapter is a new class behind the same protocol.
-- Media *generation* of any kind. Editing is built (ADR 0048) and needs a local ffmpeg,
+- Media *generation* of any kind. Editing is built (ADR 0060) and needs a local ffmpeg,
   which the container discovers at startup — a machine without one gets an editor that
   refuses every operation with the remedy in the sentence, and `health()` says so. What
   remains unbuilt is everything that makes a picture rather than moving one: no
@@ -349,7 +349,7 @@ the verification loop, the audit chain and the device round-trip are all real.
 
 ```bash
 ./scripts/check.sh           # everything CI runs: lint, format, types, tests, migrations
-pytest                       # TESTCOUNT tests, no infrastructure
+pytest                       # 1,980 tests, no infrastructure
 ruff check . && ruff format .
 mypy packages services
 alembic upgrade head && alembic revision --autogenerate -m "what changed"

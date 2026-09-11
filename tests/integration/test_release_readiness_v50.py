@@ -166,7 +166,20 @@ def test_the_readme_states_one_test_count_and_the_right_number_of_adrs():
     # hand-written list ran out at thirty-six and then matched "thirty" inside "thirty-seven".
     words = {
         f"{tens}{'-' + unit if unit else ''}": base + n
-        for tens, base in (("twenty", 20), ("thirty", 30), ("forty", 40), ("fifty", 50))
+        for tens, base in (
+            ("twenty", 20),
+            ("thirty", 30),
+            ("forty", 40),
+            ("fifty", 50),
+            # The generator stopped at fifty-nine and the sixtieth ADR made `stated` None,
+            # so this failed with "README says None ADRs" rather than with a wrong number.
+            # Extended well past the count rather than by one, which is the same mistake in
+            # a smaller size — the previous hand-written list ran out at thirty-six.
+            ("sixty", 60),
+            ("seventy", 70),
+            ("eighty", 80),
+            ("ninety", 90),
+        )
         for n, unit in enumerate(
             ["", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine"]
         )
@@ -174,6 +187,10 @@ def test_the_readme_states_one_test_count_and_the_right_number_of_adrs():
     sentence = re.search(r"and ([a-z\-]+)\s*\n?\[architecture decisions\]", readme)
     assert sentence, "the README no longer states an ADR count where this test looks for it"
     stated = words.get(sentence.group(1))
+    assert stated is not None, (
+        f"the README says {sentence.group(1)!r} ADRs and this test cannot read that as a "
+        "number — extend `words` rather than assuming the count is wrong"
+    )
 
     actual = len(list(DECISIONS.glob("0*.md")))
     assert stated == actual, f"README says {stated} ADRs; there are {actual}"

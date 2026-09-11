@@ -190,7 +190,6 @@ class Container:
     #: state the UI can show rather than an exception from inside a render (ADR 0060).
     editor: Any = None
 
-
     #: Whether state actually outlives this process (Sprint 51). False is a supported
     #: configuration and not a degraded one — but it must never be a silent assumption.
     persistent: bool = False
