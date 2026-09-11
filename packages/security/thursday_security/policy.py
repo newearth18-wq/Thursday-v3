@@ -112,6 +112,21 @@ _DEFAULTS: tuple[ActionPolicy, ...] = (
     ActionPolicy(
         "system.process.stop", PermissionLevel.MODIFY, PolicyDecision.ASK_ONCE, RiskLevel.MEDIUM
     ),
+    ActionPolicy(
+        # Stricter than `stop`, and deliberately: stopping a process ends something the owner
+        # can see, while starting one runs code they have not read. It already resolved this
+        # way through the `system` namespace default — this states it, so a change to that
+        # default cannot quietly turn "always ask before running something" into ASK_ONCE.
+        #
+        # Found by Sprint 61 tightening the release gate: the old check exempted every
+        # `system.*` action from "does this have a policy of its own", so this one was never
+        # asked about.
+        "system.process.start",
+        PermissionLevel.MODIFY,
+        PolicyDecision.ASK_ALWAYS,
+        RiskLevel.HIGH,
+        False,
+    ),
     # ---------------------------------------------------------------- asked every time
     ActionPolicy(
         "file.delete", PermissionLevel.MODIFY, PolicyDecision.ASK_ALWAYS, RiskLevel.HIGH, False
@@ -124,6 +139,19 @@ _DEFAULTS: tuple[ActionPolicy, ...] = (
     ),
     ActionPolicy(
         "script.run", PermissionLevel.MODIFY, PolicyDecision.ASK_ALWAYS, RiskLevel.HIGH, False
+    ),
+    ActionPolicy(
+        # ADDENDUM §20 says "request approval/policy check" before waking, and this is that
+        # check. ASK_ALWAYS to begin with, for the reason §102 and §104 give for their own
+        # categories: a new capability with a physical consequence starts by asking, and the
+        # owner lowers it once they know what it does. Waking a machine draws power, spins
+        # fans and may be happening at three in the morning beside somebody asleep — none of
+        # which Thursday can see, which is exactly why it is not Thursday's call.
+        "device.wake",
+        PermissionLevel.SYSTEM,
+        PolicyDecision.ASK_ALWAYS,
+        RiskLevel.MEDIUM,
+        False,
     ),
     # ---------------------------------------------------------------- level 3: external
     ActionPolicy(

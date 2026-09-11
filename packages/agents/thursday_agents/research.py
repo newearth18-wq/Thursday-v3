@@ -27,6 +27,10 @@ class ResearchAgent(BaseAgent):
     spec = AgentSpec(
         name="research",
         description="Finds and cross-checks information from memory, the vault and the web.",
+        user_description="ค้นข้อมูลจากความจำ บันทึกของคุณ และเว็บ แล้วตรวจทานให้ก่อนตอบ",
+        user_examples=["หาข้อมูลเรื่องนี้ให้หน่อย", "เรื่องนี้จริงไหม"],
+        safety_notes="งานนี้อาจต้องเปิดเว็บ ผมจะไม่ส่งข้อมูลที่เป็นความลับออกไป",
+        requirements=["research"],
         capabilities=["research", "search", "recall", "fact_check", "summarize"],
         tools=["memory.search", "obsidian.search", "web.search"],
         agent_type="research",

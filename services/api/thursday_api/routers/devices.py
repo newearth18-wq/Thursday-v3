@@ -112,6 +112,18 @@ async def list_compute(c: Container = Depends(get_container)) -> dict:
     return {"devices": devices}
 
 
+@router.get("/compute/benchmarks")
+async def list_benchmarks(c: Container = Depends(get_container)) -> dict:
+    """What real calls have measured about each model (ADDENDUM §25, §26).
+
+    Measured from work Thursday actually did, not from a benchmark prompt nobody asked for.
+    A model with too few samples is reported as `measured: false` rather than given a
+    provisional figure — the router cannot tell a guess from a measurement, so it is not
+    handed one.
+    """
+    return c.benchmarks.report()
+
+
 @router.get("/compute/route")
 async def explain_route(
     capability: str = "ai.llm",
@@ -360,6 +372,97 @@ async def rotate_credential(
         "device_id": str(device_id),
         "fingerprint": credential.fingerprint,
         "rotated_at": credential.rotated_at.isoformat() if credential.rotated_at else None,
+    }
+
+
+@router.put("/devices/{device_id}/wake-on-lan")
+async def set_wake_on_lan(
+    device_id: UUID, mac: str, enabled: bool = False, c: Container = Depends(get_container)
+) -> dict:
+    """Record where a machine is, so it can be woken (ADDENDUM §20).
+
+    Set by the owner, never learned from the network. Thursday sniffing MAC addresses would
+    be the same reconnaissance ADR 0044 refused for inference endpoints, and a magic packet
+    sent to an address Thursday guessed is a packet aimed at somebody else's machine.
+
+    `enabled` defaults to False: recording an address and consenting to use it are separate
+    decisions, and the second one should be made deliberately rather than as a side effect
+    of the first.
+    """
+    from thursday_devices.wake import InvalidMac, WakeRecord, magic_packet
+
+    try:
+        magic_packet(mac)
+    except InvalidMac as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    record = WakeRecord(device_id=device_id, mac=mac.strip(), enabled=enabled)
+    c.wake_records[device_id] = record
+    return record.row()
+
+
+@router.post("/devices/{device_id}/wake")
+async def wake_device(device_id: UUID, c: Container = Depends(get_container)) -> dict:
+    """Wake a sleeping machine (ADDENDUM §20).
+
+    The order here is §20's own: policy check, then packet, then *wait for the node*. The
+    third step is what makes the answer honest — a magic packet is unacknowledged UDP, so
+    "sent" and "woke" are separate facts and only the second one is what the owner asked
+    about.
+
+    Gated by the Permission Engine like every other consequential verb. There is no
+    back door around it, and this endpoint is not one (§95).
+    """
+    record = c.wake_records.get(device_id) if c.wake_records else None
+    if record is None:
+        raise HTTPException(
+            status_code=404,
+            detail="no MAC address is recorded for this device; set one before waking it",
+        )
+    if not record.enabled:
+        # Having an address and being willing to use it are two decisions. Refusing here
+        # rather than at the policy layer keeps "the owner turned this off" distinct from
+        # "the owner has not approved this one", which are different things to tell them.
+        raise HTTPException(status_code=409, detail="waking is disabled for this device")
+
+    from thursday_devices import actions as catalogue
+
+    spec = catalogue.get("device.wake")
+    if spec is None:  # pragma: no cover - the catalogue is a constant in this build
+        # Stated rather than assumed. If the verb ever leaves the catalogue this says so;
+        # without it the next line raises "NoneType has no attribute 'level'", which sends
+        # whoever is reading the traceback looking in the wrong place entirely.
+        raise HTTPException(status_code=500, detail="device.wake is missing from the catalogue")
+
+    verdict = c.permissions.decide(
+        ActionRequest(
+            action="device.wake",
+            resource=record.mac,
+            device_id=device_id,
+            level=spec.level,
+            risk=spec.risk,
+            reversible=spec.reversible,
+            expected_outcome="the machine comes online and can run work",
+        )
+    )
+    if verdict.decision is not PolicyDecision.AUTO:
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "decision": verdict.decision.value,
+                "reason": verdict.reason,
+                "rule": verdict.rule,
+            },
+        )
+
+    result = await c.wake.wake(device_id, record.mac)
+    return {
+        "device_id": str(device_id),
+        "sent": result.sent,
+        # The field that matters, and the one that is not inferred from sending.
+        "verified": result.verified,
+        "waited_s": round(result.waited_s, 1),
+        "error": result.error,
     }
 
 

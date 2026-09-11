@@ -14,6 +14,7 @@ only by handle, so no password is ever written into a tracked file.
 
 from __future__ import annotations
 
+import os
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
@@ -23,7 +24,49 @@ from pydantic import Field, computed_field
 from pydantic_settings import BaseSettings, PydanticBaseSettingsSource, SettingsConfigDict
 from thursday_shared.enums import AutonomyLevel, ProactivityLevel
 
+from thursday_core.learning import TeachingFrequency
+from thursday_core.logging import get_logger
+
+log = get_logger(__name__)
+
+#: The file a *checkout* reads. Correct in the repository and nowhere else — it is relative,
+#: so it resolves against the working directory, which for an installed app is wherever
+#: Windows happened to start the executable.
 SETTINGS_FILE = Path("settings.yaml")
+
+#: An explicit override, for anybody who wants the file somewhere of their choosing.
+SETTINGS_ENV = "THURSDAY_SETTINGS"
+
+#: Where the data directory is named, if it has been. `sidecar.rs` sets this for a packaged
+#: build (Sprint 87); a checkout leaves it unset.
+DATA_DIR_ENV = "THURSDAY_DATA_DIR"
+
+
+def settings_path() -> Path:
+    """Where to read `settings.yaml` from, in order of preference.
+
+    Sprint 90, and the gap it closes: an installed Thursday had **nowhere to configure
+    anything**. `settings.yaml` is not bundled by the installer, and `SETTINGS_FILE` is
+    relative, so the packaged backend read no file at all — every value came from the code
+    defaults, and the only channel that could change one was a Windows environment
+    variable. EASY INSTALL's whole premise is that a normal user never opens a terminal, so
+    "set an environment variable" is not an answer, it is the absence of one.
+
+    The data directory is the right home because it is already the one place a packaged
+    Thursday can write to and a person can find (`%APPDATA%\ai.thursday.desktop`), and
+    because `sidecar.rs` already names it. A checkout, where the variable is unset, keeps
+    reading the repository's own file exactly as before.
+    """
+    explicit = os.environ.get(SETTINGS_ENV)
+    if explicit:
+        return Path(explicit)
+    data_dir = os.environ.get(DATA_DIR_ENV)
+    if data_dir:
+        candidate = Path(data_dir) / SETTINGS_FILE.name
+        if candidate.exists():
+            return candidate
+    return SETTINGS_FILE
+
 
 #: settings.yaml is grouped for humans; Settings is flat for code. This maps one to the
 #: other, so a reader can find any field in either place.
@@ -45,6 +88,8 @@ _YAML_MAP: dict[str, dict[str, str]] = {
         "pool_size": "db_pool_size",
         "echo": "debug",
     },
+    "edition": {"name": "edition"},
+    "teaching": {"frequency": "teaching"},
     "redis": {"url": "redis_url"},
     "models": {
         "backend": "llm_backend",
@@ -126,9 +171,12 @@ _YAML_MAP: dict[str, dict[str, str]] = {
 class YamlSettingsSource(PydanticBaseSettingsSource):
     """Reads settings.yaml, flattening the human-facing groups into field names."""
 
-    def __init__(self, settings_cls: type[BaseSettings], path: Path = SETTINGS_FILE) -> None:
+    def __init__(self, settings_cls: type[BaseSettings], path: Path | None = None) -> None:
         super().__init__(settings_cls)
-        self._path = path
+        # Resolved per instance rather than bound at import: the data directory is named by
+        # the environment, and a module-level default would freeze whatever it was when
+        # this file was first imported.
+        self._path = path if path is not None else settings_path()
 
     def get_field_value(self, field: Any, field_name: str) -> tuple[Any, str, bool]:
         return None, field_name, False
@@ -168,6 +216,11 @@ class Settings(BaseSettings):
     proactivity: ProactivityLevel = ProactivityLevel.NORMAL
     #: When Thursday may *act* unasked. Separate axis, separate risk (ADR 0009).
     autonomy: AutonomyLevel = AutonomyLevel.MODERATE
+    #: How often Thursday teaches unprompted (§7, §39): OFF · ON_REQUEST · LOW · NORMAL · HIGH.
+    #: A third axis, and separate from the two above for the same reason they are separate
+    #: from each other: how much Thursday *explains* is not how much it acts or announces.
+    #: OFF and ON_REQUEST are ceilings — no relevance score reaches past them.
+    teaching: str = "NORMAL"
 
     # runtime -------------------------------------------------------------------
     environment: str = "development"
@@ -177,6 +230,20 @@ class Settings(BaseSettings):
     data_dir: Path = Path("var")
     log_level: str = "INFO"
     log_json: bool = False
+
+    # edition -------------------------------------------------------------------
+    #: Which shape of Thursday this install is (EASY INSTALL §"Deployment editions").
+    #:
+    #: This is the setting the easy-install requirement turns on. `desktop` must run on a
+    #: machine where nothing has been installed and nothing has been configured — no
+    #: database server, no Redis, no Docker, no terminal. `hub` is the multi-device
+    #: deployment that earns those dependencies by needing them. `developer` is `hub` with
+    #: everything visible.
+    #:
+    #: `external_services()` reports what each one actually demands, and a test asserts
+    #: that `desktop` demands nothing — because "it just works" is a claim, and a claim
+    #: that nothing checks is the class of bug this project keeps finding.
+    edition: str = "desktop"
 
     # storage -------------------------------------------------------------------
     #: Set this to override the composed URL entirely (a managed database, say).
@@ -254,6 +321,12 @@ class Settings(BaseSettings):
     #: justification when somebody asks where their data went.
     ai_routing_mode: str = "LOCAL_FIRST"
     ai_routing_profile: str = "BALANCED"
+
+    #: Where magic packets go (ADDENDUM §20). The all-networks broadcast by default; a
+    #: deployment with several subnets sets the directed broadcast for the one its machines
+    #: are on, because 255.255.255.255 does not cross a router and a packet that never
+    #: arrives looks exactly like a machine that would not wake.
+    wake_broadcast: str = "255.255.255.255"
 
     # rate limits (§128) --------------------------------------------------------
     #: Requests allowed per minute, per calling address, per class. Generous by design: this
@@ -351,6 +424,40 @@ class Settings(BaseSettings):
     @property
     def uses_postgres(self) -> bool:
         return "postgres" in self.resolved_database_url
+
+    @property
+    def is_desktop(self) -> bool:
+        return self.edition.lower() == "desktop"
+
+    @property
+    def teaching_frequency(self) -> TeachingFrequency:
+        """`teaching` as the enum the tutor compares against (§7, §39).
+
+        An unrecognised value falls back to OFF rather than to the default. A typo in this
+        setting is somebody trying to turn teaching *down*, and the safe reading of a
+        misspelled instruction is the quiet one — the loud failure mode here is Thursday
+        talking over a person who asked it not to.
+        """
+        try:
+            return TeachingFrequency[self.teaching.strip().upper()]
+        except KeyError:
+            log.warning("unknown_teaching_frequency", value=self.teaching)
+            return TeachingFrequency.OFF
+
+    def external_services(self) -> list[str]:
+        """What somebody has to install and run before this configuration works.
+
+        The whole point of the desktop edition is that this list is empty. Returning it —
+        rather than asserting it somewhere — means the installer, the health check and the
+        test suite all ask the same question of the same code, and a future setting that
+        quietly adds a dependency shows up in all three at once.
+        """
+        needed = []
+        if self.uses_postgres:
+            needed.append("PostgreSQL")
+        if self.redis_url:
+            needed.append("Redis")
+        return needed
 
     def ensure_dirs(self) -> None:
         self.data_dir.mkdir(parents=True, exist_ok=True)

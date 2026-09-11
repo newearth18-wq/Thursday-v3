@@ -182,6 +182,19 @@ CATALOGUE: dict[str, ActionSpec] = {
             description="stop a process by name",
         ),
         ActionSpec(
+            "device.wake",
+            "device.wake",
+            PermissionLevel.SYSTEM,
+            RiskLevel.MEDIUM,
+            # Verified, and by the only evidence there is: the machine's node connecting.
+            # A magic packet is unacknowledged UDP, so "sent" tells you nothing about
+            # whether anything woke (ADDENDUM §20, ADR 0012).
+            verify=True,
+            reversible=False,
+            required_args=("device_id",),
+            description="wake a sleeping machine with a magic packet",
+        ),
+        ActionSpec(
             "system.lock",
             "system.power",
             PermissionLevel.SYSTEM,

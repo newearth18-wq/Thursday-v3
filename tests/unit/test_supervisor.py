@@ -129,3 +129,31 @@ async def test_the_offline_verifier_escalates_rather_than_fabricating_a_pass():
         AgentResult(agent="document", ok=True, output={"document": "..."}),
     )
     assert not report.passed
+
+
+async def test_the_critique_refuses_rather_than_crashing_without_a_model(supervisor):
+    """`_llm_critique` had no guard of its own — only one in `_needs_judgement`.
+
+    Sprint 86's audit found the call was annotated `# type: ignore[attr-defined]` while
+    mypy was actually reporting `union-attr`: "this can be None". The one tool that had
+    noticed the model registry might be absent had been told to be quiet about the wrong
+    thing, and the only reason it never crashed is that today's single caller happens to
+    check first — in a different method, which is a guarantee the next caller does not
+    inherit.
+
+    A supervisor that cannot judge must say so, not raise `AttributeError` from inside
+    verification, which is the one place in Thursday whose whole job is to be trustworthy
+    about whether work succeeded.
+    """
+    result = AgentResult(
+        agent="computer",
+        ok=True,
+        output={"action": "app.open", "verified": True},
+        tool_results=[ToolResult(call_id=new_id(), tool="app.open", ok=True, verified=True)],
+    )
+
+    check = await supervisor._llm_critique(contract(), result)
+
+    assert check["ok"] is False, "a critique that could not run must never report a pass"
+    assert check["recoverable"] is True
+    assert isinstance(check["detail"], str) and check["detail"]

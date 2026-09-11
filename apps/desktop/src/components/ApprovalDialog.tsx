@@ -4,6 +4,13 @@ import type { Approval } from "@/lib/types";
 /**
  * PART 38/70. The full context comes before the buttons, never after — the owner should
  * never have to click to find out what they are approving.
+ *
+ * Sprint 81 removed the "agent" row. It printed the class name that requested the action —
+ * "ResearchAgent" — which is the same leak Sprint 65 forbade and Sprint 80 fixed in the
+ * working strip. It is also not one of the things §38 says a person needs in order to
+ * decide: the action, what it touches, which machine, what will happen, what happens if
+ * they refuse, and whether it can be undone. Which internal class asked is not on that
+ * list. The field is still on the wire and still in the audit trail, where it belongs.
  */
 export function ApprovalDialog({
   approval,
@@ -45,12 +52,6 @@ export function ApprovalDialog({
         <dd className="truncate font-mono text-slate-300">{approval.resource || "—"}</dd>
         <dt className="text-slate-500">device</dt>
         <dd className="text-slate-300">{approval.device_name ?? "—"}</dd>
-        {approval.agent && (
-          <>
-            <dt className="text-slate-500">agent</dt>
-            <dd className="text-slate-300">{approval.agent}</dd>
-          </>
-        )}
         <dt className="text-slate-500">expected</dt>
         <dd className="text-slate-300">{approval.expected_outcome}</dd>
         <dt className="text-slate-500">if you say no</dt>

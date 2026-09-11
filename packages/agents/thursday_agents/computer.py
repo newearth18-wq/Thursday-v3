@@ -18,6 +18,9 @@ from thursday_agents.base import BaseAgent
 class ComputerAgent(BaseAgent):
     spec = AgentSpec(
         name="computer",
+        user_description="เปิดโปรแกรมและสั่งงานบนเครื่องที่เชื่อมต่ออยู่",
+        user_examples=["เปิด Chrome", "ปิดโปรแกรมนี้ให้หน่อย"],
+        requirements=["device"],
         description="Operates the user's machines: applications, files, processes, screen.",
         capabilities=[
             "app_control",

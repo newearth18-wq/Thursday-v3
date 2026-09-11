@@ -1,3 +1,4 @@
+/// <reference types="vitest" />
 import { fileURLToPath, URL } from "node:url";
 import react from "@vitejs/plugin-react";
 import { defineConfig } from "vite";
@@ -21,4 +22,14 @@ export default defineConfig({
     },
   },
   build: { target: "esnext", sourcemap: true },
+  // The parts of the interface worth testing are the ones that decide what a person is
+  // shown: which face goes with which mood, and what text ends up on the screen. Those are
+  // plain functions and components, and they run here rather than being eyeballed.
+  test: {
+    environment: "jsdom",
+    setupFiles: ["./src/test-setup.ts"],
+    include: ["src/**/*.test.{ts,tsx}"],
+    globals: true,
+    css: false,
+  },
 });

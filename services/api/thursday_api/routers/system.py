@@ -3,12 +3,16 @@
 from __future__ import annotations
 
 from enum import IntEnum
+from typing import Any
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Body, Depends, HTTPException
 from fastapi.responses import PlainTextResponse
+from thursday_core import catalogue, practice
+from thursday_core import checkup as checkup_module
 from thursday_core.backup import BackupError
 from thursday_core.container import Container
+from thursday_core.expression import Turn, express
 from thursday_security.policy import HARD_BLOCKED
 from thursday_shared.enums import (
     AutonomyLevel,
@@ -18,7 +22,7 @@ from thursday_shared.enums import (
     RiskLevel,
 )
 from thursday_shared.errors import ThursdayError
-from thursday_shared.models import ActionRequest, utcnow
+from thursday_shared.models import ActionRequest, DeviceAction, utcnow
 
 from thursday_api.deps import get_container
 from thursday_api.schemas import EmergencyStopRequest
@@ -61,6 +65,180 @@ async def health_models(c: Container = Depends(get_container)) -> dict:
     return _subset(await c.health(), "model")
 
 
+@router.get("/checkup")
+async def check_thursday(advanced: bool = False, c: Container = Depends(get_container)) -> dict:
+    """Settings → "Check Thursday" (EASY INSTALL).
+
+    The same checks `/health` runs, said in the owner's language. Two endpoints over one
+    source rather than two health checks: the one that drifts is the one nobody watches.
+
+    A problem carries a `repair` only when `SelfRecovery` would actually accept that action,
+    so the button and the security boundary cannot disagree.
+    """
+    return (await checkup_module.check(c)).render(advanced=advanced)
+
+
+@router.post("/repair")
+async def repair_thursday(
+    component: str,
+    action: str,
+    advanced: bool = False,
+    c: Container = Depends(get_container),
+) -> dict:
+    """Settings → "Repair Thursday" — for one component, by name.
+
+    Takes an action, and that is safe for the same reason `/updates/apply` takes no URL
+    (§120): the action is not trusted, it is *checked*. `SelfRecovery.repair` refuses
+    anything not on the allowlist, so `change_permission` posted here is declined in the
+    same words whether it came from the owner, a model, or a page that persuaded a browser
+    to post it. "ห้ามแก้ไข security-sensitive state โดยไม่มี confirmation" holds here as
+    something stronger than a confirmation: there is no automatic path to that state at all.
+
+    `ok` says whether the thing works now, not whether the handler returned — a repair is
+    verified by re-running the component's health check (ADR 0051).
+    """
+    result = await checkup_module.repair(c, component, action)
+    if not advanced:
+        # `technical` is whatever the handler raised, and a handler that cannot reach a
+        # local model raises the connection error verbatim. Gated exactly as `/checkup`
+        # gates the same field, rather than trusted to be harmless.
+        result.pop("technical", None)
+    return result
+
+
+# ------------------------------------------------------- learning (ADAPTIVE ONBOARDING)
+
+
+@router.get("/learn")
+async def learning_center(c: Container = Depends(get_container)) -> dict:
+    """§10's "เรียนรู้ Thursday" — the whole centre in one read.
+
+    Not called Documentation on purpose (§10). What comes back is what this machine can
+    actually do (§52), what the owner has already used (§42), and one suggested next thing
+    (§57) — never a wall of features, and never a score to accumulate.
+    """
+    return {
+        "summary": catalogue.summary_line(c),
+        "areas": catalogue.areas(c),
+        "path": c.tutor.learning_path(),
+        "progress": c.learning.snapshot(),
+        "next": c.tutor.suggest(),
+        "practice": practice.offers(c),
+    }
+
+
+@router.get("/learn/features")
+async def learning_features(c: Container = Depends(get_container)) -> dict:
+    """Every feature, available or not, each with why (§11, §12)."""
+    return {
+        "features": [row.render() for row in catalogue.catalogue(c)],
+        "agents": c.tutor.agent_descriptions(),
+    }
+
+
+@router.post("/learn/{lesson_id}/start")
+async def learn_start(lesson_id: str, c: Container = Depends(get_container)) -> dict:
+    """Begin a lesson. Refuses gracefully with §12's reason if the machine cannot run it."""
+    result = c.lessons.start(c, lesson_id)
+    if result is None:
+        raise HTTPException(status_code=404, detail="ไม่พบบทเรียนนี้")
+    return _lesson_payload(result)
+
+
+@router.post("/learn/{lesson_id}/attempt")
+async def learn_attempt(
+    lesson_id: str, evidence: Any = Body(default=None), c: Container = Depends(get_container)
+) -> dict:
+    """Judge one attempt by what it left behind.
+
+    Takes evidence, not a verdict. There is no field here through which a client could say
+    the step succeeded — the step's own check reads the machine and decides (ADR 0012, and
+    the same shape as `/setup/verify` and `/updates/apply`).
+    """
+    result = await c.lessons.attempt(c, lesson_id, evidence)
+    if result is None:
+        raise HTTPException(status_code=404, detail="ไม่พบบทเรียนนี้")
+    return _lesson_payload(result)
+
+
+@router.post("/learn/{lesson_id}/skip")
+async def learn_skip(lesson_id: str, c: Container = Depends(get_container)) -> dict:
+    """ "ข้ามก่อน" (§2). Recorded as skipped, never as completed."""
+    result = c.lessons.skip(lesson_id)
+    if result is None:
+        raise HTTPException(status_code=404, detail="ไม่พบบทเรียนนี้")
+    return _lesson_payload(result)
+
+
+def _lesson_payload(result: Any) -> dict:
+    return {
+        "lesson": result.lesson_id,
+        "step": result.step,
+        "passed": result.passed,
+        "message": result.message,
+        "done": result.done,
+        "next": {"show": result.next_show, "try": result.next_try},
+    }
+
+
+@router.post("/learn/tips/dismiss")
+async def dismiss_tip(capability: str, c: Container = Depends(get_container)) -> dict:
+    """ "ไม่ต้อง" (§66). Recorded against the capability, so no rephrasing gets past it."""
+    c.tips.dismiss(capability)
+    return {"dismissed": capability}
+
+
+@router.post("/learn/reset")
+async def reset_learning(scope: str = "tips", c: Container = Depends(get_container)) -> dict:
+    """§38's three resets, each doing exactly what it says.
+
+    `tips` restores the offers without touching what the owner actually did — that is their
+    history, not the tutor's. `tutorials` forgets lessons only. `all` is "restart
+    introduction": back to a machine that has never met anybody.
+    """
+    if scope == "tips":
+        return {"scope": scope, "reset": c.learning.reset_tips()}
+    if scope == "tutorials":
+        return {"scope": scope, "reset": c.learning.reset_tutorials()}
+    if scope == "all":
+        c.learning.reset_all()
+        return {"scope": scope, "reset": True}
+    raise HTTPException(status_code=422, detail="scope must be tips, tutorials or all")
+
+
+@router.get("/learn/practice/{action:path}")
+async def practice_action(action: str, c: Container = Depends(get_container)) -> dict:
+    """§23. Describes what an action *would* do and what Thursday would ask.
+
+    A read, and the URL says so. Nothing is dispatched, no approval is created, and the
+    payload states `happened: false` rather than leaving a client to infer it.
+    """
+    return practice.rehearse(c, action).render()
+
+
+@router.get("/learn/why/{action:path}")
+async def why_it_asks(action: str, c: Container = Depends(get_container)) -> dict:
+    """§35's "ทำไมเมื่อกี้ถึงถามฉันก่อน", read back from the live policy table."""
+    return {"action": action, "why": practice.explain_decision(c, action)}
+
+
+@router.post("/learn/teaching")
+async def set_teaching(frequency: str, c: Container = Depends(get_container)) -> dict:
+    """§39. The owner's dial, and it is honoured absolutely — OFF means no unsolicited
+    teaching of any kind, including the first-run introduction."""
+    from thursday_core.learning import TeachingFrequency
+
+    try:
+        c.learning.frequency = TeachingFrequency[frequency.strip().upper()]
+    except KeyError as exc:
+        allowed = ", ".join(member.name for member in TeachingFrequency)
+        raise HTTPException(status_code=422, detail=f"frequency must be one of {allowed}") from exc
+    return {
+        "teaching": c.learning.frequency.name,
+        "unprompted": c.learning.may_teach_unprompted(),
+    }
+
+
 @router.get("/world-state")
 async def world_state(c: Container = Depends(get_container)) -> dict:
     """PART 45. The 'now' Thursday reasons against."""
@@ -70,6 +248,26 @@ async def world_state(c: Container = Depends(get_container)) -> dict:
 @router.get("/world")
 async def world(c: Container = Depends(get_container)) -> dict:
     return c.world.snapshot().model_dump(mode="json")
+
+
+@router.get("/expression")
+async def expression(c: Container = Depends(get_container)) -> dict:
+    """Sprint 80. What Thursday is doing and how it is going, derived.
+
+    The socket pushes the same shape the moment anything changes; this exists for the first
+    paint and for a client that has been asleep. Both call `express`, so there is one place
+    that decides what Thursday is feeling and no way for the two to disagree.
+    """
+    checks = await c.health()
+    return express(
+        c.world.snapshot(),
+        unhealthy=sum(1 for check in checks if not check["ok"]),
+        lockdown=bool(c.permissions.lockdown),
+        # Sprint 85. Without this the docstring above would have become untrue the moment
+        # §10's field existed: the socket would report an open microphone and this endpoint
+        # a closed one, for the same machine, in the same second.
+        turn=Turn(listening=c.microphone_open()),
+    ).payload()
 
 
 @router.get("/autonomy")
@@ -236,6 +434,104 @@ async def undo(action_id: UUID, c: Container = Depends(get_container)) -> dict:
         raise HTTPException(status_code=404, detail=exc.to_dict()) from exc
 
 
+@router.get("/setup")
+async def setup_progress(c: Container = Depends(get_container)) -> dict:
+    """Where the first run has got to."""
+    return c.setup.progress()
+
+
+@router.post("/setup/answer")
+async def setup_answer(step: str, value: Any = Body(...), c: Container = Depends(get_container)):
+    """Record one screen's answer and advance."""
+    from thursday_core.setup import SetupError, SetupStep
+
+    try:
+        c.setup.answer(SetupStep(step.upper()), value)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=f"unknown step: {step}") from exc
+    except SetupError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return c.setup.progress()
+
+
+@router.post("/setup/verify")
+async def setup_verify(c: Container = Depends(get_container)) -> dict:
+    """Finish the install, if a real command really worked.
+
+    Runs the test command for real and judges the *result*, not the request. This endpoint
+    cannot be told that setup succeeded — there is no parameter for it, in the same way the
+    updater has no parameter for a URL (ADR 0033): a completion flag a client can post is a
+    completion flag a client will post.
+    """
+    from thursday_core.setup import SetupError
+
+    device = next((d for d in c.hub.online()), None)
+    if device is None:
+        # Not an error the owner caused, and not silent (§38).
+        raise HTTPException(
+            status_code=409,
+            detail="no device is connected yet, so there is nothing to try the command on",
+        )
+
+    try:
+        result = await c.hub.invoke(
+            device.id, DeviceAction(action="app.open", args={"app": "notepad"}, reason="setup")
+        )
+    except ThursdayError as exc:
+        raise HTTPException(status_code=409, detail=exc.to_dict()) from exc
+
+    try:
+        c.setup.verify(result)
+    except SetupError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return c.setup.progress()
+
+
+@router.get("/setup/recommendation")
+async def setup_recommendation(
+    preset: str = "BALANCED", advanced: bool = False, c: Container = Depends(get_container)
+) -> dict:
+    """What Thursday proposes for this machine (EASY INSTALL, setup STEP 5).
+
+    Everything the recommendation screen needs and nothing it does not: a sentence, a size, a
+    disk requirement, and the reasons. **No model name unless `advanced` is set** — the
+    requirement is explicit that a normal user never sees one, and the place that rule gets
+    broken is a debugging field somebody left in a response.
+
+    Proposes only. Nothing is downloaded, installed or configured by asking.
+    """
+    from thursday_core.recommend import AIPreset, recommend
+    from thursday_models.local_manager import LocalModelManager
+
+    try:
+        wanted = AIPreset(preset.upper())
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=f"unknown preset: {preset}") from exc
+
+    profile = LocalModelManager().profile()
+    result = recommend(profile, preset=wanted, cloud_available=c.settings.allow_cloud)
+
+    body: dict[str, Any] = {
+        "preset": result.preset.value,
+        "summary": result.summary(),
+        "summary_en": result.summary(thai=False),
+        "runs_locally": result.runs_locally,
+        "uses_cloud": result.uses_cloud,
+        "download_bytes": result.download_bytes,
+        "disk_required_bytes": result.disk_required_bytes,
+        "reasons": list(result.reasons),
+        "limits": list(result.limits),
+    }
+    if advanced:
+        # §"Power user can enable Developer Options". The hardware Thursday read, and the
+        # internal class name — the two things a normal user is spared and a developer needs.
+        body["advanced"] = {
+            "model_class": result.model_class.key if result.model_class else None,
+            "detected": profile.model_dump(mode="json"),
+        }
+    return body
+
+
 @router.post("/emergency/stop")
 async def emergency_stop(
     request: EmergencyStopRequest, c: Container = Depends(get_container)
@@ -246,8 +542,9 @@ async def emergency_stop(
 
 @router.post("/emergency/release")
 async def release_lockdown(c: Container = Depends(get_container)) -> dict:
-    c.permissions.set_lockdown(False)
-    return {"lockdown": False}
+    # Through the container, not straight at the flag: setting and clearing the stop have
+    # to be one pair, or the half that announces itself drifts from the half that does not.
+    return await c.release_lockdown()
 
 
 # ------------------------------------------------------------------ voice (V4)

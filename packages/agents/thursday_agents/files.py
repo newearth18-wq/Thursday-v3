@@ -59,6 +59,10 @@ def group_duplicates(files: list[dict[str, Any]]) -> list[list[dict[str, Any]]]:
 class FileAgent(BaseAgent):
     spec = AgentSpec(
         name="file",
+        user_description="หา จัดระเบียบ และเปิดไฟล์ให้ โดยไม่ต้องรู้ว่าไฟล์อยู่โฟลเดอร์ไหน",
+        user_examples=["หาไฟล์คะแนนล่าสุด", "ไฟล์ไหนซ้ำกันบ้าง"],
+        safety_notes="ผมไม่ลบไฟล์เอง ถ้าจะลบผมจะถามคุณก่อนทุกครั้ง",
+        requirements=["file"],
         description="Answers questions about sets of files: what is here, what is newest, what is duplicated.",
         capabilities=["file", "organise", "search", "inventory", "deduplicate"],
         tools=["file.list", "file.search", "file.read"],

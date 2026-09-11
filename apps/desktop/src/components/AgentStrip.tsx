@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { WORKING } from "@/lib/plain";
 import type { AgentStatus } from "@/lib/types";
 
 const DOT: Record<AgentStatus["state"], string> = {
@@ -13,6 +14,11 @@ const DOT: Record<AgentStatus["state"], string> = {
  *
  * If the owner has to watch this strip to understand what is happening, the design has
  * failed: Thursday is supposed to be one assistant, not a fleet with a status board.
+ *
+ * Sprint 80 fixed what it rendered. It used to print the agent's class name in a
+ * monospace font — "ResearchAgent", "SupervisorAgent" — which is precisely what Sprint 65
+ * declared must never reach a screen. The allowlisted phrase was already in the same
+ * event payload; nothing needed inventing, only reading the other field.
  */
 export function AgentStrip({ agents }: { agents: AgentStatus[] }) {
   const [expanded, setExpanded] = useState(false);
@@ -39,8 +45,7 @@ export function AgentStrip({ agents }: { agents: AgentStatus[] }) {
           {agents.map((agent) => (
             <li key={agent.name} className="flex items-center gap-2 text-xs text-slate-400">
               <span className={`h-1.5 w-1.5 rounded-full ${DOT[agent.state]}`} />
-              <span className="font-mono">{agent.name}</span>
-              <span className="text-slate-600">{agent.state}</span>
+              <span>{agent.activity || WORKING}</span>
             </li>
           ))}
         </ul>

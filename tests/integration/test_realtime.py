@@ -90,7 +90,9 @@ def test_task_updates_reach_the_client(ws_client, office_pc):
 
 def test_ping_is_answered(ws_client):
     with ws_client.websocket_connect("/api/v1/realtime") as ws:
-        ws.receive_json()
+        assert ws.receive_json()["type"] == "ready"
+        # Sprint 80: the opening expression follows `ready`, before anything is asked for.
+        assert ws.receive_json()["type"] == "expression"
         ws.send_json({"type": "ping"})
         assert ws.receive_json()["type"] == "pong"
 

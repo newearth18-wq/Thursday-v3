@@ -13,6 +13,7 @@ The transition table below is the whole specification. Anything not in it raises
 
 from __future__ import annotations
 
+from collections import deque
 from enum import StrEnum
 
 from thursday_shared.errors import ThursdayError
@@ -92,12 +93,20 @@ class VoiceStateError(ThursdayError):
     code = "voice_state_error"
 
 
+#: How many transitions to keep. Enough to explain the last few turns, which is all
+#: `history` has ever been used for.
+HISTORY_LIMIT = 200
+
+
 class VoiceStateMachine:
     """Holds the current state and refuses to leave it illegally."""
 
     def __init__(self, *, on_change: object | None = None) -> None:
         self._state = VoiceState.IDLE
-        self._history: list[tuple[VoiceState, VoiceState]] = []
+        # Bounded. Every wake, every utterance and every barge-in appends here, and this
+        # object lives as long as Thursday does — an unbounded list would grow for the life
+        # of the process to serve a debugging aid nobody reads beyond the last few entries.
+        self._history: deque[tuple[VoiceState, VoiceState]] = deque(maxlen=HISTORY_LIMIT)
         self._on_change = on_change
 
     @property

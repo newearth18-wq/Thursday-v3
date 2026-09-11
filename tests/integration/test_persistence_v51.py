@@ -40,6 +40,19 @@ async def database(tmp_path):
     return url
 
 
+#: Every persistence flag off. The four tests that mean "no database configured" say so with
+#: this rather than relying on the ambient default — `settings.yaml` turns persistence on for
+#: a real install, and a test whose premise is an unset default is a test that changes meaning
+#: when somebody changes the default.
+NOTHING_KEPT = {
+    "persist_memory": False,
+    "persist_audit": False,
+    "persist_costs": False,
+    "persist_tasks": False,
+    "persist_models": False,
+}
+
+
 @pytest.fixture
 def make_settings(tmp_path, database):
     def build(**over):
@@ -52,6 +65,15 @@ def make_settings(tmp_path, database):
                 "vault_backend": "memory",
                 "log_level": "ERROR",
                 "persist_memory": True,
+                # The other four off unless a test asks for them. They used to be off by
+                # default; `settings.yaml` now turns every one on, because that file is what
+                # a real desktop install reads. A test that means "persist memory only" has
+                # to say so, or it silently starts exercising four more stores it never
+                # created tables for.
+                "persist_audit": False,
+                "persist_costs": False,
+                "persist_tasks": False,
+                "persist_models": False,
                 **over,
             }
         )
@@ -176,6 +198,7 @@ async def test_running_without_a_database_still_works(tmp_path):
             llm_backend="rule",
             vault_backend="memory",
             log_level="ERROR",
+            **NOTHING_KEPT,
         ),
         configure_logs=False,
     )
@@ -482,6 +505,7 @@ async def test_running_without_audit_persistence_is_unchanged(tmp_path):
             llm_backend="rule",
             vault_backend="memory",
             log_level="ERROR",
+            **NOTHING_KEPT,
         ),
         configure_logs=False,
     )
@@ -526,6 +550,7 @@ async def test_health_says_whether_state_is_actually_durable(make_settings, tmp_
             llm_backend="rule",
             vault_backend="memory",
             log_level="ERROR",
+            **NOTHING_KEPT,
         ),
         configure_logs=False,
     )
@@ -660,6 +685,7 @@ async def test_running_without_spend_persistence_is_unchanged(tmp_path):
             llm_backend="rule",
             vault_backend="memory",
             log_level="ERROR",
+            **NOTHING_KEPT,
         ),
         configure_logs=False,
     )

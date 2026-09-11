@@ -24,12 +24,24 @@ Handler = Callable[[Event], Awaitable[None]]
 SyncHandler = Callable[[Event], Any]
 
 
+#: How many recently-seen event ids the replay guard remembers. Deliberately much larger
+#: than the history window: history is for reading back, and this is for *not* re-delivering
+#: something, which has to keep working across a burst that has long left the history.
+DEDUPE_LIMIT = 8192
+
+
 class InProcessEventBus:
-    def __init__(self, *, history_limit: int = 500) -> None:
+    def __init__(self, *, history_limit: int = 500, dedupe_limit: int = DEDUPE_LIMIT) -> None:
         self._handlers: list[tuple[str, Handler | SyncHandler]] = []
         self._history: list[Event] = []
         self._history_limit = history_limit
-        self._seen: set[str] = set()
+        # A dict, not a set, because insertion order is what makes eviction possible — and
+        # eviction is the whole point. This was an unbounded `set` until the audit in
+        # Sprint 86: every event id Thursday had ever published, kept forever, on the
+        # hottest path in the system. `_history` two lines up was bounded from the start,
+        # which is what makes the omission a slip rather than a decision.
+        self._seen: dict[str, None] = {}
+        self._dedupe_limit = dedupe_limit
 
     def subscribe(self, pattern: str, handler: Handler | SyncHandler) -> None:
         """``pattern`` is a glob over the event kind, e.g. ``task.*`` or ``*``."""
@@ -41,7 +53,12 @@ class InProcessEventBus:
         key = str(event.id)
         if key in self._seen:
             return
-        self._seen.add(key)
+        self._seen[key] = None
+        while len(self._seen) > self._dedupe_limit:
+            # Oldest first. A replay older than the window is delivered again, which is
+            # exactly the at-least-once contract this class documents; handlers are
+            # required to be idempotent and the guard is a courtesy, not a guarantee.
+            self._seen.pop(next(iter(self._seen)))
 
         self._history.append(event)
         if len(self._history) > self._history_limit:

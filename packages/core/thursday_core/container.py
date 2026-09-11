@@ -10,7 +10,7 @@ Tests build a container of fakes with the same attribute surface.
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from thursday_agents.automation import AutomationAgent
@@ -28,6 +28,7 @@ from thursday_agents.media import MediaAgent
 from thursday_agents.ports import LocalCalendar, LocalOutbox
 from thursday_agents.registry import AgentRegistry
 from thursday_agents.research import ResearchAgent
+from thursday_agents.tutor import TutorAgent
 from thursday_agents.vision import VisionAgent
 from thursday_automation.engine import AutomationEngine, ProactivityGate
 from thursday_automation.offers import OfferBook
@@ -36,6 +37,7 @@ from thursday_automation.routines import RoutineLearner
 from thursday_automation.skills.learning import SkillObserver
 from thursday_automation.skills.registry import SkillRegistry
 from thursday_devices.hub import DeviceHub
+from thursday_devices.wake import WakeOnLan
 from thursday_memory.embeddings import HashEmbeddingProvider, OllamaEmbeddingProvider
 from thursday_memory.graph import KnowledgeGraph
 from thursday_memory.manager import MemoryManager
@@ -54,8 +56,9 @@ from thursday_security.privacy import PrivacyClassifier, PrivacyZoneRegistry
 from thursday_security.redaction import SecretRedactor
 from thursday_security.remote import RemoteCommandGate
 from thursday_security.vault import ChainVault, EnvVault, InMemoryVault, KeychainVault
-from thursday_shared.enums import ModelTier
+from thursday_shared.enums import ModelTier, NotificationPriority
 from thursday_shared.errors import ConfigurationError
+from thursday_shared.models import Event
 from thursday_tools.builtin import register_builtin_tools
 from thursday_tools.registry import ToolRegistry, ToolRouter
 from thursday_vision.camera import CameraManager
@@ -67,6 +70,7 @@ from thursday_voice.routing import AudioRouter
 from thursday_voice.service import VoiceService
 
 from thursday_core.backup import BackupService, default_components
+from thursday_core.benchmarks import BenchmarkBook
 from thursday_core.briefing import Briefer, DecisionJournal
 from thursday_core.bus import InProcessEventBus
 from thursday_core.composer import ResponseComposer
@@ -80,6 +84,8 @@ from thursday_core.distributed import DistributedRunner
 from thursday_core.execution import ToolExecutor
 from thursday_core.focus import DeviceFocus
 from thursday_core.goals import GoalManager, PriorityQueue
+from thursday_core.learning import LearningRecord
+from thursday_core.lessons import LessonRunner
 from thursday_core.logging import configure_logging, get_logger
 from thursday_core.metrics import MetricsCollector, build_registry
 from thursday_core.model_registry import ModelRegistry
@@ -92,9 +98,11 @@ from thursday_core.reasoning import ReasoningEngine
 from thursday_core.recovery import SelfRecovery
 from thursday_core.reflection import FeedbackLog, SelfEvaluator
 from thursday_core.resumption import interrupted
+from thursday_core.setup import SetupWizard
 from thursday_core.state import build_state_store
 from thursday_core.supervisor import Supervisor
 from thursday_core.tasks import TaskManager, TaskQueue
+from thursday_core.tips import TipEngine
 from thursday_core.undo import UndoRegistry
 from thursday_core.updates import (
     LocalReleaseSource,
@@ -157,6 +165,23 @@ class Container:
     compute_executor: Any = None
     #: Runs one task across several machines, keeping each stage's provenance (ADDENDUM §21).
     distributed: Any = None
+    #: The first run, and whether a real command has ever succeeded (EASY INSTALL).
+    setup: Any = None
+    #: What the owner has learned, and how much Thursday should still explain (ONBOARDING §8).
+    learning: Any = None
+    #: Drives one lesson through SHOW → TRY → VERIFY → NEXT (ONBOARDING §4).
+    lessons: Any = None
+    #: Teaches Thursday. READ ceiling, no tools, `tutorial.*` only (ONBOARDING §46-§48).
+    tutor: Any = None
+    #: Decides whether a teaching tip is worth the interruption (ONBOARDING §50, §51).
+    tips: Any = None
+    #: What real calls measured about each model (ADDENDUM §25, §26).
+    benchmarks: Any = None
+    #: Sends the magic packet and waits for the machine to prove it woke (ADDENDUM §20).
+    wake: Any = None
+    #: Which machines have a MAC recorded, and whether the owner allows waking them. Set by
+    #: the owner; never learned from the network (ADR 0044's reasoning applies here too).
+    wake_records: dict[Any, Any] = field(default_factory=dict)
     #: Whether state actually outlives this process (Sprint 51). False is a supported
     #: configuration and not a degraded one — but it must never be a silent assumption.
     persistent: bool = False
@@ -336,7 +361,14 @@ class Container:
 
     async def emergency_stop(self, scope: str = "all") -> dict[str, Any]:
         """§69. Deliberately does not route through the reasoning engine — it must work
-        when the model is down."""
+        when the model is down.
+
+        It also announces itself on the bus. Until Sprint 82 it did not, and the
+        consequence only became visible once a screen started deriving a state from it: a
+        stop with no running tasks and no connected device produced no event at all, so
+        every open window went on showing a calm Thursday until something unrelated
+        happened. The loudest state in the system was the one nothing was told about.
+        """
         actions: dict[str, Any] = {}
         if scope in ("all", "agents"):
             cancelled = 0
@@ -356,7 +388,45 @@ class Container:
             self.permissions.set_lockdown(True)
             actions["lockdown"] = True
         log.warning("emergency_stop", scope=scope, **actions)
+        await self.bus.publish(
+            Event(
+                kind="system.emergency_stop",
+                payload={"scope": scope, **actions},
+                priority=NotificationPriority.CRITICAL,
+            )
+        )
         return actions
+
+    def microphone_open(self) -> bool:
+        """Whether the microphone is capturing right now — §10's recording indicator.
+
+        Sprint 85, and it lives here for two reasons rather than one.
+
+        Not in `expression.py`, because that module deliberately imports nothing that
+        carries an observation of a person, and `tests/unit/test_expression.py` asserts the
+        import list. Not in either service either, because **both** of them have to answer
+        this identically: the socket and `GET /expression` are two ways out of one process,
+        and a microphone reported open on one and closed on the other is precisely the
+        two-sources-of-truth failure the whole expression was built to avoid.
+
+        One boolean, read from the voice loop, which is the only thing in Thursday that
+        knows. No voice service means no microphone, reported honestly as not capturing.
+        """
+        return bool(getattr(self.voice, "listening", False))
+
+    async def release_lockdown(self) -> dict[str, Any]:
+        """Lift the stop, and say so.
+
+        Here rather than in the router because the setting and the clearing have to be one
+        pair: an endpoint that clears the flag directly is an endpoint that forgets to
+        announce it, which is how the stop became silent in the first place.
+        """
+        self.permissions.set_lockdown(False)
+        log.warning("lockdown_released")
+        await self.bus.publish(
+            Event(kind="system.lockdown_released", priority=NotificationPriority.IMPORTANT)
+        )
+        return {"lockdown": False}
 
 
 def build_container(settings: Settings | None = None, *, configure_logs: bool = True) -> Container:
@@ -412,9 +482,14 @@ def build_container(settings: Settings | None = None, *, configure_logs: bool = 
     c.remote_gate = RemoteCommandGate()
     c.hub = DeviceHub(c.bus, remote_gate=c.remote_gate, model_registry=c.model_registry)
     c.device_router = DeviceRouter(c.hub)
-    c.compute_router = ComputeRouter(registry=c.model_registry, hub=c.hub)
+    c.benchmarks = BenchmarkBook()
+    c.setup = SetupWizard()
+    c.learning = LearningRecord(frequency=settings.teaching_frequency)
+    c.lessons = LessonRunner(c.learning)
+    c.compute_router = ComputeRouter(registry=c.model_registry, hub=c.hub, benchmarks=c.benchmarks)
     c.compute_executor = ComputeExecutor(registry=c.model_registry, hub=c.hub)
     c.distributed = DistributedRunner(c.compute_router, c.compute_executor)
+    c.wake = WakeOnLan(c.hub, broadcast=settings.wake_broadcast)
     c.device_focus = DeviceFocus()
     # Pairings outlive the process. An in-memory registry would mean a restart locks out
     # every paired node — it signs with its key, the core no longer knows the key, and the
@@ -596,6 +671,13 @@ def build_container(settings: Settings | None = None, *, configure_logs: bool = 
     c.agents.register(CommunicationAgent(c.outbox))
     c.agents.register(VisionAgent(c.vision))
     c.agents.register(AutomationAgent(c.automations, routines=c.routines, skills=c.skill_observer))
+    # Last, and given the container itself: the tutor's honesty depends on reading the same
+    # catalogue, lessons and registries everything else does (§52) rather than a copy of them.
+    c.tutor = TutorAgent(c)
+    c.agents.register(c.tutor)
+    # Shares the automation engine's gate rather than metering separately: a tip and a
+    # notification compete for the same scarce thing, which is the owner's attention.
+    c.tips = TipEngine(c.learning, gate=c.automations.gate)
 
     from thursday_core.engine import ThursdayCore
 
