@@ -81,9 +81,19 @@ object can name anything on it.
 ## Where subtitle timings come from
 
 ```
-narration per scene  → each scene is as long as the line spoken over it → measured
-one narration file   → scene lengths estimated from reading speed       → estimated
+Thursday speaks it   → each scene is as long as the line it spoke        → measured
+narration per scene  → each scene is as long as the line spoken over it  → measured
+one narration file   → scene lengths estimated from reading speed        → estimated
 ```
+
+The first row is V12 ([ADR 0061](architecture/decisions/0061-a-voice-that-needs-no-download.md)).
+`PromoRequest(narrate=True)` hands the script to a `Narrator`, which speaks each line into
+its own WAV and reads the length back out of the file's own header — no ffmpeg needed on
+that path at all. Those measurements are used directly; nothing re-derives them.
+
+`narrate=True` with no voice configured is refused, never quietly downgraded to reading
+speed: answering a request for a spoken video with a silent one is a different result, not
+a worse one.
 
 Both are legitimate output. They are not the same claim. `SubtitleTrack.timing` records which
 one is in hand, nothing promotes an estimate into a measurement, and the quality gate repeats
@@ -141,9 +151,11 @@ at the worst possible moment.
 
 ## What is deliberately not built
 
-**Generation.** No text-to-image, no text-to-video, no TTS. `creative.compose` returns
-`ready=False` with `missing` naming what it lacks, rather than rendering something and
-calling it a storyboard.
+**Pictures.** No text-to-image and no text-to-video, so storyboard frames are still an
+input: `creative.compose` returns `ready=False` with `missing` naming what it lacks rather
+than rendering something and calling it a storyboard. Narration is no longer on this list —
+V12 speaks it — but eSpeak sounds like a machine, and a better voice is a Piper model file
+rather than a design change.
 
 **Silence removal on video.** Cutting silence out of a soundtrack while leaving the picture
 alone desynchronises the two for the rest of the video; doing it properly means cutting the
@@ -166,6 +178,7 @@ packages/media/thursday_media/
   subtitles.py    cue timing, SRT/VTT, wrapping — no ffmpeg, no model
   quality.py      the gate: pass / fail / unknown
   creative.py     script + pictures → a plan, or a list of what is missing
+  narration.py    script → spoken WAVs and the durations that time the subtitles
   tools.py        media.probe and media.edit, and the undo
 ```
 

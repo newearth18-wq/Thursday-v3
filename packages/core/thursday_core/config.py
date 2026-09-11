@@ -273,7 +273,14 @@ class Settings(BaseSettings):
     # voice ---------------------------------------------------------------------
     wake_word: str = "thursday"
     stt_backend: str = "stub"  # stub | whisper
-    tts_backend: str = "stub"  # stub | piper
+    # `espeak` needs no model file — 48 languages including Thai ship inside the wheel — so
+    # it is the one local voice that works on a fresh machine. `piper` sounds better and
+    # falls back to it (ADR 0061). Default stays `stub`: a text-driven voice keeps the whole
+    # loop exercisable with no audio stack, and changing what a deployment speaks through is
+    # the owner's decision rather than an upgrade's side effect.
+    tts_backend: str = "stub"  # stub | espeak | piper
+    #: eSpeak voice name — a language code such as `th`, `en`, `cmn`.
+    tts_voice: str = "th"
     voice_name: str = "thursday-neutral"
     #: Refuse to send audio to a non-local provider, whatever the chain says (§34).
     voice_local_only: bool = True

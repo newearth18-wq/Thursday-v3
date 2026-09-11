@@ -268,3 +268,151 @@ async def test_expectations_know_audio_was_asked_for(tmp_path):
         music=str(tmp_path / "bed.m4a"),
     )
     assert expectations(request, await compose(request))["audio"] is True
+
+
+# --------------------------------------------------------------- narration Thursday speaks
+
+
+class SpeaksLines:
+    """A narrator whose audio is as long as the text, so scene timing is predictable."""
+
+    def __init__(self, *, available=True, seconds_per_char=0.1):
+        self.available = available
+        self._per_char = seconds_per_char
+        self.asked: list[str] = []
+
+    async def narrate(self, lines, workdir, *, prefix="line", voice=""):
+        from pathlib import Path
+
+        from thursday_media.narration import NarratedLine, Narration
+
+        self.asked = list(lines)
+        Path(workdir).mkdir(parents=True, exist_ok=True)
+        result = Narration(voice=voice, backend="speaks-lines")
+        for index, text in enumerate(lines, start=1):
+            path = Path(workdir) / f"{prefix}{index:02d}.wav"
+            path.write_bytes(b"RIFF")
+            result.lines.append(
+                NarratedLine(text=text, path=str(path), seconds=len(text) * self._per_char)
+            )
+        return result
+
+
+async def test_thursday_speaking_the_script_gives_measured_timings(tmp_path):
+    """The gap V11 left open and V12 closes: with nothing to narrate with, every video took
+    the estimated path."""
+    scenes = [_scene("a", "abcde", tmp_path), _scene("b", "abcdefghij", tmp_path)]
+    request = PromoRequest(name="p", scenes=scenes, workdir=tmp_path, narrate=True, voice="th")
+    build = await compose(request, None, SpeaksLines())
+
+    assert build.ready, build.describe()
+    assert build.subtitles.measured, "a spoken script is measured, not estimated"
+    assert build.seconds == pytest.approx(1.5, abs=0.01)
+    # Each scene is exactly as long as the line spoken over it.
+    stills = [s for s in build.plan.steps if s.op == "still"]
+    assert [s.args["seconds"] for s in stills] == pytest.approx([0.5, 1.0], abs=0.01)
+    # And the narration is laid on scene by scene, before the join.
+    assert [s.op for s in build.plan.steps][:4] == ["still", "dub", "still", "dub"]
+
+
+async def test_what_was_spoken_is_reported(tmp_path):
+    """A synthesised voice is something the owner should be told about, not left to
+    notice."""
+    scenes = [_scene("a", "one", tmp_path), _scene("b", "two", tmp_path)]
+    build = await compose(
+        PromoRequest(name="p", scenes=scenes, workdir=tmp_path, narrate=True, voice="th"),
+        None,
+        SpeaksLines(),
+    )
+    assert build.narration is not None
+    assert build.narration.backend == "speaks-lines"
+    assert build.to_dict()["narration"]["backend"] == "speaks-lines"
+    assert build.to_dict()["narration"]["lines"][0]["text"] == "one"
+
+
+async def test_narrating_without_a_voice_is_refused_with_the_remedy(tmp_path):
+    build = await compose(
+        PromoRequest(name="p", scenes=[_scene("a", "x", tmp_path)], workdir=tmp_path, narrate=True),
+        None,
+        None,
+    )
+    assert not build.ready
+    assert any("THURSDAY_TTS_BACKEND=espeak" in m for m in build.missing)
+
+
+async def test_an_unavailable_narrator_is_refused_before_anything_is_written(tmp_path):
+    build = await compose(
+        PromoRequest(name="p", scenes=[_scene("a", "x", tmp_path)], workdir=tmp_path, narrate=True),
+        None,
+        SpeaksLines(available=False),
+    )
+    assert not build.ready
+    assert list(tmp_path.glob("*.srt")) == []
+
+
+async def test_speaking_and_supplying_narration_at_once_is_refused(tmp_path):
+    (tmp_path / "vo.m4a").write_bytes(b"0" * 128)
+    build = await compose(
+        PromoRequest(
+            name="p",
+            scenes=[_scene("a", "x", tmp_path)],
+            workdir=tmp_path,
+            narrate=True,
+            narration=str(tmp_path / "vo.m4a"),
+        ),
+        None,
+        SpeaksLines(),
+    )
+    assert not build.ready
+    assert any("not both" in m for m in build.missing)
+
+
+async def test_a_scene_with_no_line_cannot_be_narrated(tmp_path):
+    """All or none, for the same reason a supplied track cannot be part measured: a silent
+    scene would have to be timed by a different rule, and every cue after it would move."""
+    scenes = [_scene("a", "spoken", tmp_path), _scene("b", "", tmp_path)]
+    build = await compose(
+        PromoRequest(name="p", scenes=scenes, workdir=tmp_path, narrate=True),
+        None,
+        SpeaksLines(),
+    )
+    assert not build.ready
+    assert any("words for scene 2" in m for m in build.missing)
+
+
+async def test_nothing_is_spoken_when_the_request_is_refused(tmp_path):
+    """The check runs before a single line is synthesised — five files of audio nobody
+    asked for is a mess somebody has to clean up."""
+    narrator = SpeaksLines()
+    await compose(
+        PromoRequest(
+            name="p",
+            scenes=[_scene("a", "x", tmp_path), _scene("b", "", tmp_path)],
+            workdir=tmp_path,
+            narrate=True,
+        ),
+        None,
+        narrator,
+    )
+    assert narrator.asked == [], "nothing should have been sent to the synthesiser"
+
+
+async def test_the_narrators_own_measurement_is_used_without_an_editor(tmp_path):
+    """`compose` is given `editor=None` here on purpose. The narrator measured these
+    durations off the audio it just wrote, so nothing needs to probe the files again — and
+    until this was checked, the measurement was silently discarded and every scene fell
+    back to reading speed, which made a spoken script no better timed than a guessed one.
+    """
+    scenes = [_scene("a", "abcde", tmp_path), _scene("b", "abcdefghij", tmp_path)]
+    build = await compose(
+        PromoRequest(name="p", scenes=scenes, workdir=tmp_path, narrate=True),
+        None,
+        SpeaksLines(seconds_per_char=0.1),
+    )
+
+    assert build.narration.durations == pytest.approx([0.5, 1.0])
+    assert build.seconds == pytest.approx(1.5, abs=0.001)
+    stills = [s.args["seconds"] for s in build.plan.steps if s.op == "still"]
+    assert stills == pytest.approx([0.5, 1.0], abs=0.001)
+    # And the cues sit on the scenes, which is what "measured" is supposed to buy.
+    assert [c.start for c in build.subtitles.cues] == pytest.approx([0.0, 0.5], abs=0.001)

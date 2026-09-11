@@ -27,10 +27,11 @@ jobs:
       - name: Install dependencies
         run: |
           uv venv --python ${{ matrix.python-version }}
-          # `media` brings imageio-ffmpeg, which ships a static ffmpeg binary. Without it
-          # the media suites skip themselves, and 37 tests that quietly do not run are
-          # worse than 37 that fail — the step below makes sure that cannot happen again.
-          uv pip install -e ".[dev,media]"
+          # `media` brings imageio-ffmpeg (a static ffmpeg) and `speech` brings eSpeak NG.
+          # Without them the media and narration suites skip themselves, and tests that
+          # quietly do not run are worse than tests that fail — the step below makes sure
+          # that cannot happen again.
+          uv pip install -e ".[dev,media,speech]"
 
       # Put the venv on PATH and call the tools directly rather than through `uv run`.
       # `uv run` re-resolves the whole dependency graph across every Python the project
@@ -48,15 +49,19 @@ jobs:
       # The media suites skip without ffmpeg, which is correct on a machine that has none
       # and wrong here: CI installs one on purpose, so a skip means the install stopped
       # working and nobody would have noticed from a green run.
-      - name: ffmpeg is present, so the media tests actually run
+      - name: ffmpeg and a voice are present, so those suites actually run
         run: |
           python -c "
           import sys
           from thursday_media.ffmpeg import discover
+          from thursday_voice.espeak import available
           found, _ = discover()
           if not found:
               sys.exit('no ffmpeg: the media tests would skip silently')
+          if not available():
+              sys.exit('no espeak: the narration tests would skip silently')
           print('ffmpeg at', found)
+          print('espeak available')
           "
 
       # The suite needs no database, no Redis, no model credentials and no GUI —

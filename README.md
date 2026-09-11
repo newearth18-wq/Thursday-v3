@@ -20,7 +20,7 @@ ready, what is not, and what closing each gap would take is in
 [docs/23-release-readiness.md](docs/23-release-readiness.md).
 
 **Phase 1 is implemented and runnable**: the vertical slice from
-[docs/15-vertical-slice.md](docs/15-vertical-slice.md) works end to end, with 1,980 tests that
+[docs/15-vertical-slice.md](docs/15-vertical-slice.md) works end to end, with 2,032 tests that
 need no database, no network and no model credentials — plus 62 in the desktop app, which
 is where the decisions about what a person is actually shown now live.
 
@@ -204,7 +204,7 @@ conventions, so neither can be forgotten by a new caller.
 
 Full design in [`docs/`](docs/) — the twenty-four deliverables, written before the code
 (§24 came after, describing what V11 built), plus the
-[V2 review](docs/architecture/00-v2-review.md) and sixty
+[V2 review](docs/architecture/00-v2-review.md) and sixty-one
 [architecture decisions](docs/architecture/decisions/) recording what was chosen and what
 each choice cost:
 
@@ -289,6 +289,12 @@ each choice cost:
 - The same shell on Android, as a screen onto a Thursday running somewhere else rather than
   a second backend on the phone (ADR 0057) — a "Connect to Thursday" prompt reached by
   repeated real connection failure, never by asking what platform this is
+- A voice on a fresh install: eSpeak NG as a library in a wheel — Thai included, no model
+  file to fetch — sitting under Piper in the same chain, so "offline mode still has a voice"
+  stops being conditional on a download. Thursday speaks a script into audio files and reads
+  their real durations back, which is what turns a video's subtitles from **estimated** into
+  **measured**: each scene is exactly as long as the line spoken over it, and every cue lands
+  on the frame the voice starts
 - Media editing that is local, deterministic and reversible by construction: trim, join,
   resize to 16:9/9:16/1:1, burn in subtitles, dub narration and looped music, normalise
   loudness, strip silence, overlay, crossfade, cover frame. An edit writes a **new** file and
@@ -320,6 +326,11 @@ each choice cost:
 - Real calendar and mail accounts. `CalendarProvider` and `MessageProvider` are ports with
   local adapters — real behaviour, nothing leaving the machine, and *not* the owner's actual
   calendar or inbox. A Google or Outlook adapter is a new class behind the same protocol.
+- **Pictures** Thursday makes itself. Narration it now speaks (ADR 0061), but there is no
+  text-to-image and no text-to-video, so storyboard frames stay an input and the creative
+  workflow names what it is missing rather than inventing it. The synthesised voice is
+  formant synthesis and sounds like one; a better voice is a Piper model file rather than a
+  design change.
 - Media *generation* of any kind. Editing is built (ADR 0060) and needs a local ffmpeg,
   which the container discovers at startup — a machine without one gets an editor that
   refuses every operation with the remedy in the sentence, and `health()` says so. What
@@ -349,7 +360,7 @@ the verification loop, the audit chain and the device round-trip are all real.
 
 ```bash
 ./scripts/check.sh           # everything CI runs: lint, format, types, tests, migrations
-pytest                       # 1,980 tests, no infrastructure
+pytest                       # 2,032 tests, no infrastructure
 ruff check . && ruff format .
 mypy packages services
 alembic upgrade head && alembic revision --autogenerate -m "what changed"

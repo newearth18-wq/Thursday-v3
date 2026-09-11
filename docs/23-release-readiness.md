@@ -6,7 +6,7 @@ a multi-user or internet-exposed installation.**
 That sentence is the whole document in one line. What follows is the evidence for it, and —
 more usefully — the evidence against.
 
-Written at Sprint 50 and kept current since, against 1,980 tests that need no database, no
+Written at Sprint 50 and kept current since, against 2,032 tests that need no database, no
 network and no model credentials. `./scripts/check.sh` runs lint, format, types, the suite and the migrations.
 
 ---
@@ -49,6 +49,7 @@ container, not a unit test of the class in isolation.
 | Metrics whose labels cannot carry a path or a secret | `tests/integration/test_metrics_v49.py` |
 | A promotional video assembled, narrated, subtitled and rendered, then judged by opening the file | `tests/e2e/test_v11_media_acceptance.py` |
 | Every editing operation against a real ffmpeg, each asserted on a probe of its output | `tests/integration/test_media_editing_v11.py` |
+| A script spoken by Thursday, timed off the real audio, rendered, and the finished video's soundtrack checked for being audible | `tests/e2e/test_v12_narration_acceptance.py` |
 
 ## 23.2 What is not ready, and what that would take
 
@@ -96,6 +97,17 @@ device key that expired on its own would lock the owner out of their own machine
 
 *Still open:* the other three rotations §117 lists — the shared enrolment token, the core's
 TLS key, and provider API keys.
+
+**Thursday can speak, and it sounds like a machine.** eSpeak NG (ADR 0061) is a real local
+synthesiser that installs as a wheel with no model file, covers Thai, and produces audio
+whose measured durations time the subtitles the media pipeline burns in — which is what
+closed V11's estimated-timing gap. What it is not is pleasant to listen to: it is formant
+synthesis, and for a video somebody will show at a school that matters. *To close:* a Piper
+voice file, which the existing chain already prefers where one is present — a download
+rather than a design change.
+
+Still true of the whole voice layer: **no microphone or speaker has ever been opened.**
+Narration writes files.
 
 **Media editing is built; media *generation* is not.** Editing is real, local and
 deterministic (ADR 0060) — trim, join, resize, subtitle, dub, normalise, overlay, crossfade —

@@ -260,3 +260,58 @@ async def test_probing_is_a_read_and_answers_from_the_file(tmp_path):
     assert result.ok and result.verified
     assert result.data["seconds"] == pytest.approx(2.0, abs=0.2)
     assert "320×240" in result.data["summary"]
+
+
+# ---------------------------------------------------------------------- narration (V12)
+
+
+def test_the_container_always_has_a_narrator(container):
+    """Present whether or not a real voice is configured. One that cannot speak refuses by
+    name when asked, which is more use than an attribute that is None."""
+    assert container.narrator is not None
+    assert container.narrator.backend
+
+
+async def test_the_stub_voice_refuses_to_narrate_rather_than_writing_json(container, tmp_path):
+    """The default backend describes how Thursday would speak. Written to `line01.wav` that
+    is a video with silence where the narration should be, and nothing would have failed."""
+    from thursday_media.ports import MediaUnavailable
+
+    with pytest.raises(MediaUnavailable) as raised:
+        await container.narrator.narrate(["สวัสดีครับ"], tmp_path / "narration")
+
+    assert "text-stub" in raised.value.message
+    assert "THURSDAY_TTS_BACKEND=espeak" in raised.value.message
+    assert not (tmp_path / "narration").exists() or not list((tmp_path / "narration").iterdir())
+
+
+@pytest.mark.skipif(
+    not __import__("importlib").util.find_spec("espeakng_loader"),
+    reason="espeakng-loader not installed",
+)
+async def test_choosing_espeak_gives_the_container_a_voice_that_speaks(tmp_path):
+    """End to end through the real container: a setting, a chain, and real audio out."""
+    from thursday_shared.audio import is_wav
+
+    container = build_container(
+        Settings(
+            data_dir=tmp_path / "var",
+            obsidian_vault=tmp_path / "vault",
+            database_url=f"sqlite+aiosqlite:///{tmp_path}/t.db",
+            log_level="WARNING",
+            llm_backend="rule",
+            vault_backend="memory",
+            tts_backend="espeak",
+            tts_voice="th",
+        ),
+        configure_logs=False,
+    )
+    assert "espeak-ng" in container.tts.name
+
+    narration = await container.narrator.narrate(
+        ["สวัสดีครับ ทดสอบเสียง", "second line"], tmp_path / "narration"
+    )
+    assert len(narration.lines) == 2
+    for line in narration.lines:
+        assert line.seconds > 0.2
+        assert is_wav(Path(line.path).read_bytes())

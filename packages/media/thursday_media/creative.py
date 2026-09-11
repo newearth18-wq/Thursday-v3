@@ -71,6 +71,12 @@ class PromoRequest:
     aspect: str = "16:9"
     #: One file covering the whole script. Mutually exclusive with per-scene narration.
     narration: str = ""
+    #: Speak the script with Thursday's own synthesiser (V12). Turns the estimated-timing
+    #: path into the measured one: each scene becomes exactly as long as the line spoken
+    #: over it, so every cue lands on the frame the voice starts.
+    narrate: bool = False
+    #: Which voice to speak in. Empty means the narrator's configured default.
+    voice: str = ""
     music: str = ""
     music_gain_db: float = -18.0
     subtitles: bool = True
@@ -91,6 +97,10 @@ class PromoBuild:
     missing: list[str] = field(default_factory=list)
     #: Total length of the assembled video, in seconds, before it is rendered.
     seconds: float = 0.0
+    #: What Thursday spoke, when it spoke it itself. `None` when narration was supplied or
+    #: there is none — the distinction matters for reporting, since a synthesised voice is
+    #: something the owner should be told about rather than left to notice.
+    narration: Any = None
 
     @property
     def ready(self) -> bool:
@@ -110,6 +120,7 @@ class PromoBuild:
             "ready": self.ready,
             "missing": self.missing,
             "seconds": round(self.seconds, 2),
+            "narration": self.narration.to_dict() if self.narration is not None else None,
             "subtitle_path": self.subtitle_path,
             "subtitle_timing": self.subtitles.timing,
             "summary": self.describe(),
@@ -117,20 +128,48 @@ class PromoBuild:
         }
 
 
-async def compose(request: PromoRequest, editor: Any = None) -> PromoBuild:
+async def compose(request: PromoRequest, editor: Any = None, narrator: Any = None) -> PromoBuild:
     """Turn a request into a renderable plan, or say what is stopping it.
 
-    `editor` is used only to read the length of narration files. Without one, per-scene
-    narration cannot be measured and the request is treated as having none — which is a
-    downgrade in subtitle accuracy and never a silent one.
+    `editor` is used only to read the length of narration files that were supplied. Without
+    one, per-scene narration cannot be measured and the request is treated as having none —
+    a downgrade in subtitle accuracy, and never a silent one.
+
+    `narrator` is what makes `request.narrate` possible: it speaks the script, and the
+    durations it measures are used directly, so no editor is needed for that path at all.
     """
     build = PromoBuild()
     workdir = Path(request.workdir)
     scenes = [s for s in request.scenes if (s.text.strip() or s.image)]
+    #: Lengths measured by the narrator, when Thursday spoke the script itself.
+    spoken: list[float] = []
 
     if not scenes:
         build.missing.append("a script — there are no scenes to show")
         return build
+
+    if request.narrate:
+        problem = _narration_blocker(request, scenes, narrator)
+        if problem:
+            build.missing.append(problem)
+            return build
+        # Speak first, then carry on as though the audio had been supplied: everything
+        # downstream already knows how to time a scene against its own narration file.
+        narration = await narrator.narrate(
+            [scene.text for scene in scenes],
+            workdir / "narration",
+            voice=request.voice,
+        )
+        build.narration = narration
+        scenes = [
+            Scene(text=scene.text, image=scene.image, seconds=scene.seconds, narration=line.path)
+            for scene, line in zip(scenes, narration.lines, strict=True)
+        ]
+        # Kept, rather than re-derived below. The narrator measured these off the audio it
+        # just wrote, so asking an editor to probe the same files would be slower and no
+        # more true — and asking reading speed instead would silently discard the
+        # measurement, which is what this did until a test compared the numbers.
+        spoken = narration.durations
 
     per_scene = [s for s in scenes if s.narration]
     if per_scene and len(per_scene) != len(scenes):
@@ -156,7 +195,7 @@ async def compose(request: PromoRequest, editor: Any = None) -> PromoBuild:
     if build.missing:
         return build
 
-    durations = await _scene_lengths(scenes, editor, measured=bool(per_scene))
+    durations = spoken or await _scene_lengths(scenes, editor, measured=bool(per_scene))
     build.seconds = sum(durations)
 
     steps: list[EditStep] = []
@@ -277,6 +316,34 @@ def expectations(request: PromoRequest, build: PromoBuild) -> dict[str, Any]:
         "min_seconds": max(0.0, build.seconds - 1.0),
         "max_seconds": build.seconds + 1.5,
     }
+
+
+def _narration_blocker(request: PromoRequest, scenes: list[Scene], narrator: Any) -> str:
+    """Why this script cannot be spoken, or empty when it can.
+
+    Checked before a single line is synthesised, because synthesising five of six lines and
+    then discovering the sixth is blank leaves a folder of audio nobody asked for.
+    """
+    if narrator is None or not getattr(narrator, "available", False):
+        return (
+            "a speech synthesiser — Thursday was asked to narrate this and has no voice "
+            "configured (set THURSDAY_TTS_BACKEND=espeak)"
+        )
+    if request.narration:
+        return "either narration Thursday speaks or a narration file, not both"
+    if any(scene.narration for scene in scenes):
+        return "either narration Thursday speaks or per-scene audio files, not both"
+    silent = [index for index, scene in enumerate(scenes, start=1) if not scene.text.strip()]
+    if silent:
+        # All or none, for the same reason a supplied track cannot be part measured: a scene
+        # with nothing spoken over it would have to be timed by a different rule, and every
+        # cue after it would move.
+        return (
+            "words for scene " + ", ".join(str(i) for i in silent) + " — Thursday cannot "
+            "narrate a scene with no line, and timing some scenes by voice and the rest by "
+            "reading speed would move every cue after the first silent one"
+        )
+    return ""
 
 
 async def _scene_lengths(scenes: list[Scene], editor: Any, *, measured: bool) -> list[float]:

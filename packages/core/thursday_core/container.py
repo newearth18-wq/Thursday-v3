@@ -39,6 +39,7 @@ from thursday_automation.skills.registry import SkillRegistry
 from thursday_devices.hub import DeviceHub
 from thursday_devices.wake import WakeOnLan
 from thursday_media.ffmpeg import FFmpegEditor
+from thursday_media.narration import Narrator
 from thursday_media.tools import register_media_tools, undo_media_edit
 from thursday_media.unavailable import UnavailableEditor
 from thursday_memory.embeddings import HashEmbeddingProvider, OllamaEmbeddingProvider
@@ -189,6 +190,8 @@ class Container:
     #: holds an `UnavailableEditor` that refuses with a remedy, so "not installed" is a
     #: state the UI can show rather than an exception from inside a render (ADR 0060).
     editor: Any = None
+    #: Speaks a script into audio files whose real durations time the subtitles (V12).
+    narrator: Any = None
 
     #: Whether state actually outlives this process (Sprint 51). False is a supported
     #: configuration and not a degraded one — but it must never be a silent assumption.
@@ -591,6 +594,10 @@ def build_container(settings: Settings | None = None, *, configure_logs: bool = 
     # -- voice ----------------------------------------------------------------
     c.stt, c.tts, c.wake_word = _build_voice(settings)
     c.audio_router = AudioRouter(follow_me=settings.voice_follow_me)
+    # Narration for video (V12). It takes the same TTS chain the voice loop speaks through,
+    # so a machine that can talk can narrate — and one that cannot refuses by name rather
+    # than writing a folder of files that are not audio.
+    c.narrator = Narrator(c.tts, voice=settings.tts_voice)
 
     # -- conversation ---------------------------------------------------------
     c.world = WorldState()
@@ -833,6 +840,18 @@ def _build_voice(settings: Settings) -> tuple[Any, Any, Any]:
     tts_providers: list[Any] = []
     if settings.tts_backend == "piper":
         tts_providers.append(PiperTTS(model_path=str(settings.data_dir / "piper.onnx")))
+    if settings.tts_backend in ("espeak", "piper"):
+        # Behind Piper rather than instead of it: Piper sounds better where somebody has
+        # fetched a voice, and eSpeak needs no file at all — so it is the fallback that
+        # makes "offline mode still has a voice" unconditional rather than conditional on a
+        # download having happened (ADR 0061).
+        from thursday_voice.espeak import EspeakTTS
+        from thursday_voice.espeak import available as espeak_available
+
+        if espeak_available():
+            tts_providers.append(EspeakTTS(voice=settings.tts_voice))
+        elif settings.tts_backend == "espeak":
+            log.warning("espeak_unavailable", reason="espeakng-loader is not installed")
     tts_providers.append(TextStubTTS())
 
     # Audio is HIGHLY_PRIVATE by default (§34), so the chain refuses to fall back onto a

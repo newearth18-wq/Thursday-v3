@@ -68,3 +68,4 @@ done this way?" and have no answer.
 | [0058](0058-what-thursday-is-doing-and-how-it-is-going-are-two-questions.md) | What Thursday is doing and how it is going are two questions | On one priority table a stale failure outranks a live microphone, and §10 forbids that |
 | [0059](0059-a-client-may-not-assume-it-understands-its-server.md) | A client may not assume it understands its server | A `Record` type protects the build being compiled, never the one already on somebody's phone |
 | [0060](0060-an-edit-never-writes-over-its-input.md) | An edit never writes over its input, and a render is judged by the file it produced | Undo for free, an honest risk level, and a resume that cannot corrupt a source |
+| [0061](0061-a-voice-that-needs-no-download.md) | A voice that needs no download, and a duration measured rather than guessed | Thursday could describe speech and not make any, so every video was timed by guesswork |
