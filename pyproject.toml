@@ -39,6 +39,11 @@ vision = ["opencv-python>=4.10", "mediapipe>=0.10", "onnxruntime>=1.19"]
 # Tauri embeds as its sidecar — not something the running app or its tests need, so it is
 # its own extra rather than folded into `dev`.
 installer = ["pyinstaller>=6.10"]
+# A system ffmpeg is what a real deployment uses. This wheel ships a static build and is
+# the fallback `thursday_media.ffmpeg.discover` reaches for last, so a machine with no
+# system ffmpeg can still edit. Optional on purpose: media editing is a capability that
+# reports itself unavailable rather than a dependency that must be present to start.
+media = ["imageio-ffmpeg>=0.5"]
 dev = [
     "pytest>=8.3",
     "pytest-asyncio>=0.24",
@@ -71,6 +76,7 @@ packages = [
     "packages/automation/thursday_automation",
     "packages/devices/thursday_devices",
     "packages/models/thursday_models",
+    "packages/media/thursday_media",
     "services/api/thursday_api",
     "services/worker/thursday_worker",
     "services/realtime/thursday_realtime",
@@ -107,6 +113,10 @@ ignore = [
 # file I/O is already dispatched to worker threads.
 "packages/devices/thursday_devices/node/adapters/*.py" = ["S602", "S603", "S607", "ASYNC240"]
 "packages/devices/thursday_devices/node/executor.py" = ["S324"]
+# Driving ffmpeg is this module's entire job. S603/S607 flag the subprocess call itself;
+# the arguments are always a list and never a shell string, which is the property that
+# actually matters and is asserted in tests/unit/test_media_ffmpeg_v11.py.
+"packages/media/thursday_media/ffmpeg.py" = ["S603", "S607"]
 
 [tool.mypy]
 python_version = "3.12"
@@ -123,6 +133,6 @@ pythonpath = [
     ".",
     "packages/shared", "packages/core", "packages/agents", "packages/tools",
     "packages/memory", "packages/voice", "packages/vision", "packages/security",
-    "packages/automation", "packages/devices", "packages/models",
+    "packages/automation", "packages/devices", "packages/models", "packages/media",
     "services/api", "services/worker", "services/realtime",
 ]

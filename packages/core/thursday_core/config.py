@@ -292,6 +292,17 @@ class Settings(BaseSettings):
     gesture_timeout_s: float = 10.0
     observation_retention_days: int = 7
 
+    # media ---------------------------------------------------------------------
+    #: Where ffmpeg is. Empty means "look for it" — the PATH first, then an installed
+    #: imageio-ffmpeg wheel. Not finding one is a supported state: media editing reports
+    #: itself unavailable and refuses with a remedy rather than failing mid-render (ADR 0060).
+    ffmpeg_path: str = ""
+    #: Working directory for renders and their checkpoints, under `data_dir`. Intermediate
+    #: files live here rather than beside the owner's originals.
+    media_workdir: Path = Path("media")
+    #: How long any single ffmpeg invocation may run before it is stopped.
+    media_timeout_s: float = Field(default=600.0, ge=10.0)
+
     # memory --------------------------------------------------------------------
     embedding_backend: str = "hash"  # hash (offline) | ollama
     embedding_dimensions: int = 256

@@ -62,6 +62,7 @@ _DEFAULTS: tuple[ActionPolicy, ...] = (
     ActionPolicy("window.active", PermissionLevel.READ, PolicyDecision.AUTO),
     ActionPolicy("clipboard.read", PermissionLevel.READ, PolicyDecision.AUTO),
     ActionPolicy("audio.volume.get", PermissionLevel.READ, PolicyDecision.AUTO),
+    ActionPolicy("media.probe", PermissionLevel.READ, PolicyDecision.AUTO),
     ActionPolicy("memory.search", PermissionLevel.READ, PolicyDecision.AUTO),
     ActionPolicy("obsidian.search", PermissionLevel.READ, PolicyDecision.AUTO),
     ActionPolicy("web.search", PermissionLevel.READ, PolicyDecision.AUTO),
@@ -79,6 +80,17 @@ _DEFAULTS: tuple[ActionPolicy, ...] = (
     ActionPolicy("file.folder.create", PermissionLevel.MODIFY, PolicyDecision.AUTO),
     ActionPolicy("clipboard.write", PermissionLevel.MODIFY, PolicyDecision.AUTO),
     ActionPolicy("audio.volume.set", PermissionLevel.MODIFY, PolicyDecision.AUTO),
+    # Editing writes new files and never overwrites an input (ADR 0060), so the blast
+    # radius of getting it wrong is disk space rather than somebody's footage. That is why
+    # it is AUTO and LOW rather than sitting beside file.delete — and why `reversible` is
+    # true: undoing it means deleting files this call created, with no original at risk.
+    ActionPolicy(
+        "media.edit",
+        PermissionLevel.MODIFY,
+        PolicyDecision.AUTO,
+        RiskLevel.LOW,
+        bulk_threshold=40,
+    ),
     ActionPolicy("memory.write", PermissionLevel.MODIFY, PolicyDecision.AUTO),
     ActionPolicy("obsidian.write", PermissionLevel.MODIFY, PolicyDecision.AUTO),
     ActionPolicy("browser.type", PermissionLevel.MODIFY, PolicyDecision.AUTO, RiskLevel.LOW),

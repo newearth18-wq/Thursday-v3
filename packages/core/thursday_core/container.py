@@ -38,6 +38,9 @@ from thursday_automation.skills.learning import SkillObserver
 from thursday_automation.skills.registry import SkillRegistry
 from thursday_devices.hub import DeviceHub
 from thursday_devices.wake import WakeOnLan
+from thursday_media.ffmpeg import FFmpegEditor
+from thursday_media.tools import register_media_tools, undo_media_edit
+from thursday_media.unavailable import UnavailableEditor
 from thursday_memory.embeddings import HashEmbeddingProvider, OllamaEmbeddingProvider
 from thursday_memory.graph import KnowledgeGraph
 from thursday_memory.manager import MemoryManager
@@ -182,6 +185,12 @@ class Container:
     #: Which machines have a MAC recorded, and whether the owner allows waking them. Set by
     #: the owner; never learned from the network (ADR 0044's reasoning applies here too).
     wake_records: dict[Any, Any] = field(default_factory=dict)
+    #: Local media editing (V11). Always present: when ffmpeg is not on the machine this
+    #: holds an `UnavailableEditor` that refuses with a remedy, so "not installed" is a
+    #: state the UI can show rather than an exception from inside a render (ADR 0060).
+    editor: Any = None
+
+
     #: Whether state actually outlives this process (Sprint 51). False is a supported
     #: configuration and not a degraded one — but it must never be a silent assumption.
     persistent: bool = False
@@ -350,6 +359,16 @@ class Container:
                 ),
             }
         )
+        media = self.editor.health()
+        checks.append(
+            {
+                "component": "media",
+                # Not being able to edit video is not a fault — a machine without ffmpeg is
+                # a supported deployment. What would be a fault is claiming the capability.
+                "ok": True,
+                "detail": str(media.get("detail") or "unknown"),
+            }
+        )
         checks.append(
             {
                 "component": "skills",
@@ -513,6 +532,11 @@ def build_container(settings: Settings | None = None, *, configure_logs: bool = 
         register_browser_tools(c.tools)
     else:
         log.info("browser_tools_unavailable", reason="playwright is not installed")
+    c.editor = _build_editor(settings)
+    # Registered whether or not ffmpeg is present, unlike the browser tools above. The
+    # difference is deliberate: an unavailable editor still answers, with a sentence naming
+    # the remedy, and "install ffmpeg" is more use to the owner than ToolNotFound.
+    register_media_tools(c.tools, c.editor, workdir=settings.data_dir / settings.media_workdir)
     c.tool_router = ToolRouter(c.tools)
     c.tasks = TaskManager(c.bus, repository=_task_repository(settings, c))
     c.state = build_state_store(settings.redis_url)
@@ -536,7 +560,7 @@ def build_container(settings: Settings | None = None, *, configure_logs: bool = 
     c.agents.register(FileAgent())
     c.agents.register(CodingAgent())
     c.agents.register(DesignAgent())
-    c.agents.register(MediaAgent())
+    c.agents.register(MediaAgent(c.editor))
     c.agent_factory = AgentFactory(c.agents)
     c.supervisor = Supervisor(c.models, use_llm_critique=not settings.offline)
 
@@ -752,6 +776,29 @@ def _build_vault(settings: Settings) -> Any:
     return EnvVault()
 
 
+def _build_editor(settings: Settings) -> Any:
+    """An ffmpeg-backed editor, or one that refuses honestly.
+
+    Discovery happens once, at build time, so the answer to "can Thursday edit video on this
+    machine" is settled before anybody asks for a video rather than three minutes into a
+    render (ADR 0060).
+    """
+    workdir = settings.data_dir / settings.media_workdir
+    editor = FFmpegEditor.discovered(
+        settings.ffmpeg_path or None,
+        timeout_s=settings.media_timeout_s,
+        # The path jail media editing works inside: the render workspace, plus the vault so
+        # a finished video can be filed next to the notes about it. A plan can name a file,
+        # and a plan can come from a model.
+        allowed_roots=(workdir, settings.data_dir, settings.obsidian_vault),
+    )
+    if editor.available:
+        log.info("media_editing_available", ffmpeg=editor.ffmpeg)
+        return editor
+    log.info("media_editing_unavailable", reason="no ffmpeg found")
+    return UnavailableEditor()
+
+
 def _playwright_available() -> bool:
     from importlib.util import find_spec
 
@@ -890,6 +937,10 @@ def _register_undo_executors(c: Container) -> None:
             ),
         )
         return result.succeeded
+
+    # Deleting files a media edit created. Safe only because an edit never overwrites an
+    # input, so everything it names was created by the call being undone (ADR 0060).
+    c.undo.register_executor("media_edit", undo_media_edit)
 
     async def memory_forget(record: UndoRecord) -> bool:
         from uuid import UUID

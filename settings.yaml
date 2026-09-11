@@ -111,6 +111,17 @@ vision:
   gesture_timeout_s: 10
   observation_retention_days: 7
 
+media:
+  # Empty means "find it": the PATH first, then an installed imageio-ffmpeg wheel. Not
+  # finding one is supported — editing then reports itself unavailable and refuses with a
+  # remedy rather than failing part-way through a render (ADR 0048).
+  ffmpeg_path: ""
+  # Renders and their checkpoints, under data_dir. Intermediate files live here rather than
+  # beside the owner's originals.
+  workdir: media
+  # How long any single ffmpeg invocation may run before it is stopped.
+  timeout_s: 600
+
 memory:
   embedding_backend: hash        # hash (offline) | ollama
   embedding_dimensions: 256

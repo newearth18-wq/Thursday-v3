@@ -6,7 +6,7 @@ a multi-user or internet-exposed installation.**
 That sentence is the whole document in one line. What follows is the evidence for it, and —
 more usefully — the evidence against.
 
-Written at Sprint 50 and kept current since, against 1,373 tests that need no database, no
+Written at Sprint 50 and kept current since, against TESTCOUNT tests that need no database, no
 network and no model credentials. `./scripts/check.sh` runs lint, format, types, the suite and the migrations.
 
 ---
@@ -47,6 +47,8 @@ container, not a unit test of the class in isolation.
 | A tutor whose lessons end when the machine proves it, and whose practice mode has no execution path | `tests/e2e/test_onboarding_acceptance.py` |
 | A photograph, a replayed video and a recorded voice each refused with the matcher reporting a perfect score | `tests/e2e/test_identity_acceptance.py` |
 | Metrics whose labels cannot carry a path or a secret | `tests/integration/test_metrics_v49.py` |
+| A promotional video assembled, narrated, subtitled and rendered, then judged by opening the file | `tests/e2e/test_v11_media_acceptance.py` |
+| Every editing operation against a real ffmpeg, each asserted on a probe of its output | `tests/integration/test_media_editing_v11.py` |
 
 ## 23.2 What is not ready, and what that would take
 
@@ -94,6 +96,28 @@ device key that expired on its own would lock the owner out of their own machine
 
 *Still open:* the other three rotations §117 lists — the shared enrolment token, the core's
 TLS key, and provider API keys.
+
+**Media editing is built; media *generation* is not.** Editing is real, local and
+deterministic (ADR 0060) — trim, join, resize, subtitle, dub, normalise, overlay, crossfade —
+and every operation is tested against a real ffmpeg with the assertion made on a probe of the
+output rather than on an exit code. It needs ffmpeg on the machine: the container discovers
+one at startup, and a machine without one gets an editor that refuses every call with the
+remedy in the sentence while `health()` reports `media` as unavailable. That is a supported
+deployment, not a degraded one.
+
+What is missing is everything that *creates* material rather than assembling it. There is no
+text-to-image, no text-to-video and no text-to-speech, so `creative.compose` takes pictures
+and narration as inputs and returns `ready=False` naming what it lacks. The brief's creative
+workflow is therefore half-built on purpose — the deterministic half. *To close:* a provider
+behind a port for each, in the shape ADR 0001 describes.
+
+Two smaller limits, both deliberate. **Silence removal refuses on video**: cutting silence
+from a soundtrack while leaving the picture alone desynchronises the two for the rest of the
+video, so it works on audio, where it is actually wanted, and says why it will not do the
+rest. And **subtitle burn-in depends on the machine's fonts** — libass renders what
+fontconfig can find, so a system with no Thai font produces boxes. The quality gate cannot
+see that, and this document says so rather than letting the test suite's green imply
+otherwise.
 
 **The updater cannot install.** It checks, verifies and refuses correctly, and no installer is
 wired (ADR 0033). This is deliberate — a half-built installer is worse than none — but it
