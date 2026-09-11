@@ -45,7 +45,8 @@ sent; it says what it *observed*.
 
 ```bash
 uv venv && source .venv/bin/activate      # or: python -m venv .venv
-uv pip install -e ".[dev]"
+uv pip install -e ".[dev,media]"          # `media` adds ffmpeg; without it Thursday
+                                          # reports video editing as unavailable
 alembic upgrade head                      # SQLite by default; no server needed
 
 python -m apps.cli                        # embedded core + local node, one command
