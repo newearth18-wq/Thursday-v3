@@ -20,8 +20,8 @@ ready, what is not, and what closing each gap would take is in
 [docs/23-release-readiness.md](docs/23-release-readiness.md).
 
 **Phase 1 is implemented and runnable**: the vertical slice from
-[docs/15-vertical-slice.md](docs/15-vertical-slice.md) works end to end, with 2,359 tests that
-need no database, no network and no model credentials — plus 169 in the desktop app, which
+[docs/15-vertical-slice.md](docs/15-vertical-slice.md) works end to end, with 2,366 tests that
+need no database, no network and no model credentials — plus 186 in the desktop app, which
 is where the decisions about what a person is actually shown now live.
 
 ```
@@ -204,7 +204,7 @@ conventions, so neither can be forgotten by a new caller.
 
 Full design in [`docs/`](docs/) — the twenty-four deliverables, written before the code
 (§24–§26 came after, describing what V11, V14 and V15 built), plus the
-[V2 review](docs/architecture/00-v2-review.md) and sixty-seven
+[V2 review](docs/architecture/00-v2-review.md) and sixty-eight
 [architecture decisions](docs/architecture/decisions/) recording what was chosen and what
 each choice cost:
 
@@ -356,6 +356,11 @@ each choice cost:
   another account, and a key with a trailing newline — before the working one is touched, and
   the outgoing key is kept so there is a way back. Every rotation carries the sentence naming
   what Thursday cannot do: revoke the old key at the provider
+- A walkthrough that points at the **real** button: a lesson names a control, the app marks
+  it, and the interface finds it at the moment it draws — no coordinate stored anywhere, and a
+  test that fails if a lesson names a control the app no longer has. A control that is not on
+  screen gets no arrow and a sentence saying so, because an arrow is a claim about where
+  something is and a wrong one costs the next one too. It points; it does not press
 - 126 REST operations, two WebSockets, 29-table schema with working migrations and seeds
 
 **Designed, ported, not yet implemented** — every one has an interface and a Phase in
@@ -409,7 +414,7 @@ the verification loop, the audit chain and the device round-trip are all real.
 
 ```bash
 ./scripts/check.sh           # everything CI runs: lint, format, types, tests, migrations
-pytest                       # 2,359 tests, no infrastructure
+pytest                       # 2,366 tests, no infrastructure
 ruff check . && ruff format .
 mypy packages services
 alembic upgrade head && alembic revision --autogenerate -m "what changed"

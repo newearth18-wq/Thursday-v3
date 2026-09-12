@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { Spotlight } from "@/components/Spotlight";
 import {
   type LearningCentre,
   type Lesson,
@@ -199,8 +200,21 @@ export function LearningCenter({ lastReply }: { lastReply?: string }) {
 
 function LessonPanel(props: { step: LessonStep; onCheck: () => void; onSkip: () => void }) {
   const { step } = props;
+  const [missing, setMissing] = useState(false);
+  const points_at = step.next.points_at;
+
   return (
     <div className="ml-5 space-y-1 rounded-lg bg-ink-900 p-2">
+      {points_at && (
+        <Spotlight name={points_at} label={step.next.show || step.message} onUnavailable={setMissing} />
+      )}
+      {/* The control is not on screen. Said out loud rather than drawn approximately: an
+          arrow is a claim about where something is, and a wrong one costs the next one too. */}
+      {points_at && missing && (
+        <p className="text-[10px] text-state-warning">
+          ปุ่มที่บทเรียนนี้พูดถึงยังไม่อยู่บนหน้าจอตอนนี้ — ลองเปิดหน้าต่างหลักของ Thursday ดูครับ
+        </p>
+      )}
       <p className="text-[11px] text-slate-300">{step.next.show || step.message}</p>
       {step.next.try && (
         <p className="font-mono text-[10px] text-thursday">“{step.next.try}”</p>

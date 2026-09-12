@@ -6,7 +6,7 @@ a multi-user or internet-exposed installation.**
 That sentence is the whole document in one line. What follows is the evidence for it, and —
 more usefully — the evidence against.
 
-Written at Sprint 50 and kept current since, against 2,359 tests that need no database, no
+Written at Sprint 50 and kept current since, against 2,366 tests that need no database, no
 network and no model credentials. `./scripts/check.sh` runs lint, format, types, the suite and the migrations.
 
 ---
@@ -286,10 +286,17 @@ It has **no control that marks a lesson complete**, and that is the property wor
 own check reads the machine. A "mark as done" button would turn the screen from a record of
 what the owner can do into a record of what they clicked.
 
-*Still open:* the §13 interactive walkthrough that highlights a real button with an arrow,
-and the §22 gesture tutorial with a live hand skeleton. Both need to point at the running
-interface rather than describe it, which is a different piece of work from rendering the
-lessons.
+The **§13 walkthrough** landed in Sprint 99 (ADR 0068). A lesson names a control rather than
+describing where it is; the desktop marks its controls and the interface finds the real one
+at the moment it draws, so no coordinate is stored anywhere. Two properties matter more than
+the arrow itself: a name a lesson uses **must exist in the app**, enforced by a test that
+scans the desktop source — renaming a control and leaving the lesson behind fails the suite —
+and a control that is not on screen gets **no arrow and a sentence saying so**, because an
+arrow is a claim about where something is and a wrong one costs the next one too. It points;
+it does not press.
+
+*Still open:* §22's gesture tutorial with a live hand skeleton. It needs a camera, and no
+camera has ever run against this code.
 
 **Some lessons the spec names are not written.** §17's five basics are, plus stopping. The
 vision (§21), gesture (§22), agent (§19), automation (§20) and multi-device (§64) lessons are
