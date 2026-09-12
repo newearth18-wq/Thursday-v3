@@ -6,7 +6,7 @@ a multi-user or internet-exposed installation.**
 That sentence is the whole document in one line. What follows is the evidence for it, and —
 more usefully — the evidence against.
 
-Written at Sprint 50 and kept current since, against 2,411 tests that need no database, no
+Written at Sprint 50 and kept current since, against 2,418 tests that need no database, no
 network and no model credentials. `./scripts/check.sh` runs lint, format, types, the suite and the migrations.
 
 ---
@@ -56,6 +56,7 @@ container, not a unit test of the class in isolation.
 | A backtest whose trade count the Supervisor recomputes, an order type no module outside `risk.py` can construct, and a live stage with no adapter behind it | `tests/integration/test_trading_agent_v14.py` |
 | A workflow saved disabled whatever the request said, with each action's permission decision resolved before it is armed | `tests/integration/test_workflow_api_v15.py` |
 | Schedule triggers that fire — five-field cron in the owner's timezone, swept by the worker | `tests/unit/test_schedule_sweep_v15.py` |
+| A core whose TLS key changes while nobody walks to a machine, followed over a real handshake against a certificate that really was replaced | `tests/integration/test_tls_rotation_live_v23.py` |
 
 ## 23.2 What is not ready, and what that would take
 
@@ -152,11 +153,21 @@ it first, and rotating away from a stolen key is a race rather than a fix. `--co
 refuses and writes nothing, and names the only thing that removes the old key's authority
 instead of racing it — re-pairing each node with a person at the machine.
 
-*Not exercised:* a real node reconnecting through a real TLS handshake to a core that has
-actually rotated. The statement is tested against RSA, ECDSA and Ed25519 keys, the endpoint
-against the running application, and the node's decision against a forged chain — but the loop
-that joins them runs with the fetch replaced, and `check_peer`'s real-socket tests have never
-met it in one run. *To close:* one rotation on a live deployment.
+That gap is now closed, and closing it found something. The test serves the real application
+under uvicorn over TLS, stops it, and starts it again on the same port with a certificate on a
+different key — which is what a rotation *is* — and then lets the node's own `run_forever` meet
+it with nothing replaced. The node fails the pin check on a real handshake, fetches the chain
+over a real request to the host it cannot yet trust, re-pins, and reconnects.
+
+What that found is unrelated to hand-overs and was waiting for anybody who looked: **a core
+that refused the HELLO ended the node process.** The refusal left `run_forever` as a bare
+`RuntimeError`, and `main` gathers that loop with the node's diagnostics server — so the whole
+process went down, including `GET /health`, whose only job is to report `last_error`. The
+refusal destroyed the explanation for the refusal, and a pairing code nobody had confirmed yet
+was enough to do it. It now backs off like every other reason a session ended, which is what
+this repository's own rule for close codes already said. A genuine defect inside a session
+still crashes loudly, which is why the refusal got its own exception type rather than a caught
+`RuntimeError`.
 
 **Thursday can speak, and it sounds like a machine.** eSpeak NG (ADR 0061) is a real local
 synthesiser that installs as a wheel with no model file, covers Thai, and produces audio
