@@ -177,7 +177,12 @@ def _lesson_payload(result: Any) -> dict:
         "passed": result.passed,
         "message": result.message,
         "done": result.done,
-        "next": {"show": result.next_show, "try": result.next_try},
+        # §13: the control this step is about, so the interface can point at the real one.
+        "next": {
+            "show": result.next_show,
+            "try": result.next_try,
+            "points_at": result.next_points_at,
+        },
     }
 
 

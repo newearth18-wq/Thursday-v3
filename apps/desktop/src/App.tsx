@@ -157,6 +157,10 @@ export default function App() {
           <form onSubmit={submit} className="mt-2">
             <div className="flex items-end gap-2">
               <input
+                // §13. The name a lesson points at. Kept in step with
+                // `thursday_core/lessons.py` by test, because an arrow drawn at a control
+                // that was renamed teaches the owner that the walkthrough is unreliable.
+                data-teach="conversation-input"
                 value={draft}
                 onChange={(event) => setDraft(event.target.value)}
                 placeholder={connected ? "Say what you need…" : "reconnecting…"}
@@ -209,6 +213,7 @@ export default function App() {
           </button>
         ))}
         <button
+          data-teach="stop-all"
           onClick={stopEverything}
           title="Stop every running task and revoke standing permissions"
           className="ml-2 rounded px-2 py-1 text-[11px] text-slate-700 hover:text-state-error"

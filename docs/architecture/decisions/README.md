@@ -75,3 +75,4 @@ done this way?" and have no answer.
 | [0065](0065-a-document-that-cannot-be-checked-will-be-wrong.md) | A document that cannot be checked will be wrong | Five stale claims, all flattering — including an agent bench understating a permission ceiling |
 | [0066](0066-a-shared-secret-rotates-through-a-window-not-an-instant.md) | A shared secret rotates through a window, not an instant | Changing the variable and restarting refuses every node mid-enrolment, and tells nobody what still held the old one |
 | [0067](0067-a-key-is-proven-before-the-working-one-is-discarded.md) | A key is proven before the working one is discarded | Writing an untested key over a working one discards the only credential that worked — and Thursday cannot revoke the old one |
+| [0068](0068-an-arrow-is-a-claim-about-where-something-is.md) | An arrow is a claim about where something is | Point it at the wrong place once and the owner stops trusting the next one |

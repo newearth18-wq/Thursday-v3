@@ -83,6 +83,14 @@ class Step:
     verify: Callable[[Any, Any], Any] = lambda _container, _evidence: False
     #: A step the owner may pass without doing — reading, not doing.
     informational: bool = False
+    #: §13. The control this step is about, named so the interface can point at the real
+    #: one. Every name here must exist in the desktop app —
+    #: `tests/integration/test_walkthrough_v19.py` checks it, because a lesson pointing at
+    #: a control that was renamed draws an arrow at nothing and teaches the owner that
+    #: the walkthrough is unreliable. Empty means this step has nothing to point at, which
+    #: is the honest answer for a step that is about what to *say* rather than where to
+    #: click.
+    points_at: str = ""
 
 
 @dataclass(frozen=True)
@@ -189,6 +197,7 @@ LESSONS: tuple[Lesson, ...] = (
                 try_this="สวัสดี Thursday",
                 then=("แบบนี้เลยครับ คุณพูดกับผมได้เหมือนคุยกับคน ไม่ต้องพูดให้ถูกรูปแบบ ผมจะพยายามเข้าใจเอง"),
                 verify=_said_something,
+                points_at="conversation-input",
             ),
         ),
     ),
@@ -213,6 +222,10 @@ LESSONS: tuple[Lesson, ...] = (
                 then="จำไว้แค่นี้ก็พอครับ ปุ่มนี้ใช้ได้เสมอ และไม่ต้องรอให้ผมถาม",
                 verify=_acknowledged,
                 informational=True,
+                # The lesson says there is a button. §13 wants the arrow on the real one,
+                # because a sentence about a button the owner cannot find is worse than no
+                # sentence.
+                points_at="stop-all",
             ),
         ),
     ),
@@ -438,6 +451,10 @@ class StepResult:
     #: The next step's SHOW line, when there is one.
     next_show: str = ""
     next_try: str = ""
+    #: §13. The control the *next* step is about, for the interface to point at. Empty
+    #: when that step has nothing to point at — which the interface must render as no
+    #: arrow rather than as an arrow somewhere plausible.
+    next_points_at: str = ""
 
 
 class LessonRunner:
@@ -482,6 +499,7 @@ class LessonRunner:
             message=step.show,
             next_show=step.show,
             next_try=step.try_this,
+            next_points_at=step.points_at,
         )
 
     # -------------------------------------------------------------- TRY → VERIFY → NEXT
@@ -515,6 +533,7 @@ class LessonRunner:
                 message=step.show,
                 next_show=step.show,
                 next_try=step.try_this,
+                next_points_at=step.points_at,
             )
 
         self._record.advance(lesson_id, step.key, now=now)
@@ -535,6 +554,7 @@ class LessonRunner:
             message=step.then,
             next_show=following.show,
             next_try=following.try_this,
+            next_points_at=following.points_at,
         )
 
     def skip(self, lesson_id: str, *, now: Any = None) -> StepResult | None:

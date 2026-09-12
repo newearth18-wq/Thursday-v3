@@ -64,7 +64,7 @@ function step(over: Record<string, unknown> = {}) {
     passed: false,
     message: "ลองบอกผมด้วยภาษาปกติว่าอยากให้ช่วยอะไร",
     done: false,
-    next: { show: "ลองบอกผมด้วยภาษาปกติว่าอยากให้ช่วยอะไร", try: "สวัสดี Thursday" },
+    next: { show: "ลองบอกผมด้วยภาษาปกติว่าอยากให้ช่วยอะไร", try: "สวัสดี Thursday", points_at: "" },
     ...over,
   };
 }
@@ -216,5 +216,34 @@ describe("the suggestion and the path are the same lesson, told apart", () => {
       await screen.findByRole("button", { name: "เริ่มบทเรียนที่แนะนำ: พูดกับ Thursday" }),
     ).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "พูดกับ Thursday" })).toBeInTheDocument();
+  });
+});
+
+describe("the arrow points at a real control, or says it cannot", () => {
+  it("tells the owner when the control is not on this screen", async () => {
+    // jsdom measures every box as zero, which is exactly the "not on screen" case: a closed
+    // drawer, a conditional button, a control renamed since the lesson was written.
+    vi.spyOn(api, "startLesson").mockResolvedValue(
+      step({ next: { show: "ลองพิมพ์ดูครับ", try: "สวัสดี", points_at: "conversation-input" } }) as never,
+    );
+    render(<LearningCenter />);
+    fireEvent.click(await screen.findByRole("button", { name: "พูดกับ Thursday" }));
+
+    expect(await screen.findByText(/ยังไม่อยู่บนหน้าจอ/)).toBeInTheDocument();
+    expect(screen.queryByTestId("spotlight")).not.toBeInTheDocument();
+  });
+
+  it("draws nothing and warns about nothing when a step is about words", async () => {
+    // Empty `points_at` is the honest answer for a step with no place to point at. It must
+    // not become an arrow somewhere plausible, nor a warning about a missing control.
+    vi.spyOn(api, "startLesson").mockResolvedValue(
+      step({ next: { show: "บอกให้ผมจำอะไรก็ได้", try: "จำไว้ว่า…", points_at: "" } }) as never,
+    );
+    render(<LearningCenter />);
+    fireEvent.click(await screen.findByRole("button", { name: "พูดกับ Thursday" }));
+
+    await screen.findByText("บอกให้ผมจำอะไรก็ได้");
+    expect(screen.queryByTestId("spotlight")).not.toBeInTheDocument();
+    expect(screen.queryByText(/ยังไม่อยู่บนหน้าจอ/)).not.toBeInTheDocument();
   });
 });

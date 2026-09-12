@@ -165,7 +165,9 @@ export interface LessonStep {
   passed: boolean;
   message: string;
   done: boolean;
-  next: { show: string; try: string };
+  /** §13: `points_at` names a real control, or is empty when this step is about words
+   *  rather than a place. Always present, so there is one shape to handle rather than two. */
+  next: { show: string; try: string; points_at: string };
 }
 
 export interface PracticeOffer {
