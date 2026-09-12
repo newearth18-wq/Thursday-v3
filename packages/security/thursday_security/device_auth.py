@@ -40,6 +40,7 @@ from uuid import UUID
 
 from thursday_shared.models import utcnow
 
+from thursday_security.enrolment import Rotation
 from thursday_security.keys import hello_payload
 
 #: How far a HELLO's own timestamp may sit from the core's clock. Wide enough for a laptop
@@ -82,8 +83,12 @@ class DeviceAuthenticator:
         *,
         required: bool = True,
         pairing: Any = None,
+        rotation: Rotation | None = None,
     ) -> None:
-        self._token = token
+        # `rotation` supersedes `token` when both are given. One token is the ordinary
+        # case and stays the simplest call; a rotation is the same thing with an overlap
+        # window (§117, ADR 0066).
+        self._rotation = rotation or (Rotation(current=token) if token else None)
         self.required = required
         self._seen: OrderedDict[str, datetime] = OrderedDict()
         #: The registry of per-device public keys (Sprint 36). When a device has paired,
@@ -93,7 +98,12 @@ class DeviceAuthenticator:
 
     @property
     def configured(self) -> bool:
-        return bool(self._token)
+        return self._rotation is not None
+
+    @property
+    def rotation(self) -> Rotation | None:
+        """What the owner may see about the enrolment tokens. Never the secrets."""
+        return self._rotation
 
     def verify(
         self,
@@ -120,6 +130,7 @@ class DeviceAuthenticator:
                 False, f"HELLO timestamp is {skew.total_seconds():.0f}s from the core's clock"
             )
 
+        token_used = ""
         keyed = self._verify_with_key(
             device_id=device_id,
             name=name,
@@ -143,19 +154,28 @@ class DeviceAuthenticator:
             # paired machine. Pairing is what removes the need for the token (§80), so the
             # token's absence cannot be what refuses a paired device.
             return AuthOutcome(False, "no device token is configured on the core")
-        elif not self._verify_with_token(
-            device_id=device_id,
-            name=name,
-            os=os,
-            nonce=nonce,
-            issued_at=issued_at,
-            signature=signature,
-        ):
-            return AuthOutcome(False, "the HELLO signature did not match")
+        else:
+            matched = self._matching_token(
+                device_id=device_id,
+                name=name,
+                os=os,
+                nonce=nonce,
+                issued_at=issued_at,
+                signature=signature,
+                now=now,
+            )
+            if matched is None:
+                return AuthOutcome(False, self._token_refusal(now))
+            token_used = matched
 
         if self._replayed(nonce, now):
             return AuthOutcome(False, "this HELLO nonce has already been used")
 
+        if token_used and self._rotation is not None:
+            # Which secret got this node in, by fingerprint. "Is anything still using
+            # the old token?" is then a question the logs answer, rather than one the
+            # owner settles by rotating and waiting to see what breaks.
+            return AuthOutcome(True, f"signature verified with {self._rotation.label(token_used)}")
         return AuthOutcome(True, "signature verified")
 
     def _verify_with_key(
@@ -201,7 +221,7 @@ class DeviceAuthenticator:
             return AuthOutcome(False, "the HELLO signature did not match this device's key")
         return AuthOutcome(True, "verified against the device's registered key")
 
-    def _verify_with_token(
+    def _matching_token(
         self,
         *,
         device_id: str,
@@ -210,21 +230,45 @@ class DeviceAuthenticator:
         nonce: str,
         issued_at: datetime,
         signature: str,
-    ) -> bool:
+        now: datetime,
+    ) -> str | None:
         """The bootstrap path, for a device that has not paired yet (ADR 0013).
 
-        Still here because enrolment has to start somewhere, and narrower than it was: it
-        now authenticates only devices with no key on file. Once a device pairs, this path
-        is closed for it permanently.
+        Still here because enrolment has to start somewhere, and narrower than it was:
+        it authenticates only devices with no key on file, and once a device pairs this
+        path is closed for it permanently.
+
+        Returns *which* token matched, so the caller can say so. Every live token is
+        tried even after one matches: stopping early would make the time taken depend
+        on which secret was used, and there are at most two.
         """
-        expected = sign(
-            self._token or "",
-            signing_payload(
-                device_id=device_id, name=name, os=os, nonce=nonce, issued_at=issued_at
-            ),
+        if self._rotation is None:  # pragma: no cover - `configured` is checked first
+            return None
+        payload = signing_payload(
+            device_id=device_id, name=name, os=os, nonce=nonce, issued_at=issued_at
         )
-        # compare_digest, not ==: a byte-by-byte comparison leaks where the mismatch is.
-        return hmac.compare_digest(expected, signature)
+        found: str | None = None
+        for token in self._rotation.accepts(now):
+            # compare_digest, not ==: a byte-by-byte comparison leaks where the
+            # mismatch is.
+            if hmac.compare_digest(sign(token, payload), signature) and found is None:
+                found = token
+        return found
+
+    def _token_refusal(self, now: datetime) -> str:
+        """Why the signature did not match — including the case worth naming.
+
+        A node that was mid-enrolment when the overlap ended signs with a token that
+        used to work. "The signature did not match" sends its owner looking for a typo;
+        the date the old token stopped working sends them to the right answer.
+        """
+        if self._rotation is not None and self._rotation.expired(now):
+            retired = self._rotation.retires_at
+            return (
+                "the HELLO signature did not match — the previous enrolment token "
+                f"stopped working on {retired.isoformat() if retired else 'its retirement date'}"
+            )
+        return "the HELLO signature did not match"
 
     def _replayed(self, nonce: str, now: datetime) -> bool:
         """Remember nonces for as long as a captured frame could still be within skew."""
