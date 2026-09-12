@@ -1,5 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { clearServerOverride, serverOverride, setServerOverride } from "@/lib/origin";
+import {
+  apiToken,
+  clearServerOverride,
+  serverOverride,
+  setApiToken,
+  setServerOverride,
+  wsProtocols,
+} from "@/lib/origin";
 
 /**
  * The part of origin.ts that can be exercised without a real Tauri runtime: what gets
@@ -61,5 +68,39 @@ describe("the server override", () => {
     } finally {
       if (original) Object.defineProperty(window, "localStorage", original);
     }
+  });
+});
+
+// ADR 0073 — the token the owner's Thursday was given, if it has one.
+
+describe("the API token", () => {
+  beforeEach(() => localStorage.clear());
+
+  it("is empty when this Thursday never needed one", () => {
+    expect(apiToken()).toBe("");
+    expect(wsProtocols()).toEqual([]);
+  });
+
+  it("is stored and read back", () => {
+    setApiToken("  a-token  ");
+    expect(apiToken()).toBe("a-token");
+  });
+
+  it("offers no subprotocol when there is nothing to carry", () => {
+    // A handshake that offers a subprotocol the server does not know fails. A Thursday on
+    // this machine needs no token, so the list has to be empty rather than carry an empty one.
+    setApiToken("");
+    expect(wsProtocols()).toEqual([]);
+  });
+
+  it("carries the token where a browser is allowed to put it", () => {
+    setApiToken("a-token");
+    expect(wsProtocols()).toEqual(["thursday.token.a-token"]);
+  });
+
+  it("is cleared by storing nothing", () => {
+    setApiToken("a-token");
+    setApiToken("   ");
+    expect(apiToken()).toBe("");
   });
 });

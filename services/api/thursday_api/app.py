@@ -6,8 +6,9 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
+from thursday_core.auth import admit
 from thursday_core.config import Settings, get_settings
-from thursday_core.container import Container, build_container, start
+from thursday_core.container import Container, api_token, build_container, start
 from thursday_core.logging import get_logger
 from thursday_realtime.gateway import router as realtime_router
 from thursday_shared import __version__
@@ -92,6 +93,38 @@ def create_app(settings: Settings | None = None, container: Container | None = N
     )
     app.state.limiter = limiter
     trusted = frozenset(settings.trusted_proxies)
+    token = api_token(settings)
+    app.state.api_token = token
+
+    # Registered first, so it is the innermost of the three. Deliberate in both directions:
+    # a flood of wrong tokens is rate-limited like any other flood rather than getting a free
+    # comparison each time, and a 401 still leaves through `trace_middleware` carrying the
+    # `x-trace-id` of the request that caused it.
+    @app.middleware("http")
+    async def auth_middleware(request: Request, call_next):
+        refusal = admit(
+            path=request.url.path,
+            peer=getattr(request.client, "host", None),
+            host_header=request.headers.get("host"),
+            authorization=request.headers.get("authorization"),
+            token=token,
+        )
+        if refusal is None:
+            return await call_next(request)
+        # The remedy goes in the log, where the owner reads it, and not in the response: a
+        # caller who has not proved who they are is not told how this deployment is secured.
+        log.warning(
+            "request_refused",
+            path=request.url.path,
+            peer=getattr(request.client, "host", None),
+            status=refusal.status,
+            note=refusal.note,
+        )
+        return JSONResponse(
+            status_code=refusal.status,
+            content={"error": {"message": refusal.message}, "trace_id": current_trace_id()},
+            headers=refusal.headers or {},
+        )
 
     # Registered *before* `trace_middleware`, which makes it the inner one: Starlette builds
     # its stack so the last middleware registered ends up outermost. The first version of

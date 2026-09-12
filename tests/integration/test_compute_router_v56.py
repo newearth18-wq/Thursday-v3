@@ -427,7 +427,12 @@ def client(settings, container):
     container.device_auth.required = False
     app = create_app(settings, container=container)
     app.state.container = container
-    with TestClient(app) as http:
+    with TestClient(
+        app,
+        base_url="http://127.0.0.1:8000",
+        client=("127.0.0.1", 50000),
+        headers={"host": "127.0.0.1:8000"},
+    ) as http:
         yield http
 
 

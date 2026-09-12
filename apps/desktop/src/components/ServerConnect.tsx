@@ -1,5 +1,10 @@
 import { useState } from "react";
-import { serverOverride, setServerOverride } from "@/lib/origin";
+import {
+  apiToken,
+  serverOverride,
+  setApiToken,
+  setServerOverride,
+} from "@/lib/origin";
 
 /**
  * "Where is Thursday?" (Sprint 84, ADR 0057).
@@ -17,7 +22,10 @@ import { serverOverride, setServerOverride } from "@/lib/origin";
  */
 export function ServerConnect() {
   const existing = serverOverride();
-  const [address, setAddress] = useState(existing?.replace(/^https?:\/\//, "") ?? "");
+  const [address, setAddress] = useState(
+    existing?.replace(/^https?:\/\//, "") ?? "",
+  );
+  const [token, setToken] = useState(apiToken());
   const [submitted, setSubmitted] = useState(false);
 
   const submit = (event: React.FormEvent) => {
@@ -25,6 +33,11 @@ export function ServerConnect() {
     const trimmed = address.trim();
     if (!trimmed) return;
     setServerOverride(trimmed);
+    // ADR 0073. A Thursday reachable from this phone is, by definition, reachable from off
+    // its own machine — which is exactly the deployment that needs a token. Optional here
+    // rather than required, because the same screen is reached on desktop when a sidecar
+    // died, and that Thursday needs none.
+    setApiToken(token);
     setSubmitted(true);
     // A reload rather than threading a "reconnect with this URL" action through the
     // socket hook: `API_ORIGIN`/`WS_ORIGIN` are computed once, at module load, from
@@ -43,7 +56,7 @@ export function ServerConnect() {
           {existing
             ? `${address || existing} didn't respond. Check the address below, or the machine it's running on.`
             : "Thursday runs on your computer, not on this phone. Enter the address it's" +
-              " reachable at — the same one you'd type into a browser on that machine."}
+              " reachable at, and the access token set on that machine."}
         </p>
       </div>
 
@@ -60,6 +73,19 @@ export function ServerConnect() {
                      text-sm text-slate-100 outline-none placeholder:text-slate-600
                      focus:border-thursday/40 focus:ring-1 focus:ring-thursday/30"
         />
+        <input
+          value={token}
+          onChange={(event) => setToken(event.target.value)}
+          placeholder="access token (if this Thursday has one)"
+          type="password"
+          autoCapitalize="none"
+          autoCorrect="off"
+          spellCheck={false}
+          aria-label="access token"
+          className="rounded-xl border border-white/10 bg-ink-900/70 px-4 py-3 text-center
+                     text-sm text-slate-100 outline-none placeholder:text-slate-600
+                     focus:border-thursday/40 focus:ring-1 focus:ring-thursday/30"
+        />
         <button
           type="submit"
           disabled={address.trim() === "" || submitted}
@@ -71,7 +97,8 @@ export function ServerConnect() {
       </form>
 
       <p className="max-w-sm text-xs text-slate-700">
-        Thursday's desktop app shows this address in its tray menu, or ask whoever set it up.
+        Thursday's desktop app shows this address in its tray menu, or ask
+        whoever set it up.
       </p>
     </div>
   );

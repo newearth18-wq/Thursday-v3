@@ -1,7 +1,7 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ServerConnect } from "@/components/ServerConnect";
-import { serverOverride, setServerOverride } from "@/lib/origin";
+import { apiToken, serverOverride, setServerOverride } from "@/lib/origin";
 
 describe("the connect screen", () => {
   beforeEach(() => {
@@ -58,5 +58,41 @@ describe("the connect screen", () => {
   it("names where the address comes from, for someone who does not know it", () => {
     render(<ServerConnect />);
     expect(screen.getByText(/tray menu/i)).toBeInTheDocument();
+  });
+
+  // ADR 0073 — a Thursday reachable from this phone is, by definition, reachable from off
+  // its own machine, which is exactly the deployment that needs a token.
+
+  it("stores the access token beside the address", () => {
+    render(<ServerConnect />);
+    fireEvent.change(screen.getByPlaceholderText("192.168.1.42:8000"), {
+      target: { value: "10.0.0.5:8000" },
+    });
+    fireEvent.change(screen.getByLabelText("access token"), {
+      target: { value: "an-owner-token" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /connect/i }));
+
+    expect(serverOverride()).toBe("http://10.0.0.5:8000");
+    expect(apiToken()).toBe("an-owner-token");
+  });
+
+  it("connects without one, because this screen is also reached on a Thursday that needs none", () => {
+    render(<ServerConnect />);
+    fireEvent.change(screen.getByPlaceholderText("192.168.1.42:8000"), {
+      target: { value: "10.0.0.5:8000" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /connect/i }));
+
+    expect(serverOverride()).toBe("http://10.0.0.5:8000");
+    expect(apiToken()).toBe("");
+  });
+
+  it("does not show the token while it is typed", () => {
+    render(<ServerConnect />);
+    expect(screen.getByLabelText("access token")).toHaveAttribute(
+      "type",
+      "password",
+    );
   });
 });

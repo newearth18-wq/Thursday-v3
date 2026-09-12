@@ -272,7 +272,12 @@ def test_rotation_resets_the_clock_on_the_key_rather_than_on_the_pairing(contain
 def client(settings, container):
     app = create_app(settings, container=container)
     app.state.container = container
-    with TestClient(app) as http:
+    with TestClient(
+        app,
+        base_url="http://127.0.0.1:8000",
+        client=("127.0.0.1", 50000),
+        headers={"host": "127.0.0.1:8000"},
+    ) as http:
         yield http
 
 
@@ -363,7 +368,15 @@ def test_a_session_past_its_deadline_is_closed_and_told_to_come_back(settings, c
     app = create_app(instant, container=container)
     app.state.container = container
 
-    with TestClient(app) as http, http.websocket_connect("/api/v1/device") as ws:
+    with (
+        TestClient(
+            app,
+            base_url="http://127.0.0.1:8000",
+            client=("127.0.0.1", 50000),
+            headers={"host": "127.0.0.1:8000"},
+        ) as http,
+        http.websocket_connect("/api/v1/device") as ws,
+    ):
         ws.send_text(hello_for(credential.device_id, key))
         assert json.loads(ws.receive_text())["type"] == "WELCOME"
         frame = json.loads(ws.receive_text())

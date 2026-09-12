@@ -18,6 +18,7 @@
  */
 
 const OVERRIDE_KEY = "thursday.server";
+const TOKEN_KEY = "thursday.token";
 
 /** `host[:port]`, no scheme — what the connect screen collects and stores. */
 function readOverride(): string | null {
@@ -37,13 +38,41 @@ export function serverOverride(): string | null {
 /** Accepts what a person typed — with or without a scheme — and normalises it to one. */
 export function setServerOverride(address: string): void {
   const trimmed = address.trim();
-  const withScheme = /^https?:\/\//.test(trimmed) ? trimmed : `http://${trimmed}`;
+  const withScheme = /^https?:\/\//.test(trimmed)
+    ? trimmed
+    : `http://${trimmed}`;
   try {
     localStorage.setItem(OVERRIDE_KEY, withScheme.replace(/\/+$/, ""));
   } catch {
     // Nothing to fall back to: the address will not survive a reload in this browser.
     // Letting the call succeed silently is still better than throwing out of a settings
     // screen over a storage quirk the person cannot do anything about.
+  }
+}
+
+/**
+ * The owner's API token (ADR 0073), if this install was given one.
+ *
+ * Stored beside the address because they are one decision: a Thursday reachable from another
+ * machine needs a token, and a Thursday on this machine needs neither. Kept out of the URL —
+ * a token in a query string is a token in every log on the way.
+ */
+export function apiToken(): string {
+  try {
+    return localStorage.getItem(TOKEN_KEY) ?? "";
+  } catch {
+    return "";
+  }
+}
+
+export function setApiToken(token: string): void {
+  try {
+    const trimmed = token.trim();
+    if (trimmed) localStorage.setItem(TOKEN_KEY, trimmed);
+    else localStorage.removeItem(TOKEN_KEY);
+  } catch {
+    // Same as the address: nothing to fall back to, and throwing out of a settings screen
+    // over a storage quirk helps nobody.
   }
 }
 
@@ -70,3 +99,13 @@ export const WS_ORIGIN = API_ORIGIN
   : `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}`;
 
 export const IS_TAURI = TAURI;
+
+/**
+ * What a browser can put in a WebSocket handshake, which is not a header (ADR 0073). Empty
+ * when there is no token, because offering a subprotocol the server does not know would fail
+ * the handshake on a deployment that needs no token at all.
+ */
+export function wsProtocols(): string[] {
+  const token = apiToken();
+  return token ? [`thursday.token.${token}`] : [];
+}

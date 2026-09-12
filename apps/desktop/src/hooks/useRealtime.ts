@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { WS_ORIGIN } from "@/lib/origin";
+import { WS_ORIGIN, wsProtocols } from "@/lib/origin";
 import { knownPosture, knownProp } from "@/lib/avatar";
 import { knownMood } from "@/lib/mood";
 import type {
@@ -60,7 +60,10 @@ function readExpression(message: RealtimeMessage): Expression {
     activity: typeof message.activity === "string" ? message.activity : "",
     prop: knownProp(message.prop),
     because: typeof message.because === "string" ? message.because : "",
-    intensity: typeof message.intensity === "number" ? message.intensity : UNKNOWN.intensity,
+    intensity:
+      typeof message.intensity === "number"
+        ? message.intensity
+        : UNKNOWN.intensity,
     running: typeof message.running === "number" ? message.running : 0,
     waiting: typeof message.waiting === "number" ? message.waiting : 0,
     unhealthy: typeof message.unhealthy === "number" ? message.unhealthy : 0,
@@ -102,7 +105,13 @@ export function useRealtime() {
   const failures = useRef(0);
 
   const connect = useCallback(() => {
-    const ws = new WebSocket(WS_URL);
+    // ADR 0073. The subprotocol is the only place a browser can put a credential in a
+    // WebSocket handshake; empty on a Thursday that needs no token, because offering one the
+    // server does not recognise fails the handshake.
+    const protocols = wsProtocols();
+    const ws = protocols.length
+      ? new WebSocket(WS_URL, protocols)
+      : new WebSocket(WS_URL);
     socket.current = ws;
 
     ws.onopen = () => {
@@ -160,26 +169,41 @@ export function useRealtime() {
         case "approval.required":
           setApprovals((prior) => {
             const incoming = message.payload as Approval;
-            return prior.some((a) => a.id === incoming.id) ? prior : [...prior, incoming];
+            return prior.some((a) => a.id === incoming.id)
+              ? prior
+              : [...prior, incoming];
           });
           break;
 
         case "approval.resolved":
           setApprovals((prior) =>
-            prior.filter((a) => a.id !== (message.payload as { id?: string })?.id),
+            prior.filter(
+              (a) => a.id !== (message.payload as { id?: string })?.id,
+            ),
           );
           break;
 
         case "agent.updated": {
-          const payload = message.payload as { agent?: string; activity?: string; ok?: boolean };
+          const payload = message.payload as {
+            agent?: string;
+            activity?: string;
+            ok?: boolean;
+          };
           if (!payload?.agent) break;
           setAgents((prior) => {
             const state: AgentStatus["state"] =
-              message.kind === "agent.started" ? "working" : payload.ok ? "completed" : "failed";
+              message.kind === "agent.started"
+                ? "working"
+                : payload.ok
+                  ? "completed"
+                  : "failed";
             const rest = prior.filter((a) => a.name !== payload.agent);
             // `activity` is what gets drawn; `name` only tells two jobs apart. Both are
             // in the payload for exactly that reason (see `BaseAgent.run`).
-            return [...rest, { name: payload.agent!, activity: payload.activity ?? "", state }];
+            return [
+              ...rest,
+              { name: payload.agent!, activity: payload.activity ?? "", state },
+            ];
           });
           break;
         }
@@ -202,12 +226,22 @@ export function useRealtime() {
     if (!socket.current || socket.current.readyState !== WebSocket.OPEN) return;
     setMessages((prior) => [
       ...prior,
-      { id: crypto.randomUUID(), role: "owner", text, at: new Date().toISOString() },
+      {
+        id: crypto.randomUUID(),
+        role: "owner",
+        text,
+        at: new Date().toISOString(),
+      },
     ]);
     setThinking(true);
     setAgents([]);
     socket.current.send(
-      JSON.stringify({ type: "turn", text, session_id: sessionId.current, device_id: deviceId }),
+      JSON.stringify({
+        type: "turn",
+        text,
+        session_id: sessionId.current,
+        device_id: deviceId,
+      }),
     );
   }, []);
 

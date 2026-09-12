@@ -1,14 +1,22 @@
 /** The REST surface, typed. Every call goes through here so the base URL lives in one place. */
 
-import { API_ORIGIN } from "./origin";
+import { API_ORIGIN, apiToken } from "./origin";
 import type { Approval, Device, MemoryRecord, Policy, Task } from "./types";
 import type { Consequence, Graph, Problem } from "./workflow";
 
 const BASE = `${API_ORIGIN}/api/v1`;
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  // ADR 0073. Sent when there is one and omitted when there is not, rather than sent empty:
+  // a Thursday on this machine needs no token, and `Bearer ` with nothing after it is a
+  // wrong token rather than no token.
+  const token = apiToken();
   const response = await fetch(`${BASE}${path}`, {
-    headers: { "content-type": "application/json", ...(init?.headers ?? {}) },
+    headers: {
+      "content-type": "application/json",
+      ...(token ? { authorization: `Bearer ${token}` } : {}),
+      ...(init?.headers ?? {}),
+    },
     ...init,
   });
   if (!response.ok) {
@@ -20,14 +28,21 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
 export const api = {
   tasks: () => request<{ tasks: Task[] }>("/tasks?limit=20"),
-  cancelTask: (id: string) => request(`/tasks/${id}/cancel`, { method: "POST" }),
+  cancelTask: (id: string) =>
+    request(`/tasks/${id}/cancel`, { method: "POST" }),
   pauseTask: (id: string) => request(`/tasks/${id}/pause`, { method: "POST" }),
-  resumeTask: (id: string) => request(`/tasks/${id}/resume`, { method: "POST" }),
+  resumeTask: (id: string) =>
+    request(`/tasks/${id}/resume`, { method: "POST" }),
 
   devices: () => request<{ devices: Device[] }>("/devices"),
   // V21. A gated action comes back 202 with an approval to answer, not 403 — the engine
   // saying "ask the owner" now reaches the owner instead of stopping here.
-  deviceAction: (id: string, action: string, args: Record<string, unknown> = {}, reason = "") =>
+  deviceAction: (
+    id: string,
+    action: string,
+    args: Record<string, unknown> = {},
+    reason = "",
+  ) =>
     request<DeviceActionOutcome>(`/devices/${id}/actions`, {
       method: "POST",
       body: JSON.stringify({ action, args, reason }),
@@ -36,7 +51,8 @@ export const api = {
   approvals: () => request<{ approvals: Approval[] }>("/approvals"),
   approve: (id: string, scope = "once") =>
     request(`/approvals/${id}/approve?scope=${scope}`, { method: "POST" }),
-  reject: (id: string) => request(`/approvals/${id}/reject`, { method: "POST" }),
+  reject: (id: string) =>
+    request(`/approvals/${id}/reject`, { method: "POST" }),
 
   searchMemory: (q: string) =>
     request<{ memories: MemoryRecord[] }>("/memory/search", {
@@ -45,52 +61,76 @@ export const api = {
     }),
   forgetMemory: (id: string) => request(`/memory/${id}`, { method: "DELETE" }),
   memoryConflicts: () =>
-    request<{ conflicts: { id: string; description: string; status: string }[] }>(
-      "/memory/conflicts",
-    ),
+    request<{
+      conflicts: { id: string; description: string; status: string }[];
+    }>("/memory/conflicts"),
   resolveConflict: (id: string, resolution: string) =>
-    request(`/memory/conflicts/${id}?resolution=${resolution}`, { method: "POST" }),
-  memoryLinks: (id: string) =>
-    request<{ links: { source_id: string; target_id: string; relation: string }[] }>(
-      `/memory/links?memory_id=${id}`,
-    ),
-  writeMemory: (layer: string, content: string) =>
-    request<{ written: boolean; decision?: string; reason?: string }>("/memory", {
+    request(`/memory/conflicts/${id}?resolution=${resolution}`, {
       method: "POST",
-      body: JSON.stringify({ layer, content, importance: 0.7 }),
     }),
-  memoryConfirmations: () =>
-    request<{ pending: { index: number; content: string; layer: string; proposed_by?: string }[] }>(
-      "/memory/confirmations",
+  memoryLinks: (id: string) =>
+    request<{
+      links: { source_id: string; target_id: string; relation: string }[];
+    }>(`/memory/links?memory_id=${id}`),
+  writeMemory: (layer: string, content: string) =>
+    request<{ written: boolean; decision?: string; reason?: string }>(
+      "/memory",
+      {
+        method: "POST",
+        body: JSON.stringify({ layer, content, importance: 0.7 }),
+      },
     ),
+  memoryConfirmations: () =>
+    request<{
+      pending: {
+        index: number;
+        content: string;
+        layer: string;
+        proposed_by?: string;
+      }[];
+    }>("/memory/confirmations"),
   confirmMemory: (index: number, accept: boolean) =>
-    request("/memory/confirmations", { method: "POST", body: JSON.stringify({ index, accept }) }),
+    request("/memory/confirmations", {
+      method: "POST",
+      body: JSON.stringify({ index, accept }),
+    }),
 
-  policies: () => request<{ autonomy: string; policies: Policy[]; hard_blocked: string[] }>(
-    "/policies",
-  ),
+  policies: () =>
+    request<{ autonomy: string; policies: Policy[]; hard_blocked: string[] }>(
+      "/policies",
+    ),
   setPolicy: (action: string, decision: string) =>
     request<{ action: string; decision: string }>(
       `/policies/${encodeURIComponent(action)}?decision=${decision}`,
       { method: "POST" },
     ),
-  grants: () => request<{ grants: { id: string; action: string; resource_glob: string }[] }>(
-    "/approvals/grants",
-  ),
-  revokeGrant: (id: string) => request(`/approvals/grants/${id}`, { method: "DELETE" }),
+  grants: () =>
+    request<{
+      grants: { id: string; action: string; resource_glob: string }[];
+    }>("/approvals/grants"),
+  revokeGrant: (id: string) =>
+    request(`/approvals/grants/${id}`, { method: "DELETE" }),
 
-  autonomy: () => request<{ autonomy: string; proactivity: string; note: string }>("/autonomy"),
+  autonomy: () =>
+    request<{ autonomy: string; proactivity: string; note: string }>(
+      "/autonomy",
+    ),
   setAutonomy: (autonomy: string) =>
     request(`/autonomy?autonomy=${autonomy}`, { method: "POST" }),
 
   /** PART 69/98 — a plain call, deliberately not routed through the model. */
   emergencyStop: () =>
-    request("/emergency/stop", { method: "POST", body: JSON.stringify({ scope: "all" }) }),
+    request("/emergency/stop", {
+      method: "POST",
+      body: JSON.stringify({ scope: "all" }),
+    }),
   releaseLockdown: () => request("/emergency/release", { method: "POST" }),
 
-  health: () => request<{ ok: boolean; checks: { component: string; ok: boolean; detail: string }[] }>(
-    "/health",
-  ),
+  health: () =>
+    request<{
+      ok: boolean;
+      checks: { component: string; ok: boolean; detail: string }[];
+    }>("/health"),
 
   // V15. `preview` is called on every edit and writes nothing; everything else is a
   // deliberate act by the owner, and saving is not one of the acts that arms a rule.
@@ -112,11 +152,16 @@ export const api = {
       { method: "POST" },
     ),
   runWorkflow: (id: string) =>
-    request<{ ran: boolean; steps: number }>(`/automations/${id}/run`, { method: "POST" }),
-  deleteWorkflow: (id: string) => request(`/automations/${id}`, { method: "DELETE" }),
+    request<{ ran: boolean; steps: number }>(`/automations/${id}/run`, {
+      method: "POST",
+    }),
+  deleteWorkflow: (id: string) =>
+    request(`/automations/${id}`, { method: "DELETE" }),
   learn: () => request<LearningCentre>("/learn"),
   startLesson: (id: string) =>
-    request<LessonStep>(`/learn/${encodeURIComponent(id)}/start`, { method: "POST" }),
+    request<LessonStep>(`/learn/${encodeURIComponent(id)}/start`, {
+      method: "POST",
+    }),
   // The body is evidence of what happened, not a claim that it did.
   attemptLesson: (id: string, evidence: unknown) =>
     request<LessonStep>(`/learn/${encodeURIComponent(id)}/attempt`, {
@@ -124,7 +169,9 @@ export const api = {
       body: JSON.stringify(evidence ?? null),
     }),
   skipLesson: (id: string) =>
-    request<LessonStep>(`/learn/${encodeURIComponent(id)}/skip`, { method: "POST" }),
+    request<LessonStep>(`/learn/${encodeURIComponent(id)}/skip`, {
+      method: "POST",
+    }),
 
   describeCron: (cron: string) =>
     request<{ reads_as: string; valid: boolean; problem?: string }>(
@@ -191,8 +238,19 @@ export interface LearningCentre {
   summary: string;
   areas: { area: string; title: string; features: string[]; example: string }[];
   path: LearningStage[];
-  progress: { verbosity: string; teaching: string; used: string[]; tutorials_completed: string[] };
-  next: { id: string; name: string; stage_title: string; minutes: number; reason: string } | null;
+  progress: {
+    verbosity: string;
+    teaching: string;
+    used: string[];
+    tutorials_completed: string[];
+  };
+  next: {
+    id: string;
+    name: string;
+    stage_title: string;
+    minutes: number;
+    reason: string;
+  } | null;
   practice: PracticeOffer[];
 }
 
