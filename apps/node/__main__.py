@@ -36,13 +36,21 @@ from thursday_devices.node.adapters import for_current_platform
 from thursday_devices.node.executor import NodeExecutor
 from thursday_models.local_manager import LocalModelManager
 from thursday_security.device_auth import sign, signing_payload
+from thursday_security.handover import HandOver, HandOverRefused, follow
 from thursday_security.keys import (
     PrivateKey,
     hello_payload,
     pairing_payload,
     rotation_payload,
 )
-from thursday_security.pinning import Pin, PinUnavailable, check_peer, peer_pin, pinned_context
+from thursday_security.pinning import (
+    Pin,
+    PinMismatch,
+    PinUnavailable,
+    check_peer,
+    peer_pin,
+    pinned_context,
+)
 from thursday_shared.models import DeviceAction
 from thursday_shared.protocol import (
     CLOSE_SESSION_EXPIRED,
@@ -363,6 +371,37 @@ class NodeIdentity:
         value = pairing.get("pin") or ""
         return Pin(value=value, host=pairing.get("core", "")) if value else None
 
+    def adopt_pin(self, value: str, *, after: list[HandOver]) -> None:
+        """Record a new pin for the core, having verified a signed path to it (ADR 0071).
+
+        The pin it replaces is kept. Not because anything reads it back — nothing does — but
+        because the owner asking "what did this machine trust, and when did that change"
+        deserves an answer from the file rather than from a log that has rotated away.
+
+        Never call this without `follow` having succeeded. There is no check here: the
+        verification lives in `thursday_security.handover` where it can be tested on its own,
+        and duplicating half of it here would produce two checks that drift apart.
+        """
+        pairing = self.data.get("pairing") or {}
+        history = list(pairing.get("pin_history") or [])
+        history.append(
+            {
+                "pin": pairing.get("pin", ""),
+                "replaced_at": datetime.now(UTC).isoformat(),
+                "handovers": [link.to_dict() for link in after],
+            }
+        )
+        pairing["pin"] = value
+        pairing["pin_history"] = history
+        self.data["pairing"] = pairing
+        self._write(self.data)
+        log.warning(
+            "core_key_changed",
+            was=Pin(value=history[-1]["pin"]).short if history[-1]["pin"] else "",
+            now=Pin(value=value).short,
+            links=len(after),
+        )
+
     def forget_pairing(self) -> None:
         """Drop the pairing record after the core has revoked or lost this device.
 
@@ -386,6 +425,31 @@ def api_base(core_url: str) -> str:
     if path.endswith("/device"):
         path = path[: -len("/device")]
     return urlunsplit((scheme, parts.netloc, path or "/api/v1", "", ""))
+
+
+def published_handovers(base: str, *, timeout: float = 15.0) -> list[HandOver]:
+    """Fetch the hand-over chain the core publishes (ADR 0071).
+
+    Two things about this request look wrong and are not.
+
+    **It is unauthenticated.** It has to be: the node is asking precisely because it could not
+    open the channel it would authenticate on. Nothing here is secret — public keys and the
+    dates they changed — and the document defends itself, because a chain the core's key did
+    not sign fails `follow` and changes nothing.
+
+    **It does not validate the certificate.** Same reason `peer_pin` does not. The core the
+    node is trying to reach may be presenting a key no CA has ever heard of, which is the
+    case pinning exists for; requiring a CA here would break the recovery path on exactly the
+    deployments that need it. The signature is the security, not the transport.
+    """
+    import httpx
+
+    url = f"{base}/devices/tls-handover"
+    with httpx.Client(verify=False, timeout=timeout) as client:  # noqa: S501 - see docstring
+        response = client.get(url)
+    response.raise_for_status()
+    raw = response.json().get("handovers") or []
+    return [HandOver.from_dict(item) for item in raw]
 
 
 def pairing_request(identity: NodeIdentity, *, name: str, os_name: str, hostname: str) -> dict:
@@ -600,6 +664,8 @@ class NodeClient:
         #: "why is nothing happening", so the reason a connection failed is kept.
         self.connected = False
         self.last_error: str | None = None
+        #: Pins this node has already looked for a hand-over from. See `_follow_handover`.
+        self._handover_tried: set[str] = set()
 
     async def run_forever(self) -> None:
         delay = RECONNECT_BASE_S
@@ -625,11 +691,65 @@ class NodeClient:
                 # node reconnecting in a tight loop, which is a denial of service the nodes
                 # perform on their owner's behalf.
                 delay = await self._back_off(exc, delay)
+            except PinMismatch as exc:
+                # The core is presenting a key this node did not agree to trust. Before
+                # treating that as an attack, ask whether the key it *did* trust signed a
+                # hand-over to this one (ADR 0071) — a certificate whose key finally changed
+                # is the ordinary reason for this, and the alternative is somebody walking to
+                # every machine in the house.
+                self.connected = False
+                self.last_error = str(exc)
+                if await self._follow_handover():
+                    delay = RECONNECT_BASE_S
+                    continue
+                delay = await self._back_off(exc, delay)
             except (OSError, websockets.WebSocketException) as exc:
                 self.connected = False
                 delay = await self._back_off(exc, delay)
             except asyncio.CancelledError:
                 raise
+
+    async def _follow_handover(self) -> bool:
+        """Try to walk a signed path from the pin this node holds to the key the core is using.
+
+        Attempted **once per pin**. A node whose pin genuinely does not match — the case this
+        whole mechanism exists to keep dangerous — would otherwise re-fetch the chain on
+        every reconnection for as long as it runs, which is a node attacking its own core on
+        the strength of a failure.
+
+        Returns whether the pin moved. Every refusal is a `False` and a log line rather than
+        an exception: the caller's next step is the same backing-off it would have done, and
+        the interesting detail is which refusal it was.
+        """
+        import httpx
+
+        pin = self.identity.core_pin
+        if pin is None or pin.value in self._handover_tried:
+            return False
+        self._handover_tried.add(pin.value)
+
+        try:
+            # Blocking I/O, so off the event loop: the diagnostics endpoint answers from the
+            # same loop and "why is my node not responding" should not be this.
+            chain = await asyncio.to_thread(published_handovers, api_base(self.core_url))
+        except (httpx.HTTPError, ValueError, HandOverRefused) as exc:
+            # Unreachable, not serving the endpoint, or serving something that will not
+            # parse. All three mean the same thing here: there is no chain to follow.
+            log.warning("core_handover_unavailable", error=str(exc))
+            return False
+
+        try:
+            walked = follow(chain, pin.value)
+        except HandOverRefused as exc:
+            log.error("core_handover_refused", error=str(exc), pin=pin.short)
+            self.last_error = (
+                f"{self.last_error} — and the core published no signed hand-over this node "
+                f"could follow: {exc}"
+            )
+            return False
+
+        self.identity.adopt_pin(walked[-1].next_pin, after=walked)
+        return True
 
     async def _back_off(self, exc: Exception, delay: float) -> float:
         self.last_error = f"{type(exc).__name__}: {exc}"

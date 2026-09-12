@@ -50,8 +50,13 @@ sticky, is checked before the token fallback, and removes the device from the hu
 registry survives a restart.
 
 Still outstanding, and named rather than implied: the private key lives in a 0600 file rather
-than the OS keychain; TLS certificate pinning is not implemented; session tokens are not yet
-short-lived and rotated (Sprint 41's key-rotation work).
+than the OS keychain.
+
+Two other gaps this section carried have since closed, and are recorded here because a threat
+model that only ever grows is one nobody re-read. TLS certificate pinning arrived with
+ADR 0041 and is described under T13 below. Sessions stopped lasting as long as the socket with
+ADR 0042: a HELLO now authenticates a connection for twelve hours rather than indefinitely,
+with no setting that removes the bound.
 
 ### T7 as built (Sprint 45 · ADR 0030)
 
@@ -129,7 +134,18 @@ authentication gap left by Sprint 36: the node proved who it was and the core pr
 so anyone holding a certificate for the core's hostname could accept the node's HELLO and then
 send it commands. A node holding a pin refuses a plaintext connection rather than falling back.
 
-Still outstanding: short-lived, rotating session tokens.
+**And the pinned key can now change (ADR 0071).** Pinning bought its safety by refusing
+anything but the key learned at pairing, which meant replacing the core's TLS key stopped every
+node at once — each needing somebody to walk to it. A pin is `sha256(SubjectPublicKeyInfo)`,
+so a statement carrying the retiring key can be checked against the pin alone, and then used to
+verify a signature by its private half: the retiring key names its successor and every node
+follows, without a new anchor and without re-pairing. Following grants no power the retiring key
+did not already have, which is why it is safe — and why it is useless against T13's own
+premise: **a compromised key cannot be handed over**, because whoever else holds it can sign a
+hand-over too. The tool refuses that case rather than producing a file the owner would read as
+safety.
+
+Session tokens are bounded rather than indefinite (ADR 0042, twelve hours).
 
 ## 14.4 Controls always on
 

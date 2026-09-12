@@ -6,7 +6,7 @@ a multi-user or internet-exposed installation.**
 That sentence is the whole document in one line. What follows is the evidence for it, and —
 more usefully — the evidence against.
 
-Written at Sprint 50 and kept current since, against 2,375 tests that need no database, no
+Written at Sprint 50 and kept current since, against 2,411 tests that need no database, no
 network and no model credentials. `./scripts/check.sh` runs lint, format, types, the suite and the migrations.
 
 ---
@@ -76,7 +76,8 @@ of the three, so selection, availability detection and migration ordering are te
 platform calls themselves are not. *To close:* one run on each of macOS, Windows and a Linux
 desktop.
 
-**Device sessions are bounded and device keys rotate; three other rotations do not.**
+**Every credential in the system now rotates, and the last one to arrive is the one that
+looked impossible.**
 Certificate pinning (ADR 0041) closed the gap the pinning work itself surfaced: Sprint 36's
 authentication ran in one direction, so a node proved who it was and the core proved nothing.
 The node now pins the core's SubjectPublicKeyInfo, learned at pairing where a person is
@@ -124,11 +125,38 @@ would leave the owner believing a compromised key was dead.
 `AnthropicLLM.health()` stopped reporting `"ok"` for a registered key in the same sprint — the
 old wording read as "the provider is working" and was true of a revoked one.
 
-*Still open:* the core's TLS key, and only that. It is the harder one and not for want of
-effort: a node pins the core's SubjectPublicKeyInfo, learned at pairing where a person was
-present (ADR 0041), so rotating it invalidates every node's pin at once. That needs a signed
-hand-over from the retiring key, which is a different design rather than a longer window or a
-verified swap.
+The **core's TLS key** was the one left, and it took a different shape from the other three
+(ADR 0071). A window was no use — a node switched off for it is still stranded — and a verified
+swap was no use either, because the party that has to be convinced is the node, not the core.
+
+What made it possible is that a pin is `sha256(SubjectPublicKeyInfo)`, which is a *commitment to
+a public key*. A statement carrying the retiring SPKI can therefore be checked against nothing
+but the pin, and once the hash matches, the node holds the real key and can verify a signature
+made by its private half. So the retiring key can name its successor and every node can check
+the claim without a new anchor and without re-pairing. Following it grants no power the retiring
+key did not already have, which is what makes it sound: a holder of that key could impersonate
+the core to a node pinned to it anyway.
+
+There is **no window**, and that is the part that matters for machines nobody is watching. The
+statement is a permanent fact rather than a permission, so a node follows it the first time it
+fails to connect — a laptop in a bag for six months and two rotations walks the chain when it
+comes back out. It asks once per pin rather than once per reconnection, because a node whose pin
+genuinely does not match would otherwise hammer its own core forever.
+
+Two refusals are worth naming, because they are the honest half of it. **Thursday does not hold
+the core's TLS key** — it does not generate, store, install or rotate it, since the core is
+served behind whatever terminates TLS for it; the signing tool is run by hand on the host by
+whoever holds the key, and it touches no network. And **a compromised key cannot be handed
+over**: whoever else holds it can sign a hand-over too, so each node follows whichever reaches
+it first, and rotating away from a stolen key is a race rather than a fix. `--compromised`
+refuses and writes nothing, and names the only thing that removes the old key's authority
+instead of racing it — re-pairing each node with a person at the machine.
+
+*Not exercised:* a real node reconnecting through a real TLS handshake to a core that has
+actually rotated. The statement is tested against RSA, ECDSA and Ed25519 keys, the endpoint
+against the running application, and the node's decision against a forged chain — but the loop
+that joins them runs with the fetch replaced, and `check_peer`'s real-socket tests have never
+met it in one run. *To close:* one rotation on a live deployment.
 
 **Thursday can speak, and it sounds like a machine.** eSpeak NG (ADR 0061) is a real local
 synthesiser that installs as a wheel with no model file, covers Thai, and produces audio

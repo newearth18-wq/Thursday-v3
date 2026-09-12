@@ -78,3 +78,4 @@ done this way?" and have no answer.
 | [0068](0068-an-arrow-is-a-claim-about-where-something-is.md) | An arrow is a claim about where something is | Point it at the wrong place once and the owner stops trusting the next one |
 | [0069](0069-a-phone-may-approve-but-may-not-grant-standing-permission.md) | A phone may approve, but may not grant standing permission | The conditions an answer is given under decide what kind of answer it may be — and this one is a discipline, not a boundary |
 | [0070](0070-a-surface-may-only-take-back-what-it-can-reach.md) | A surface may only take what it can take back | §20's own scenario was unreachable from everywhere, and a phone cannot undo a shutdown — the undo has never been observed to work |
+| [0071](0071-a-pin-is-a-commitment-to-a-key-so-a-key-can-hand-over.md) | A pin is a commitment to a key, so a key can hand over | The last rotation §117 asks for — and it cannot help with the case people rotate for
