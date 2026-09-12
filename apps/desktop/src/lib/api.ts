@@ -25,6 +25,13 @@ export const api = {
   resumeTask: (id: string) => request(`/tasks/${id}/resume`, { method: "POST" }),
 
   devices: () => request<{ devices: Device[] }>("/devices"),
+  // V21. A gated action comes back 202 with an approval to answer, not 403 — the engine
+  // saying "ask the owner" now reaches the owner instead of stopping here.
+  deviceAction: (id: string, action: string, args: Record<string, unknown> = {}, reason = "") =>
+    request<DeviceActionOutcome>(`/devices/${id}/actions`, {
+      method: "POST",
+      body: JSON.stringify({ action, args, reason }),
+    }),
 
   approvals: () => request<{ approvals: Approval[] }>("/approvals"),
   approve: (id: string, scope = "once") =>
@@ -187,6 +194,15 @@ export interface LearningCentre {
   progress: { verbosity: string; teaching: string; used: string[]; tutorials_completed: string[] };
   next: { id: string; name: string; stage_title: string; minutes: number; reason: string } | null;
   practice: PracticeOffer[];
+}
+
+export interface DeviceActionOutcome {
+  /** Present only when the action ran. */
+  verified?: boolean;
+  /** Present only when it needs an answer first. */
+  approval_id?: string;
+  decision?: string;
+  ran?: boolean;
 }
 
 export interface Catalogue {

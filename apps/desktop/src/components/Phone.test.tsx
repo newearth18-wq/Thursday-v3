@@ -159,3 +159,43 @@ describe("what is happening", () => {
     expect(await screen.findByText("ยังไม่ได้เชื่อมต่อ")).toBeInTheDocument();
   });
 });
+
+describe("what a phone may do to a machine", () => {
+  it("offers lock and wake", async () => {
+    render(<Phone connected />);
+    expect(await screen.findByRole("button", { name: "ล็อกหน้าจอ" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "ปลุกเครื่อง" })).toBeEnabled();
+  });
+
+  it("shows shutting down as refused, with the reason, rather than hiding it", async () => {
+    // A control that is silently absent teaches nothing — the same choice the workflow
+    // builder makes for a trigger with no runner.
+    render(<Phone connected />);
+    expect(await screen.findByRole("button", { name: "ปิดเครื่อง" })).toBeDisabled();
+    expect(screen.getByText(/ยังไม่ได้บันทึกจะหาย/)).toBeInTheDocument();
+  });
+
+  it("sends the action and says it is done when it ran", async () => {
+    const act = vi.spyOn(api, "deviceAction").mockResolvedValue({ verified: true } as never);
+    render(<Phone connected />);
+    fireEvent.click(await screen.findByRole("button", { name: "ล็อกหน้าจอ" }));
+
+    await waitFor(() => expect(act).toHaveBeenCalledWith("d1", "system.lock", {}, "ล็อกหน้าจอ"));
+    expect(await screen.findByText(/เรียบร้อย/)).toBeInTheDocument();
+  });
+
+  it("says an action is waiting on an answer rather than claiming it ran", async () => {
+    // The engine said "ask the owner", so the action comes back as an approval at the top
+    // of this same screen. Reporting it as done would be the one lie that matters here.
+    vi.spyOn(api, "deviceAction").mockResolvedValue({
+      approval_id: "ap-9",
+      decision: "ASK_ONCE",
+      ran: false,
+    } as never);
+    render(<Phone connected />);
+    fireEvent.click(await screen.findByRole("button", { name: "ล็อกหน้าจอ" }));
+
+    expect(await screen.findByText(/รออนุมัติอยู่ด้านบน/)).toBeInTheDocument();
+    expect(screen.queryByText(/เรียบร้อย/)).not.toBeInTheDocument();
+  });
+});

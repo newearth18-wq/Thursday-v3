@@ -57,19 +57,34 @@ async def test_conversation_continues_within_a_session(client):
 async def test_direct_device_control_still_passes_the_permission_engine(
     client, office_pc, tmp_path
 ):
-    """There is no back door around the Permission Engine, not even for the API."""
+    """There is no back door around the Permission Engine, not even for the API.
+
+    Sprint 101 changed *how* a gated action is turned away, not whether it is: it used to
+    come back 403 and now comes back 202 with an approval to answer. What is asserted here
+    is the property rather than the status code — **nothing ran without consent** — because
+    that is the guarantee, and the previous version of this test would have passed just as
+    happily if the endpoint had started refusing things the owner should have been asked
+    about (which is exactly what it was doing; see §20's own scenario).
+    """
     allowed = await client.post(
         f"/api/v1/devices/{office_pc.device_id}/actions",
         json={"action": "system_info", "args": {}},
     )
     assert allowed.status_code == 200 and allowed.json()["verified"] is True
 
-    refused = await client.post(
+    gated = await client.post(
         f"/api/v1/devices/{office_pc.device_id}/actions",
         json={"action": "run_shell", "args": {"command": "rm -rf /"}},
     )
-    assert refused.status_code == 403
-    assert refused.json()["detail"]["decision"] == PolicyDecision.ASK_ALWAYS.value
+    assert gated.status_code == 202
+    body = gated.json()
+    assert body["ran"] is False
+    assert body["decision"] == PolicyDecision.ASK_ALWAYS.value
+    assert body["approval_id"]
+
+    # And it is a real pending approval, not a receipt the endpoint made up.
+    pending = (await client.get("/api/v1/approvals")).json()["approvals"]
+    assert body["approval_id"] in {a["id"] for a in pending}
 
 
 async def test_an_unknown_device_is_a_404(client):

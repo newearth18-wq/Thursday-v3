@@ -7,13 +7,19 @@ from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi.responses import JSONResponse
 from thursday_core.container import Container
 from thursday_core.logging import get_logger
 from thursday_devices.hub import WebSocketDeviceSession
 from thursday_security.pairing import PairingError, initial_trust
 from thursday_shared.enums import PolicyDecision, TrustLevel
 from thursday_shared.errors import ThursdayError
-from thursday_shared.models import ActionRequest, DeviceAction, DeviceCapabilities
+from thursday_shared.models import (
+    ActionRequest,
+    ApprovalRequest,
+    DeviceAction,
+    DeviceCapabilities,
+)
 from thursday_shared.protocol import (
     CLOSE_SESSION_EXPIRED,
     ActionResultFrame,
@@ -593,12 +599,27 @@ async def device_heartbeat(request: DeviceHeartbeat, c: Container = Depends(get_
     return {"device_id": str(request.device_id), "status": summary.status if summary else None}
 
 
-@router.post("/devices/{device_id}/actions")
+# `response_model=None`: this returns a plain dict when the action ran and a 202 when it needs
+# an answer first, and FastAPI cannot derive one schema from both. Saying so here beats
+# flattening the two into a shape that describes neither.
+@router.post("/devices/{device_id}/actions", response_model=None)
 async def act(
     device_id: UUID, request: DeviceActionRequest, c: Container = Depends(get_container)
-) -> dict:
+) -> dict | JSONResponse:
     """Direct device control. Still goes through the Permission Engine — there is no
-    back door around it, for any caller."""
+    back door around it, for any caller.
+
+    **A gated action is asked about; it is not refused.** Until Sprint 101 anything the
+    engine did not answer AUTO came back 403, which made §20's own headline scenario
+    unreachable from every surface: "ปิดเครื่องให้หน่อย" is `system.power`, `system.power`
+    is ASK_ALWAYS, and ASK_ALWAYS was a refusal here rather than a question. Locking a
+    screen — ASK_ONCE, LOW, reversible — was refused too. The engine was saying *ask the
+    owner* and this endpoint was hearing *no*.
+
+    It now raises the approval and returns **202** with its id, the same shape every
+    other deferred decision in this API uses. BLOCK is still 403: that is the engine
+    saying no, and there is nobody to ask.
+    """
     summary = c.hub.summary(device_id)
     if summary is None:
         raise HTTPException(status_code=404, detail="unknown device")
@@ -609,16 +630,17 @@ async def act(
     if spec is None:
         raise HTTPException(status_code=400, detail=f"unknown action {request.action!r}")
 
+    resource = str(
+        request.args.get("path")
+        or request.args.get("app")
+        or request.args.get("name")
+        or request.args.get("url")
+        or ""
+    )
     verdict = c.permissions.decide(
         ActionRequest(
             action=request.action,
-            resource=str(
-                request.args.get("path")
-                or request.args.get("app")
-                or request.args.get("name")
-                or request.args.get("url")
-                or ""
-            ),
+            resource=resource,
             device_id=device_id,
             level=spec.level,
             risk=spec.risk,
@@ -626,13 +648,45 @@ async def act(
             expected_outcome=request.reason,
         )
     )
-    if verdict.decision is not PolicyDecision.AUTO:
+    if verdict.decision is PolicyDecision.BLOCK:
         raise HTTPException(
             status_code=403,
             detail={
                 "decision": verdict.decision.value,
                 "reason": verdict.reason,
                 "rule": verdict.rule,
+            },
+        )
+
+    if verdict.decision.requires_approval:
+        approval = await c.approvals.request(
+            ApprovalRequest(
+                action=request.action,
+                agent="api",
+                device_id=device_id,
+                device_name=summary.name,
+                resource=resource,
+                risk=verdict.risk,
+                level=verdict.level,
+                reversible=spec.reversible,
+                expected_outcome=request.reason or spec.description,
+                # Passed through rather than decided here: ADR 0008's rule that an
+                # ASK_ALWAYS approval offers no 'always allow' belongs to the approval,
+                # not to whichever endpoint happened to raise it.
+                policy=verdict.decision,
+            )
+        )
+        return JSONResponse(
+            status_code=202,
+            content={
+                "approval_id": str(approval.id),
+                "decision": verdict.decision.value,
+                "reason": verdict.reason,
+                "action": request.action,
+                "device_name": summary.name,
+                # Said here as well as on the approval: a caller that reads only this
+                # response should still learn that nothing has run.
+                "ran": False,
             },
         )
     try:

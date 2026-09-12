@@ -5,7 +5,9 @@ import {
   NO_STANDING_ON_PHONE,
   PHONE_MAX_WIDTH,
   machineFor,
+  mayActFromPhone,
   mayGrantStanding,
+  refusalFor,
   scopesFor,
   surfaceFor,
 } from "@/lib/surface";
@@ -61,5 +63,40 @@ describe("naming the machine", () => {
     for (const nothing of [null, undefined, "", "   "]) {
       expect(machineFor(nothing)).toBe("ไม่ได้ระบุเครื่อง");
     }
+  });
+});
+
+describe("what a phone may do to a machine", () => {
+  it("may lock and wake — both recoverable", () => {
+    expect(mayActFromPhone("system.lock", "phone")).toBe(true);
+    expect(mayActFromPhone("device.wake", "phone")).toBe(true);
+  });
+
+  it("may not shut a machine down or restart it", () => {
+    // Not because it is high-risk in the abstract: because the owner is in a different
+    // building and cannot take it back. The apparent undo is wake-on-LAN, and §23 says
+    // plainly that waking a machine has never woken a machine.
+    expect(mayActFromPhone("system.power", "phone")).toBe(false);
+  });
+
+  it("may not run a shell or delete a file either", () => {
+    expect(mayActFromPhone("shell.run", "phone")).toBe(false);
+    expect(mayActFromPhone("powershell.run", "phone")).toBe(false);
+    expect(mayActFromPhone("file.delete", "phone")).toBe(false);
+  });
+
+  it("is an allowlist, so a verb added to the catalogue is off the phone by default", () => {
+    // The safe direction for a list somebody will forget to update.
+    expect(mayActFromPhone("some.future.verb", "phone")).toBe(false);
+  });
+
+  it("does not narrow the desktop, where the owner is at the machine", () => {
+    expect(mayActFromPhone("system.power", "desktop")).toBe(true);
+    expect(refusalFor("system.power", "desktop")).toBe("");
+  });
+
+  it("explains each refusal rather than leaving a control silently absent", () => {
+    expect(refusalFor("system.power", "phone")).toContain("ยังไม่ได้บันทึกจะหาย");
+    expect(refusalFor("shell.run", "phone")).not.toBe("");
   });
 });
