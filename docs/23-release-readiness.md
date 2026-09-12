@@ -6,7 +6,7 @@ a multi-user or internet-exposed installation.**
 That sentence is the whole document in one line. What follows is the evidence for it, and —
 more usefully — the evidence against.
 
-Written at Sprint 50 and kept current since, against 2,151 tests that need no database, no
+Written at Sprint 50 and kept current since, against 2,317 tests that need no database, no
 network and no model credentials. `./scripts/check.sh` runs lint, format, types, the suite and the migrations.
 
 ---
@@ -24,7 +24,7 @@ container, not a unit test of the class in isolation.
 | Hash-chained audit that detects tampering and deletion | `tests/unit/test_security.py` |
 | Device protocol with per-device Ed25519 identity, pairing and revocation | `tests/unit/test_pairing_v36.py` |
 | Voice, vision, gesture and multi-device layers | `tests/e2e/test_v4…v8_*.py` |
-| Thirteen agents; skills learned, run and composed | `tests/e2e/test_v9_skills_acceptance.py` |
+| Eighteen agents; skills learned, run and composed | `tests/e2e/test_v9_skills_acceptance.py` |
 | Proactivity that offers rather than acts | `tests/e2e/test_v10_proactive_acceptance.py` |
 | Spend metered at the router, capped, and degrading to local | `tests/e2e/test_v45_cost_acceptance.py` |
 | Backup and restore, with a real round trip through a real file | `tests/integration/test_backup_v47.py` |
@@ -53,6 +53,9 @@ container, not a unit test of the class in isolation.
 | Circulation and collection counted from records, with overdue answered as at a stated date | `tests/integration/test_library_agent_v13.py` |
 | A run sheet whose clock times are computed, and the person rostered onto two consecutive items | `tests/integration/test_event_agent_v13.py` |
 | A script spoken by Thursday, timed off the real audio, rendered, and the finished video's soundtrack checked for being audible | `tests/e2e/test_v12_narration_acceptance.py` |
+| A backtest whose trade count the Supervisor recomputes, an order type no module outside `risk.py` can construct, and a live stage with no adapter behind it | `tests/integration/test_trading_agent_v14.py` |
+| A workflow saved disabled whatever the request said, with each action's permission decision resolved before it is armed | `tests/integration/test_workflow_api_v15.py` |
+| Schedule triggers that fire — five-field cron in the owner's timezone, swept by the worker | `tests/unit/test_schedule_sweep_v15.py` |
 
 ## 23.2 What is not ready, and what that would take
 
@@ -120,11 +123,16 @@ one at startup, and a machine without one gets an editor that refuses every call
 remedy in the sentence while `health()` reports `media` as unavailable. That is a supported
 deployment, not a degraded one.
 
-What is missing is everything that *creates* material rather than assembling it. There is no
-text-to-image, no text-to-video and no text-to-speech, so `creative.compose` takes pictures
-and narration as inputs and returns `ready=False` naming what it lacks. The brief's creative
-workflow is therefore half-built on purpose — the deterministic half. *To close:* a provider
-behind a port for each, in the shape ADR 0001 describes.
+What is missing is the *picture* side of creation: there is no text-to-image and no
+text-to-video, so `creative.compose` takes storyboard frames as an input and returns
+`ready=False` naming what it lacks. The brief's creative workflow is therefore half-built on
+purpose — the deterministic half. *To close:* a provider behind a port for each, in the shape
+ADR 0001 describes.
+
+This paragraph said "and no text-to-speech" until Sprint 96, twenty lines below the one that
+describes Thursday's voice. V12 added the synthesiser and nobody came back to this sentence,
+so the document whose whole job is to be honest about gaps was claiming a gap that had been
+closed. `test_the_readiness_document_does_not_deny_a_capability_thursday_has` now checks it.
 
 Two smaller limits, both deliberate. **Silence removal refuses on video**: cutting silence
 from a soundtrack while leaving the picture alone desynchronises the two for the rest of the
@@ -241,12 +249,21 @@ provider**; a deployment that has not, has not. *To close:* a machine with a cam
 microphone, a real recogniser behind the two ports, and the §52 anti-spoof battery run against
 an actual printed photograph, an actual phone screen and an actual recording.
 
-**The Learning Center has no UI.** Sprints 67-72 built the tutor as API and logic: the
-capability catalogue, lessons with real verification, the tip engine, the Tutor agent, and
-`GET /learn`. Nothing in the desktop app renders any of it, so the §13 interactive walkthrough
-(highlighting a real button with an arrow) and the §22 gesture tutorial with a live hand
-skeleton do not exist. *To close:* a Learning Center view in the Tauri app; the data it needs
-is already served.
+**The Learning Center is rendered; two of its lessons are not.** Sprints 67-72 built the
+tutor as API and logic and nothing drew it, so the learning path, the suggestion engine and
+the lessons with real verification existed and no owner could reach them. Sprint 96 added the
+view: the path by stage, the one suggested next thing with its reason, the practice offers
+with their real policy decisions, and lessons that start, check and skip.
+
+It has **no control that marks a lesson complete**, and that is the property worth keeping:
+`done` arrives from the server, `/attempt` takes evidence rather than a verdict, and a step's
+own check reads the machine. A "mark as done" button would turn the screen from a record of
+what the owner can do into a record of what they clicked.
+
+*Still open:* the §13 interactive walkthrough that highlights a real button with an arrow,
+and the §22 gesture tutorial with a live hand skeleton. Both need to point at the running
+interface rather than describe it, which is a different piece of work from rendering the
+lessons.
 
 **Some lessons the spec names are not written.** §17's five basics are, plus stopping. The
 vision (§21), gesture (§22), agent (§19), automation (§20) and multi-device (§64) lessons are
