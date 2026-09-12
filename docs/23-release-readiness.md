@@ -58,6 +58,7 @@ container, not a unit test of the class in isolation.
 | Schedule triggers that fire — five-field cron in the owner's timezone, swept by the worker | `tests/unit/test_schedule_sweep_v15.py` |
 | An unauthenticated caller who cannot open an app on the owner's machine, on the HTTP surface and on the socket that bypasses its middleware | `tests/integration/test_api_auth_v25.py` |
 | A core whose TLS key changes while nobody walks to a machine, followed over a real handshake against a certificate that really was replaced | `tests/integration/test_tls_rotation_live_v23.py` |
+| A device key that never touches disk, migrated out of a file into a real, unmocked Linux Secret Service and read back from it after a restart | `tests/integration/test_keychain_live_v26.py` |
 
 ## 23.2 What is not ready, and what that would take
 
@@ -69,14 +70,30 @@ constructed landmarks, frames and audio. No camera, microphone or Windows machin
 run them. *To close:* run the existing acceptance tests on real hardware; the seams are
 already ports, so nothing needs redesigning first.
 
-**The OS keychain adapters have never run against a real keychain.** The port and all three
-adapters exist (ADR 0040) — macOS Keychain, Windows DPAPI, Linux Secret Service — and the
-node's key migrates into one when it is available, write-then-read-back-then-delete. A
-configured keychain that is *not* available now fails closed instead of silently returning the
-environment vault, which is what it did before. But this container is headless Linux with none
-of the three, so selection, availability detection and migration ordering are tested and the
-platform calls themselves are not. *To close:* one run on each of macOS, Windows and a Linux
-desktop.
+**The OS keychain adapters have never run against a real keychain — except now one of them
+has.** The port and all three adapters exist (ADR 0040) — macOS Keychain, Windows DPAPI, Linux
+Secret Service — and the node's key migrates into one when it is available,
+write-then-read-back-then-delete. A configured keychain that is *not* available fails closed
+instead of silently returning the environment vault, which is what it did before.
+
+**The Linux leg is closed for real (ADR 0074).** A Secret Service is a session D-Bus bus and an
+unlocked collection — infrastructure a headless CI runner can actually have, unlike a macOS or
+Windows machine. CI now installs `gnome-keyring`, starts one, and asserts it is really there
+before the suite runs — the same discipline already applied to ffmpeg and eSpeak NG, so a
+broken setup fails loudly instead of the keychain tests quietly reverting to skipped.
+`tests/integration/test_keychain_live_v26.py` then drives the production adapter completely
+unmocked: a real round trip through `SecretServiceKeychain`, through `KeychainVault`, through
+`build_container(vault_backend="keychain")`, and through `NodeIdentity`'s file-to-keychain
+migration — the private key verified present in the real keyring and absent from disk.
+
+Turning that on found something unrelated to the keychain itself: four other test files built
+a `NodeIdentity` with no explicit keychain, reaching `detect()` — which had only ever returned
+`NoKeychain` here, so tests asserting file-based storage passed by the accident of the
+container's absence rather than by what they claimed to prove. Two immediately turned red
+against a real daemon. All are now explicit about which keychain they mean.
+
+**macOS Keychain and Windows DPAPI remain the honest gap.** *To close:* one run on each,
+which needs the hardware and OS themselves — nothing left to close by writing more tests here.
 
 **Every credential in the system now rotates, and the last one to arrive is the one that
 looked impossible.**

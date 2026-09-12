@@ -16,6 +16,7 @@ from datetime import UTC, datetime
 
 import pytest
 from thursday_security.device_auth import DeviceAuthenticator, sign, signing_payload
+from thursday_security.keychain import NoKeychain
 from thursday_security.keys import PublicKey, hello_payload, pairing_payload
 from thursday_security.pairing import PairingService
 from thursday_shared.models import DeviceCapabilities, DeviceTelemetry
@@ -28,7 +29,11 @@ TOKEN = "shared-enrolment-token"
 
 @pytest.fixture
 def identity(tmp_path):
-    return NodeIdentity(tmp_path / "node.json")
+    # Explicit `NoKeychain`, not the ambient default. These tests are about pairing and file
+    # conduct, not the keychain (that is `test_keychain.py`'s job) — and on a machine that
+    # happens to have a real one, an implicit `detect()` would silently migrate the key there
+    # instead, breaking every assertion below that expects a file.
+    return NodeIdentity(tmp_path / "node.json", keychain=NoKeychain())
 
 
 def client(identity, *, token: str = TOKEN) -> NodeClient:
@@ -65,9 +70,9 @@ def test_a_node_generates_its_own_key_on_first_use(identity):
 
 
 def test_the_key_is_the_same_one_across_restarts(tmp_path):
-    first = NodeIdentity(tmp_path / "node.json")
+    first = NodeIdentity(tmp_path / "node.json", keychain=NoKeychain())
     original = first.fingerprint
-    second = NodeIdentity(tmp_path / "node.json")
+    second = NodeIdentity(tmp_path / "node.json", keychain=NoKeychain())
     assert second.fingerprint == original
 
 

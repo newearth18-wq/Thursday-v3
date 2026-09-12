@@ -20,6 +20,7 @@ from httpx import ASGITransport, AsyncClient
 from thursday_api.app import create_app
 from thursday_api.routers.devices import HANDOVER_FILE
 from thursday_security.handover import HandOver
+from thursday_security.keychain import NoKeychain
 from thursday_security.pinning import spki_pin
 
 from apps.node.__main__ import NodeClient, NodeIdentity
@@ -200,13 +201,13 @@ async def test_a_node_follows_the_published_hand_over_and_repins(
         HandOver.from_dict(item)
         for item in json.loads((settings.data_dir / HANDOVER_FILE).read_text())["handovers"]
     ]
-    identity = paired(NodeIdentity(tmp_path / "node.json"), old_pin)
+    identity = paired(NodeIdentity(tmp_path / "node.json", keychain=NoKeychain()), old_pin)
     client = node(identity)
     monkeypatch.setattr("apps.node.__main__.published_handovers", lambda base, **kw: chain)
 
     assert await client._follow_handover() is True
 
-    assert NodeIdentity(tmp_path / "node.json").core_pin.value == new_pin
+    assert NodeIdentity(tmp_path / "node.json", keychain=NoKeychain()).core_pin.value == new_pin
 
 
 async def test_a_node_keeps_its_pin_when_the_chain_does_not_verify(
@@ -218,7 +219,7 @@ async def test_a_node_keeps_its_pin_when_the_chain_does_not_verify(
     _, impostor_key, _, _ = make_certificate(tmp_path, "impostor")
     elsewhere, _, _, _ = make_certificate(tmp_path, "elsewhere")
     forged = _sign_link(impostor_key, elsewhere)
-    identity = paired(NodeIdentity(tmp_path / "node.json"), old_pin)
+    identity = paired(NodeIdentity(tmp_path / "node.json", keychain=NoKeychain()), old_pin)
     client = node(identity)
     monkeypatch.setattr("apps.node.__main__.published_handovers", lambda base, **kw: [forged])
 
@@ -236,7 +237,7 @@ async def test_a_node_asks_once_per_pin_and_not_once_per_reconnection(
     """A node whose pin genuinely does not match reconnects for as long as it runs. Asking
     every time would be a node hammering its own core on the strength of a failure."""
     _, _, old_pin, _, _ = core_keys
-    identity = paired(NodeIdentity(tmp_path / "node.json"), old_pin)
+    identity = paired(NodeIdentity(tmp_path / "node.json", keychain=NoKeychain()), old_pin)
     client = node(identity)
     asked = []
 
@@ -255,7 +256,7 @@ async def test_a_node_asks_once_per_pin_and_not_once_per_reconnection(
 async def test_a_node_that_never_recorded_a_pin_does_not_go_looking(tmp_path, monkeypatch):
     """A node paired over plaintext has no pin, so there is nothing for a hand-over to move
     and no question to ask."""
-    identity = paired(NodeIdentity(tmp_path / "node.json"), "")
+    identity = paired(NodeIdentity(tmp_path / "node.json", keychain=NoKeychain()), "")
     client = node(identity)
     monkeypatch.setattr(
         "apps.node.__main__.published_handovers",
@@ -271,7 +272,7 @@ async def test_an_unreachable_core_is_a_refusal_rather_than_a_crash(
     import httpx
 
     _, _, old_pin, _, _ = core_keys
-    identity = paired(NodeIdentity(tmp_path / "node.json"), old_pin)
+    identity = paired(NodeIdentity(tmp_path / "node.json", keychain=NoKeychain()), old_pin)
     client = node(identity)
 
     def boom(base, **kw):
@@ -290,7 +291,7 @@ def test_the_previous_pin_is_kept_so_the_owner_can_see_what_changed(tmp_path, co
     """Nothing reads this back. It is here because "what did this machine trust, and when did
     that stop" is a question the file should answer without a log that has rotated away."""
     _, old_key, old_pin, new_cert, new_pin = core_keys
-    identity = paired(NodeIdentity(tmp_path / "node.json"), old_pin)
+    identity = paired(NodeIdentity(tmp_path / "node.json", keychain=NoKeychain()), old_pin)
     link = _sign_link(old_key, new_cert)
 
     identity.adopt_pin(new_pin, after=[link])

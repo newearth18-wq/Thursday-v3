@@ -28,10 +28,14 @@ refuses every operation rather than storing anywhere weaker. The decision to acc
 storage belongs to whoever configures the deployment, made once and visibly — not to this
 module, made silently on every write.
 
-*Verification note.* This container is headless Linux with no Secret Service, no macOS and no
-Windows, so the three platform adapters have never been run against a real keychain. What is
-tested here is selection, availability detection, the refusal to downgrade silently, and the
-exact commands each adapter would run.
+*Verification note.* The Linux leg is closed for real (ADR 0074): CI starts a genuine D-Bus
+session and an unlocked GNOME Keyring collection, and `tests/integration/test_keychain_live_
+v26.py` drives this exact adapter — unmocked — against it, including the node identity's file-
+to-keychain migration. macOS Keychain and Windows DPAPI remain unverified, honestly: there is
+no macOS and no Windows to run them against here, and no amount of test-writing changes that.
+What is tested everywhere else in this file — selection, availability detection, the refusal
+to downgrade silently, and the exact commands each adapter would run — covers all three; a
+real round trip covers the one platform a CI runner can actually have.
 """
 
 from __future__ import annotations

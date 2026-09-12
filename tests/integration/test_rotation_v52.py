@@ -24,6 +24,7 @@ from starlette.websockets import WebSocketDisconnect
 from thursday_api.app import create_app
 from thursday_core.container import build_container
 from thursday_security.device_auth import DeviceAuthenticator
+from thursday_security.keychain import NoKeychain
 from thursday_security.keys import (
     PrivateKey,
     generate_keypair,
@@ -570,7 +571,7 @@ def test_the_successor_key_is_written_down_before_the_core_is_asked_to_take_it(t
     """
     from apps.node.__main__ import NodeIdentity
 
-    identity = NodeIdentity(tmp_path / "node.json")
+    identity = NodeIdentity(tmp_path / "node.json", keychain=NoKeychain())
     live = identity.key.public.fingerprint
 
     staged = identity.stage_pending()
@@ -578,7 +579,10 @@ def test_the_successor_key_is_written_down_before_the_core_is_asked_to_take_it(t
     assert identity.key.public.fingerprint == live, "the live key must not change yet"
 
     # A fresh object over the same files: this is what survives a crash.
-    assert NodeIdentity(tmp_path / "node.json").pending_key().to_pem() == staged.to_pem()
+    assert (
+        NodeIdentity(tmp_path / "node.json", keychain=NoKeychain()).pending_key().to_pem()
+        == staged.to_pem()
+    )
 
 
 def test_staging_twice_reuses_the_key_already_staged(tmp_path):
@@ -586,14 +590,14 @@ def test_staging_twice_reuses_the_key_already_staged(tmp_path):
     orphaned in the core if the first attempt had in fact landed."""
     from apps.node.__main__ import NodeIdentity
 
-    identity = NodeIdentity(tmp_path / "node.json")
+    identity = NodeIdentity(tmp_path / "node.json", keychain=NoKeychain())
     assert identity.stage_pending().to_pem() == identity.stage_pending().to_pem()
 
 
 def test_promoting_replaces_the_live_key_and_clears_the_staging_slot(tmp_path):
     from apps.node.__main__ import NodeIdentity
 
-    identity = NodeIdentity(tmp_path / "node.json")
+    identity = NodeIdentity(tmp_path / "node.json", keychain=NoKeychain())
     identity.record_pairing(device_id=str(new_id()), fingerprint=identity.key.public.fingerprint)
     staged = identity.stage_pending()
 
@@ -601,7 +605,7 @@ def test_promoting_replaces_the_live_key_and_clears_the_staging_slot(tmp_path):
 
     assert identity.key.to_pem() == staged.to_pem()
     assert identity.pending_key() is None
-    reloaded = NodeIdentity(tmp_path / "node.json")
+    reloaded = NodeIdentity(tmp_path / "node.json", keychain=NoKeychain())
     assert reloaded.key.public.fingerprint == staged.public.fingerprint
     assert reloaded.data["pairing"]["fingerprint"] == staged.public.fingerprint
 
@@ -612,7 +616,7 @@ def test_the_staged_key_file_is_not_world_readable(tmp_path):
 
     from apps.node.__main__ import NodeIdentity
 
-    identity = NodeIdentity(tmp_path / "node.json")
+    identity = NodeIdentity(tmp_path / "node.json", keychain=NoKeychain())
     identity.stage_pending()
     mode = stat.S_IMODE(identity.pending_key_path.stat().st_mode)
     assert mode == 0o600, oct(mode)
@@ -622,7 +626,7 @@ def test_a_node_that_never_paired_refuses_to_rotate(tmp_path, capsys):
     """Rotation replaces an identity the core already trusts. There isn't one yet."""
     from apps.node.__main__ import NodeIdentity, rotate_key
 
-    identity = NodeIdentity(tmp_path / "node.json")
+    identity = NodeIdentity(tmp_path / "node.json", keychain=NoKeychain())
     assert rotate_key(identity, core_url="ws://127.0.0.1:9/api/v1/device") == 1
     assert "not paired" in capsys.readouterr().out
     assert identity.pending_key() is None, "nothing should have been staged"
@@ -646,7 +650,7 @@ def test_a_rotation_whose_reply_was_lost_resolves_itself_against_the_core(
     from apps.node.__main__ import NodeIdentity, _resolve_staged
 
     credential, old = paired_via(container)
-    identity = NodeIdentity(tmp_path / "node.json")
+    identity = NodeIdentity(tmp_path / "node.json", keychain=NoKeychain())
     identity.record_pairing(device_id=str(credential.device_id), fingerprint=credential.fingerprint)
     successor = identity.stage_pending()
 
@@ -671,7 +675,7 @@ def test_a_rotation_the_core_never_took_keeps_the_staged_key_and_says_so(
     from apps.node.__main__ import NodeIdentity, _resolve_staged
 
     credential, _old = paired_via(container)
-    identity = NodeIdentity(tmp_path / "node.json")
+    identity = NodeIdentity(tmp_path / "node.json", keychain=NoKeychain())
     identity.record_pairing(device_id=str(credential.device_id), fingerprint=credential.fingerprint)
     successor = identity.stage_pending()
     live = identity.key.public.fingerprint

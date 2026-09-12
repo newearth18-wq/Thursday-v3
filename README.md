@@ -204,7 +204,7 @@ conventions, so neither can be forgotten by a new caller.
 
 Full design in [`docs/`](docs/) — the twenty-four deliverables, written before the code
 (§24–§26 came after, describing what V11, V14 and V15 built), plus the
-[V2 review](docs/architecture/00-v2-review.md) and seventy-three
+[V2 review](docs/architecture/00-v2-review.md) and seventy-four
 [architecture decisions](docs/architecture/decisions/) recording what was chosen and what
 each choice cost:
 

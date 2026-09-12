@@ -8,10 +8,11 @@ The failure these tests are mostly about is not "the keychain broke". It is a de
 `vault_backend="keychain"` did before this, silently returning the environment vault. An
 imagined protection is worse than a known weakness, because the known one gets compensated for.
 
-*Verification note.* This container is headless Linux with no Secret Service, no macOS and no
-Windows. The platform adapters have never been run against a real keychain; what is tested
-here is selection, availability detection, the refusal to downgrade silently, migration, and
-the exact commands each adapter would run.
+*Verification note.* These tests are the mocked half. `test_keychain_live_v26.py` is the
+other half — it runs the Linux adapter, unmocked, against a real D-Bus Secret Service (ADR
+0074), which is why the two tests below that used to rely on this container having *no*
+keychain now force that with `detect` patched rather than assume it. macOS Keychain and
+Windows DPAPI still have no runner to verify against here.
 """
 
 from __future__ import annotations
@@ -70,8 +71,18 @@ class FakeKeychain:
 def test_a_configured_keychain_that_is_absent_refuses_to_start():
     """The bug this closes. `vault_backend="keychain"` returned `ChainVault(EnvVault())` and
     said nothing, so a deployment that asked for the OS keychain got the environment and
-    believed otherwise. Fails closed now, exactly as a missing device token does."""
-    with pytest.raises(ConfigurationError, match="no keychain"):
+    believed otherwise. Fails closed now, exactly as a missing device token does.
+
+    `detect` is patched to `NoKeychain` explicitly rather than relied on to fail by ambient
+    absence. This container used to have none, which made the two tests below pass for a
+    reason that had nothing to do with what they claimed to test — and once a real Secret
+    Service is running here for the tests further down this file (ADR 0074), leaving it
+    ambient would make these two the ones silently testing nothing.
+    """
+    with (
+        mock.patch("thursday_security.keychain.detect", return_value=NoKeychain()),
+        pytest.raises(ConfigurationError, match="no keychain"),
+    ):
         build_container(
             Settings(llm_backend="rule", vault_backend="keychain"), configure_logs=False
         )
@@ -80,7 +91,10 @@ def test_a_configured_keychain_that_is_absent_refuses_to_start():
 def test_the_refusal_says_what_to_do_about_it():
     """A fail-closed message that does not name the two ways out is a message that gets
     worked around by deleting the check."""
-    with pytest.raises(ConfigurationError) as raised:
+    with (
+        mock.patch("thursday_security.keychain.detect", return_value=NoKeychain()),
+        pytest.raises(ConfigurationError) as raised,
+    ):
         build_container(
             Settings(llm_backend="rule", vault_backend="keychain"), configure_logs=False
         )
