@@ -20,8 +20,8 @@ ready, what is not, and what closing each gap would take is in
 [docs/23-release-readiness.md](docs/23-release-readiness.md).
 
 **Phase 1 is implemented and runnable**: the vertical slice from
-[docs/15-vertical-slice.md](docs/15-vertical-slice.md) works end to end, with 2,310 tests that
-need no database, no network and no model credentials — plus 155 in the desktop app, which
+[docs/15-vertical-slice.md](docs/15-vertical-slice.md) works end to end, with 2,317 tests that
+need no database, no network and no model credentials — plus 169 in the desktop app, which
 is where the decisions about what a person is actually shown now live.
 
 ```
@@ -204,7 +204,7 @@ conventions, so neither can be forgotten by a new caller.
 
 Full design in [`docs/`](docs/) — the twenty-four deliverables, written before the code
 (§24–§26 came after, describing what V11, V14 and V15 built), plus the
-[V2 review](docs/architecture/00-v2-review.md) and sixty-four
+[V2 review](docs/architecture/00-v2-review.md) and sixty-five
 [architecture decisions](docs/architecture/decisions/) recording what was chosen and what
 each choice cost:
 
@@ -242,7 +242,7 @@ each choice cost:
 - Skills: capture → sandbox test → approval → activate → rollback, with risky steps
   gated; retrieved by what the owner *says* ("แบบที่เคยทำ"), turned into a plan, and
   composable into new skills that re-enter the lifecycle as drafts
-- Thirteen specialist agents plus the Supervisor. Most sit at a READ ceiling on purpose:
+- Eighteen specialist agents plus the Supervisor. Most sit at a READ ceiling on purpose:
   `coding` proposes patches and never applies or runs one, `file` finds duplicates and never
   deletes them, and `communication` drafts messages with **no code path to a sent one** —
   the single action here with neither an undo nor a verification
@@ -340,6 +340,11 @@ each choice cost:
   including the rule implementations differ on — with both day-of-month and day-of-week
   restricted, cron fires when **either** matches — and an expression that cannot be parsed is
   refused rather than narrowed to "every minute"
+- A Learning Center that renders what the tutor has served since Sprint 67 and nothing drew:
+  the path by stage, one suggested next thing with its reason, and practice offers carrying
+  their real policy decisions. It has **no control that marks a lesson complete** — `done`
+  comes from the server, `/attempt` takes evidence rather than a verdict, and the step's own
+  check reads the machine
 - 126 REST operations, two WebSockets, 29-table schema with working migrations and seeds
 
 **Designed, ported, not yet implemented** — every one has an interface and a Phase in
@@ -393,7 +398,7 @@ the verification loop, the audit chain and the device round-trip are all real.
 
 ```bash
 ./scripts/check.sh           # everything CI runs: lint, format, types, tests, migrations
-pytest                       # 2,310 tests, no infrastructure
+pytest                       # 2,317 tests, no infrastructure
 ruff check . && ruff format .
 mypy packages services
 alembic upgrade head && alembic revision --autogenerate -m "what changed"

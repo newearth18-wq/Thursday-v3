@@ -5,6 +5,7 @@ import { BrainGraph } from "@/components/BrainGraph";
 import { Conversation } from "@/components/Conversation";
 import { DevicePanel } from "@/components/DevicePanel";
 import { Hud } from "@/components/Hud";
+import { LearningCenter } from "@/components/LearningCenter";
 import { MemoryPanel } from "@/components/MemoryPanel";
 import { PermissionPanel } from "@/components/PermissionPanel";
 import { ServerConnect } from "@/components/ServerConnect";
@@ -15,12 +16,23 @@ import { useRealtime } from "@/hooks/useRealtime";
 import { api } from "@/lib/api";
 import { IS_TAURI } from "@/lib/origin";
 
+/** What a drawer may read from the window around it. Passed rather than fetched again, so
+ *  a lesson checking "did you get a real reply" is checking the reply the owner actually
+ *  saw — evidence, not a second opinion. */
+interface DrawerContext {
+  lastReply?: string;
+}
+
 const DRAWERS = {
   tasks: { label: "tasks", render: () => <TaskPanel /> },
   devices: { label: "devices", render: () => <DevicePanel /> },
   memory: { label: "memory", render: () => <MemoryPanel /> },
   permissions: { label: "permissions", render: () => <PermissionPanel /> },
   workflows: { label: "workflows", render: () => <WorkflowBuilder /> },
+  learn: {
+    label: "learn",
+    render: (ctx: DrawerContext) => <LearningCenter lastReply={ctx.lastReply} />,
+  },
 } as const;
 
 type Drawer = keyof typeof DRAWERS;
@@ -51,6 +63,9 @@ export default function App() {
     setApprovals,
   } = useRealtime();
   const live = useMind(agents, approvals);
+  // The last thing Thursday actually said. A lesson that asks "did you get a real turn back"
+  // is answered with the turn the owner saw, not with a claim from this component.
+  const lastReply = [...messages].reverse().find((m) => m.role === "thursday")?.text;
   const [draft, setDraft] = useState("");
   const [drawer, setDrawer] = useState<Drawer | null>(null);
   const [lockdown, setLockdown] = useState(false);
@@ -218,7 +233,7 @@ export default function App() {
               close
             </button>
           </div>
-          <div className="min-h-0 flex-1 overflow-y-auto">{DRAWERS[drawer].render()}</div>
+          <div className="min-h-0 flex-1 overflow-y-auto">{DRAWERS[drawer].render({ lastReply })}</div>
         </aside>
       )}
     </div>

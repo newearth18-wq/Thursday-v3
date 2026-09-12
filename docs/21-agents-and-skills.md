@@ -5,8 +5,13 @@
 
 ## The agent bench
 
-Thirteen specialists plus the Supervisor. The **ceiling** column is the interesting one:
+Eighteen specialists plus the Supervisor. The **ceiling** column is the interesting one:
 most of the bench is READ, and that is a design rather than an accident — see below.
+
+The table is checked against the running container by
+`tests/integration/test_release_readiness_v50.py`: a bench that lists thirteen agents while
+Thursday runs eighteen is how a reader learns something false about what their machine may
+do — and the row that went wrong first was a **ceiling**, not a description.
 
 | Agent | Does | Ceiling |
 |---|---|---|
@@ -22,12 +27,18 @@ most of the bench is READ, and that is a design rather than an accident — see 
 | `communication` | **drafts** messages; there is no path from here to a sent one | MODIFY |
 | `automation` | explains what runs by itself; proposes, never enables | READ |
 | `design` | a design **specification** — tokens, layout, components. Not an image | READ |
-| `media` | identifies files from their headers. Cannot edit them | READ |
+| `media` | probes files, and since V11 **edits** them — every edit writes a new file | MODIFY |
+| `teacher` | school documents whose correctness is arithmetic | READ |
+| `library` | circulation and collection, counted from records | READ |
+| `event` | run sheets with computed clock times, and the clashes they expose | READ |
+| `trading` | backtests and position sizing. **Cannot place an order** | READ |
+| `tutor` | teaches Thursday's own use; practice mode has no execution path | READ |
 
 Several hold **no tools at all** (`data`, `document`, `vision`, `calendar`, `communication`,
-`automation`, `design`). They work on what an earlier step read or on a service that owns
-its own consent, so an analysis cannot widen into an unplanned file read, a report writer
-cannot overwrite a file, and an agent cannot open a camera around `VisionService`.
+`automation`, `design`, `teacher`, `library`, `event`, `trading`, `tutor`). They work on what
+an earlier step read or on a service that owns its own consent, so an analysis cannot widen
+into an unplanned file read, a report writer cannot overwrite a file, and an agent cannot open
+a camera around `VisionService`.
 
 Three boundaries are worth naming because the obvious design goes the other way:
 

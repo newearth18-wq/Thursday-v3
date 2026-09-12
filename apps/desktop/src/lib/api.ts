@@ -107,6 +107,18 @@ export const api = {
   runWorkflow: (id: string) =>
     request<{ ran: boolean; steps: number }>(`/automations/${id}/run`, { method: "POST" }),
   deleteWorkflow: (id: string) => request(`/automations/${id}`, { method: "DELETE" }),
+  learn: () => request<LearningCentre>("/learn"),
+  startLesson: (id: string) =>
+    request<LessonStep>(`/learn/${encodeURIComponent(id)}/start`, { method: "POST" }),
+  // The body is evidence of what happened, not a claim that it did.
+  attemptLesson: (id: string, evidence: unknown) =>
+    request<LessonStep>(`/learn/${encodeURIComponent(id)}/attempt`, {
+      method: "POST",
+      body: JSON.stringify(evidence ?? null),
+    }),
+  skipLesson: (id: string) =>
+    request<LessonStep>(`/learn/${encodeURIComponent(id)}/skip`, { method: "POST" }),
+
   describeCron: (cron: string) =>
     request<{ reads_as: string; valid: boolean; problem?: string }>(
       `/automations/schedule/describe?cron=${encodeURIComponent(cron)}`,
@@ -127,6 +139,52 @@ export interface StoredWorkflow extends Graph {
   run_count: number;
   last_run_at: string | null;
   explanation: string;
+}
+
+// V16 — §10's "เรียนรู้ Thursday". `attempt` takes evidence, never a verdict: there is no
+// field here through which this client could say a step succeeded, because the step's own
+// check reads the machine and decides (ADR 0012).
+export interface Lesson {
+  id: string;
+  name: string;
+  minutes: number;
+  done: boolean;
+  available: boolean;
+  reason?: string;
+}
+
+export interface LearningStage {
+  stage: string;
+  title: string;
+  lessons: Lesson[];
+}
+
+export interface LessonStep {
+  lesson: string;
+  step: string;
+  passed: boolean;
+  message: string;
+  done: boolean;
+  next: { show: string; try: string };
+}
+
+export interface PracticeOffer {
+  practice: boolean;
+  action: string;
+  would: string;
+  decision: string;
+  why: string;
+  risk: string;
+  reversible: boolean;
+}
+
+export interface LearningCentre {
+  summary: string;
+  areas: { area: string; title: string; features: string[]; example: string }[];
+  path: LearningStage[];
+  progress: { verbosity: string; teaching: string; used: string[]; tutorials_completed: string[] };
+  next: { id: string; name: string; stage_title: string; minutes: number; reason: string } | null;
+  practice: PracticeOffer[];
 }
 
 export interface Catalogue {

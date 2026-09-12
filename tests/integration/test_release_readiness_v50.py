@@ -308,3 +308,115 @@ def test_the_readme_does_not_overstate_the_desktop_suite():
     assert match, "the README no longer states a desktop test count"
     claimed = int(match.group(1).replace(",", ""))
     assert claimed <= written, f"README claims {claimed} desktop tests; {written} are written"
+
+
+# -------------------------------------------------- the documents that describe the bench
+
+#: Number words the three documents use for the size of the agent bench. Same generator
+#: idea as the ADR count above, and the same reason: a hand-written list runs out.
+_TENS = (("twenty", 20), ("thirty", 30), ("forty", 40), ("fifty", 50))
+_UNITS = ["", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine"]
+NUMBER_WORDS: dict[str, int] = {
+    "ten": 10,
+    "eleven": 11,
+    "twelve": 12,
+    "thirteen": 13,
+    "fourteen": 14,
+    "fifteen": 15,
+    "sixteen": 16,
+    "seventeen": 17,
+    "eighteen": 18,
+    "nineteen": 19,
+    **{
+        f"{tens}{'-' + unit if unit else ''}": base + n
+        for tens, base in _TENS
+        for n, unit in enumerate(_UNITS)
+    },
+}
+
+
+def _registered(container) -> dict[str, str]:
+    return {spec.name: spec.permission_ceiling.name for spec in container.agents.specs()}
+
+
+def test_the_agent_bench_table_lists_every_agent_that_actually_runs(container):
+    """§21's table said thirteen while the container registered eighteen: `teacher`,
+    `library`, `event`, `trading` and `tutor` were absent from the document describing the
+    bench. A reader counting agents from the docs was five short."""
+    bench = Path("docs/21-agents-and-skills.md").read_text(encoding="utf-8")
+    listed = set(re.findall(r"^\| `([a-z_]+)` \|", bench, re.MULTILINE))
+    assert listed == set(_registered(container)), (
+        f"in the table and not registered: {sorted(listed - set(_registered(container)))}; "
+        f"registered and not in the table: {sorted(set(_registered(container)) - listed)}"
+    )
+
+
+def test_the_bench_table_states_each_agents_real_ceiling(container):
+    """The row that went stale first was a **ceiling**, not a description: `media` was
+    listed READ and "Cannot edit them" long after V11 gave it editing tools and MODIFY.
+
+    A document that understates what an agent may do is worse than one that is merely out
+    of date — it is the document somebody reads to decide whether to trust the machine.
+    """
+    bench = Path("docs/21-agents-and-skills.md").read_text(encoding="utf-8")
+    rows = dict(re.findall(r"^\| `([a-z_]+)` \| .* \| ([A-Z]+) \|$", bench, re.MULTILINE))
+    assert rows == _registered(container), (
+        f"documented {rows} vs registered {_registered(container)}"
+    )
+
+
+@pytest.mark.parametrize(
+    ("document", "pattern"),
+    [
+        ("README.md", r"- ([A-Za-z\-]+) specialist agents plus the Supervisor"),
+        ("docs/21-agents-and-skills.md", r"^([A-Za-z\-]+) specialists plus the Supervisor"),
+        ("docs/23-release-readiness.md", r"\| ([A-Za-z\-]+) agents; skills learned"),
+    ],
+)
+def test_every_document_that_counts_the_agents_counts_the_same_number(container, document, pattern):
+    """ "Thirteen" was written in three places and wrong in all three. One registry, one
+    number, and nothing left that can disagree with it quietly."""
+    text = Path(document).read_text(encoding="utf-8")
+    match = re.search(pattern, text, re.MULTILINE)
+    assert match, f"{document} no longer states an agent count where this test looks"
+    stated = NUMBER_WORDS.get(match.group(1).lower())
+    assert stated is not None, (
+        f"{document} says {match.group(1)!r} agents and this test cannot read that as a "
+        "number — extend `NUMBER_WORDS` rather than assuming the count is wrong"
+    )
+    assert stated == len(_registered(container)), (
+        f"{document} says {stated} agents; {len(_registered(container))} are registered"
+    )
+
+
+def test_the_readiness_document_agrees_with_the_readme_about_the_suite():
+    """Both state a test count. The README's is checked against the tree above, so making
+    them agree makes both true — and §23 had drifted 159 tests behind."""
+    readme = re.search(TEST_COUNT, Path("README.md").read_text(encoding="utf-8"))
+    readiness = re.search(
+        TEST_COUNT, Path("docs/23-release-readiness.md").read_text(encoding="utf-8")
+    )
+    assert readme and readiness, "one of the two no longer states a test count"
+    assert readme.group(1) == readiness.group(1), (
+        f"README says {readme.group(1)} tests; §23 says {readiness.group(1)}"
+    )
+
+
+def test_the_readiness_document_does_not_deny_a_capability_thursday_has(container):
+    """§23 exists to be honest about gaps, so a gap it names that has since been closed is
+    the one kind of error it cannot afford.
+
+    It claimed "no text-to-speech" for four sprints after V12 gave Thursday a voice —
+    twenty lines below its own paragraph describing that voice.
+    """
+    text = Path("docs/23-release-readiness.md").read_text(encoding="utf-8")
+    denials = {
+        "no text-to-speech": container.narrator is not None,
+        "no automation engine": container.automations is not None,
+        "no trading module": container.agents.has("trading"),
+    }
+    # The sentence recording what the document used to say is allowed to quote the old
+    # wording; only a live claim counts, so the quoted phrase is removed before looking.
+    live = text.replace('"and no text-to-speech"', "")
+    wrong = [phrase for phrase, present in denials.items() if present and phrase in live]
+    assert wrong == [], f"§23 denies a capability Thursday has: {wrong}"
