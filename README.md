@@ -20,7 +20,7 @@ ready, what is not, and what closing each gap would take is in
 [docs/23-release-readiness.md](docs/23-release-readiness.md).
 
 **Phase 1 is implemented and runnable**: the vertical slice from
-[docs/15-vertical-slice.md](docs/15-vertical-slice.md) works end to end, with 2,151 tests that
+[docs/15-vertical-slice.md](docs/15-vertical-slice.md) works end to end, with 2,229 tests that
 need no database, no network and no model credentials — plus 62 in the desktop app, which
 is where the decisions about what a person is actually shown now live.
 
@@ -203,8 +203,8 @@ nothing completes without passing Verify.** Both are single choke points rather 
 conventions, so neither can be forgotten by a new caller.
 
 Full design in [`docs/`](docs/) — the twenty-four deliverables, written before the code
-(§24 came after, describing what V11 built), plus the
-[V2 review](docs/architecture/00-v2-review.md) and sixty-two
+(§24 and §25 came after, describing what V11 and V14 built), plus the
+[V2 review](docs/architecture/00-v2-review.md) and sixty-three
 [architecture decisions](docs/architecture/decisions/) recording what was chosen and what
 each choice cost:
 
@@ -216,6 +216,7 @@ each choice cost:
 | [Roadmap](docs/13-roadmap.md) | [Threat model](docs/14-threat-model.md) | [Vertical slice](docs/15-vertical-slice.md) | [Persona](docs/16-persona.md) |
 | [Voice](docs/17-voice.md) | [Vision](docs/18-vision.md) | [Gesture](docs/19-gestures.md) | [Multi-device](docs/20-multi-device.md) |
 | [Agents & skills](docs/21-agents-and-skills.md) | [Proactive](docs/22-proactive.md) | [Release readiness](docs/23-release-readiness.md) | [Media](docs/24-media.md) |
+| [Trading](docs/25-trading.md) | | | |
 
 ---
 
@@ -319,6 +320,14 @@ each choice cost:
 - Edit plans that checkpoint: a step is skipped on resume only when the file it produced is
   still exactly the size that was recorded, so a render killed midway resumes and a
   half-written file is re-rendered rather than handed to the next step
+- A trading module that **cannot place an order** — not guarded, not flagged off: there is no
+  live adapter behind the port and `trade.execute` is in the permanent block set, two
+  independent refusals of the same act. What is real is everything up to it: deterministic
+  backtests that fill on the bar *after* the signal, a risk manager that is the **only** place
+  an order is constructed (asserted by walking the AST), sizing derived from what the stop
+  would cost rather than from a position size, and a ladder that records `"ran"` and has no
+  value meaning `"passed"`. No prediction, no promise, and the disclaimer travels in the
+  payload so nothing downstream can quote the return figure without it
 - 80 REST operations, two WebSockets, 29-table schema with working migrations and seeds
 
 **Designed, ported, not yet implemented** — every one has an interface and a Phase in
@@ -372,7 +381,7 @@ the verification loop, the audit chain and the device round-trip are all real.
 
 ```bash
 ./scripts/check.sh           # everything CI runs: lint, format, types, tests, migrations
-pytest                       # 2,151 tests, no infrastructure
+pytest                       # 2,229 tests, no infrastructure
 ruff check . && ruff format .
 mypy packages services
 alembic upgrade head && alembic revision --autogenerate -m "what changed"

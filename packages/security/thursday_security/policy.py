@@ -49,6 +49,11 @@ HARD_BLOCKED: frozenset[str] = frozenset(
         "approval.disable",
         "disk.format",
         "system.directory.delete",
+        # V14. There is no live broker in this repository (ADR 0063) and no path that could
+        # reach one. Blocking the verb as well means a future adapter cannot be switched on
+        # by configuration or by an agent's reasoning — it would take deleting this line,
+        # which is a decision somebody makes deliberately and a reviewer can see.
+        "trade.execute",
     }
 )
 
@@ -63,6 +68,9 @@ _DEFAULTS: tuple[ActionPolicy, ...] = (
     ActionPolicy("clipboard.read", PermissionLevel.READ, PolicyDecision.AUTO),
     ActionPolicy("audio.volume.get", PermissionLevel.READ, PolicyDecision.AUTO),
     ActionPolicy("media.probe", PermissionLevel.READ, PolicyDecision.AUTO),
+    # Reading market data and running a backtest change nothing and risk nothing.
+    ActionPolicy("trade.backtest", PermissionLevel.READ, PolicyDecision.AUTO),
+    ActionPolicy("trade.read", PermissionLevel.READ, PolicyDecision.AUTO),
     ActionPolicy("memory.search", PermissionLevel.READ, PolicyDecision.AUTO),
     ActionPolicy("obsidian.search", PermissionLevel.READ, PolicyDecision.AUTO),
     ActionPolicy("web.search", PermissionLevel.READ, PolicyDecision.AUTO),
@@ -174,6 +182,17 @@ _DEFAULTS: tuple[ActionPolicy, ...] = (
     ),
     ActionPolicy(
         "social.post", PermissionLevel.EXTERNAL, PolicyDecision.ASK_ALWAYS, RiskLevel.HIGH, False
+    ),
+    # Paper trading moves no money and is still ASK_ALWAYS: the owner should know every
+    # time Thursday starts trading on their behalf, even where the money is imaginary,
+    # because the habit of approving it is the thing that has to survive contact with a
+    # live adapter that does not exist yet.
+    ActionPolicy(
+        "trade.paper",
+        PermissionLevel.EXTERNAL,
+        PolicyDecision.ASK_ALWAYS,
+        RiskLevel.MEDIUM,
+        False,
     ),
     ActionPolicy(
         "purchase.make",

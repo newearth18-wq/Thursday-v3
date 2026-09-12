@@ -56,6 +56,19 @@ rostered onto two consecutive items.
 **Not done:** worksheets, publicity, stage scripts, evaluation forms — prose with no
 checkable property, and the document agent's job.
 
+## Trading (done in this repo, and it cannot trade)
+The optional module §15 asks for, built so that the one irreversible thing in it is
+impossible rather than guarded: **there is no live adapter and the verb is blocked**, two
+independent refusals of the same act. Deterministic backtests, a risk manager that is the
+only place an `Order` is constructed, and a ladder that reports `"ran"` and never
+`"passed"`; see
+[§25](25-trading.md) and
+[ADR 0063](architecture/decisions/0063-a-trading-module-that-cannot-trade.md).
+**Exit:** a backtest whose trade count the Supervisor recomputes, and an AST walk asserting
+no module outside `risk.py` builds an order.
+**Not done:** market data, broker connectivity, prediction, portfolio optimisation — and
+none of them are next. Unblocking live execution is a reviewed pull request, not a setting.
+
 ## Phase 5 — Learning (6–8 weeks)
 Knowledge graph · timeline queries · skill capture from demonstration · skill sandbox
 testing · skill versioning + rollback · dynamic agents · self-evaluation · quality-aware
