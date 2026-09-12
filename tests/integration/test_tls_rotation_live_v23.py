@@ -30,6 +30,7 @@ import uvicorn
 from thursday_api.app import create_app
 from thursday_devices.fake import FakeAdapter
 from thursday_devices.node.executor import NodeExecutor
+from thursday_security.keychain import NoKeychain
 from thursday_security.pinning import PinMismatch
 
 from apps.node.__main__ import CoreRefused, NodeClient, NodeIdentity
@@ -97,7 +98,7 @@ def rotation(tmp_path, settings, container):
     port = free_port()
     core_url = f"wss://127.0.0.1:{port}/api/v1/device"
 
-    identity = NodeIdentity(tmp_path / "node.json")
+    identity = NodeIdentity(tmp_path / "node.json", keychain=NoKeychain())
     identity.record_pairing(
         device_id=str(uuid.uuid4()),
         fingerprint=identity.fingerprint,
@@ -167,7 +168,7 @@ async def test_a_node_follows_a_real_rotation_with_nobody_helping_it(rotation, s
             deadline = time.monotonic() + 20
             while time.monotonic() < deadline:
                 await asyncio.sleep(0.05)
-                if NodeIdentity(rotation["path"]).core_pin.value == new_pin:
+                if NodeIdentity(rotation["path"], keychain=NoKeychain()).core_pin.value == new_pin:
                     break
         finally:
             loop.cancel()

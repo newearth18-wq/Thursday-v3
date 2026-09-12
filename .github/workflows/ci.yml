@@ -64,6 +64,46 @@ jobs:
           print('espeak available')
           "
 
+      # §23 named this plainly: the OS keychain adapters had never run against a real
+      # keychain, because this container is headless Linux with none of the three. macOS
+      # Keychain and Windows DPAPI still have no runner here and stay an honest gap — but a
+      # real D-Bus Secret Service is exactly the thing a headless Linux runner can have, so
+      # this closes that third for real rather than leaving it mocked forever (ADR 0074).
+      #
+      # `--unlock` both creates and unlocks the login collection on first use, reading its
+      # password from stdin — a newline, since a fresh collection with an empty password is
+      # what a CI runner needs and there is nobody to type one. `DBUS_SESSION_BUS_ADDRESS`
+      # goes to `$GITHUB_ENV` so every later step, `pytest` included, inherits the same bus.
+      - name: Start a real D-Bus session and an unlocked keyring
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libsecret-tools gnome-keyring dbus-x11
+          eval "$(dbus-launch --sh-syntax)"
+          echo "DBUS_SESSION_BUS_ADDRESS=$DBUS_SESSION_BUS_ADDRESS" >> "$GITHUB_ENV"
+          # The password is piped to the *inner* command, not this step's own stdin — a
+          # redirect on the outer invocation would replace that pipe and the collection
+          # would come up locked, which is exactly the failure mode this comment is here so
+          # nobody reintroduces.
+          setsid nohup bash -c 'printf "\n" | gnome-keyring-daemon --unlock --components=secrets --replace --foreground' \
+            > keyring.log 2>&1 < /dev/null &
+          disown
+          sleep 1.5
+          cat keyring.log
+
+      # Same discipline as the ffmpeg/espeak step above, for the same reason: a skip here
+      # means test_keychain_live_v26.py silently stopped proving anything and reverted to
+      # exactly the gap §23 names — nobody would notice from a green run.
+      - name: A live Linux keychain is present, so that suite actually runs
+        run: |
+          python -c "
+          import sys
+          from thursday_security.keychain import detect
+          keychain = detect()
+          if keychain.name != 'secret-service' or not keychain.available:
+              sys.exit(f'no live Secret Service: got {keychain.name!r}, available={keychain.available}')
+          print('secret service available via', keychain.name)
+          "
+
       # The suite needs no database, no Redis, no model credentials and no GUI —
       # that is a design requirement, not a convenience.
       - name: Test
