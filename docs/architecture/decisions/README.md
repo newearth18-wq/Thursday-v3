@@ -70,3 +70,4 @@ done this way?" and have no answer.
 | [0060](0060-an-edit-never-writes-over-its-input.md) | An edit never writes over its input, and a render is judged by the file it produced | Undo for free, an honest risk level, and a resume that cannot corrupt a source |
 | [0061](0061-a-voice-that-needs-no-download.md) | A voice that needs no download, and a duration measured rather than guessed | Thursday could describe speech and not make any, so every video was timed by guesswork |
 | [0062](0062-a-school-document-is-arithmetic-somebody-is-held-to.md) | A school document is arithmetic somebody is held to | Twenty prompts would each be wrong in a way nothing checks; seven have a number that must come out right |
+| [0063](0063-a-trading-module-that-cannot-trade.md) | A trading module that cannot trade | Two independent refusals of one act: no live adapter to reach, and a verb no grant unblocks |
