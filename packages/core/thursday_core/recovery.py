@@ -111,16 +111,31 @@ class SelfRecovery:
         window: timedelta = ATTEMPT_WINDOW,
     ) -> None:
         self._repairs: dict[str, Callable[[], Awaitable[Any] | Any]] = {}
+        #: How to observe that a repair worked, where re-checking the broken component would
+        #: ask the wrong question. See `verification` for why that happens.
+        self._verifications: dict[str, Callable[[], Awaitable[bool | None] | bool | None]] = {}
         self._attempts: dict[str, _Attempts] = {}
         self._max = max_attempts
         self._window = window
 
-    def register(self, action: str, repair: Callable[[], Awaitable[Any] | Any]) -> None:
+    def register(
+        self,
+        action: str,
+        repair: Callable[[], Awaitable[Any] | Any],
+        *,
+        verify: Callable[[], Awaitable[bool | None] | bool | None] | None = None,
+    ) -> None:
         """Attach a repair. Refused here if it is not on the allowed list.
 
         Refused at *registration* rather than at call time on purpose: a forbidden repair
         that exists and is merely never invoked is one line away from being invoked, and
         the wiring is where a reviewer would look.
+
+        `verify` is for a repair that works by **routing around** the failure rather than
+        healing it. Switching to another model leaves the broken provider exactly as broken,
+        so re-checking that provider — the obvious thing, and what this did first — asks
+        whether the part is fixed when the owner asked whether Thursday works. A repair that
+        heals the component it names needs none of this and gets the default.
         """
         if not is_self_repairable(action):
             raise PermissionError(
@@ -128,6 +143,25 @@ class SelfRecovery:
                 "Thursday is permitted to do rather than restoring what it could already do"
             )
         self._repairs[action] = repair
+        if verify is not None:
+            self._verifications[action] = verify
+
+    def can(self, action: str) -> bool:
+        """Whether this repair is both permitted *and* actually wired to something.
+
+        Two different questions that were being answered by one. `is_self_repairable` says a
+        repair is allowed; it says nothing about whether anything would happen. Offering a
+        button on the first answer alone produces one that, when pressed, replies that there
+        is no automatic repair for this part — which teaches the owner that the buttons do
+        nothing, including the ones that work.
+        """
+        return is_self_repairable(action) and action in self._repairs
+
+    def verification(
+        self, action: str
+    ) -> Callable[[], Awaitable[bool | None] | bool | None] | None:
+        """How to observe that this repair worked, if it came with its own way of asking."""
+        return self._verifications.get(action)
 
     async def repair(
         self, component: str, action: str, *, now: datetime | None = None

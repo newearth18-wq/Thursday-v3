@@ -30,8 +30,18 @@ what needs a person.
 
 **And a repair reports what the machine shows, not what the handler returned.** ACT → VERIFY
 (ADR 0012) applies to the subsystem whose whole job is fixing things, and applies hardest
-there: the container wires two of the three repairs to placeholders that do nothing, and the
-first version of `repair()` ran one, saw no exception, and told the owner it was fixed.
+there: the container used to wire the repairs to placeholders that did nothing, and the first
+version of `repair()` ran one, saw no exception, and told the owner it was fixed.
+
+That verification is what kept the placeholders honest for as long as they existed, and it is
+what said so out loud when they were replaced: **two of the three could never have worked**
+(ADR 0072, and `repairs.py` for each). They are no longer offered, and what a person has to do
+instead is said in their place.
+
+**What a repair restores is not always the part that broke.** Switching to another model
+leaves the failing provider failing, so re-checking it would report every successful switch as
+a failure. A repair may register its own way of being observed; the component check remains
+the default, because a repair that heals what it names should be checked against what it names.
 """
 
 from __future__ import annotations
@@ -48,20 +58,27 @@ log = get_logger(__name__)
 #: genuinely restore the capability. Declared rather than derived: an unrecognised component
 #: becomes "ส่วนประกอบภายใน" with no repair offered, which is vague and true.
 #:
-#: Two of these eleven carry a repair, and one more comes from the model rows below. That is
-#: the honest count: reconnecting a node, restarting a worker and falling back to another model
-#: tier are things Thursday can actually do. Starting a database, starting somebody's inference
-#: server, or clearing a cache that is not the problem are not — and a button that does nothing
-#: teaches the owner that the buttons do nothing, including the ones that work.
+#: **None of these twelve carries a repair.** The only one the core can actually perform comes
+#: from the model rows below, and that is the honest count — Sprint 66 listed three and two of
+#: them could never have worked (`repairs.py` says why for each). Starting a database, starting
+#: somebody's inference server, dialling a machine that dials you, or clearing a cache that is
+#: not the problem are not things Thursday can do, and a button that does nothing teaches the
+#: owner that the buttons do nothing, including the one that works.
 COMPONENTS: dict[str, tuple[str, str | None]] = {
-    "devices": ("การเชื่อมต่อกับเครื่อง", "reconnect_node"),
+    # `reconnect_node` used to be offered here and could never have worked: a node dials the
+    # core, so there is no address to dial back, and this component is unhealthy only when
+    # *nothing* is connected — so not even a stale session to close. See `repairs.py`.
+    "devices": ("การเชื่อมต่อกับเครื่อง", None),
     "database": ("ที่เก็บข้อมูล", None),
     "redis": ("ส่วนเก็บสถานะ", None),
     "memory": ("ความจำ", None),
     "audit": ("บันทึกการทำงาน", None),
     "spend": ("ค่าใช้จ่าย", None),
     "approvals": ("การขออนุญาต", None),
-    "queue": ("คิวงาน", "restart_worker"),
+    # `restart_worker` likewise: the background worker is a separate process with its own
+    # container, and starting a process the core does not own is the neighbourhood of
+    # "install a system component" — which is on the never-automatic list.
+    "queue": ("คิวงาน", None),
     "automations": ("งานอัตโนมัติ", None),
     "voice": ("เสียง", None),
     "skills": ("ทักษะที่เรียนรู้", None),
@@ -96,6 +113,16 @@ _LOCAL_MODEL = ("AI ในเครื่อง", "switch_model")
 _CLOUD_MODEL = ("AI บนคลาวด์", "switch_model")
 _SOME_MODEL = ("AI", "switch_model")
 
+#: What a person has to do, where Thursday cannot. Declared beside the component rather than
+#: left to the technical detail, because the detail is Developer Options and a normal-mode
+#: owner would otherwise be told something is broken and nothing else. This is what replaced
+#: the two buttons that could not work: a sentence that is true instead of a control that is
+#: not.
+REMEDIES: dict[str, str] = {
+    "devices": "เปิดโปรแกรม Thursday node บนเครื่องนั้น — เครื่องเป็นฝ่ายต่อเข้ามา สั่งจากตรงนี้ไม่ได้",
+    "queue": "ตัวประมวลผลเบื้องหลังเป็นคนละโปรเซส เปิดด้วย python -m apps.worker",
+}
+
 UNKNOWN_COMPONENT = "ส่วนประกอบภายใน"
 
 EVERYTHING_OK = "ทุกอย่างปกติ"
@@ -115,6 +142,9 @@ class Finding:
     #: The internal detail, for Developer Options. Never rendered by default — `render()`
     #: gates it, and so does the endpoint that returns a repair's result.
     technical: str = ""
+    #: What a person has to do, where Thursday cannot. Shown in normal mode, unlike
+    #: `technical`: it is the whole point of not offering a button.
+    remedy: str = ""
 
     @property
     def repairable(self) -> bool:
@@ -155,7 +185,11 @@ class Checkup:
         if self.missing_services:
             return f"ต้องเปิด {', '.join(self.missing_services)} ก่อน"
         first = self.problems[0]
-        return f"{first.label}ไม่ตอบสนอง" + (" — ซ่อมได้" if first.repairable else "")
+        if first.repairable:
+            return f"{first.label}ไม่ตอบสนอง — ซ่อมได้"
+        # No button, but there may still be a next step, and "ไม่ตอบสนอง" on its own is a
+        # dead end for the owner reading it.
+        return f"{first.label}ไม่ตอบสนอง" + (" — ต้องทำเอง" if first.remedy else "")
 
     def render(self, *, advanced: bool = False) -> dict:
         """The screen. `advanced` is Developer Options and nothing else turns it on.
@@ -170,6 +204,7 @@ class Checkup:
                 "what": finding.label,
                 "message": finding.message(),
                 "repair": finding.repair,
+                "remedy": finding.remedy,
             }
             if advanced:
                 row["component"] = finding.component
@@ -202,6 +237,19 @@ def describe(component: str) -> tuple[str, str | None]:
     return COMPONENTS.get(component, (UNKNOWN_COMPONENT, None))
 
 
+def _can(container: Any, action: str) -> bool:
+    """Whether this container could actually perform this repair.
+
+    Asks the recovery layer rather than the allowlist, so the button and what happens when it
+    is pressed cannot disagree. Falls back to the permission question alone when no recovery
+    layer is wired, which is a test's container rather than a deployment's.
+    """
+    recovery = getattr(container, "recovery", None)
+    if recovery is None:  # pragma: no cover - the container always wires one
+        return is_self_repairable(action)
+    return bool(recovery.can(action))
+
+
 async def check(container: Any) -> Checkup:
     """Run the health checks Thursday already has, and say what they mean.
 
@@ -215,10 +263,11 @@ async def check(container: Any) -> Checkup:
         ok = bool(raw.get("ok", False))
         label, repair = describe(component)
 
-        # Only offer a repair the recovery layer would actually accept. `is_self_repairable`
-        # is the same predicate `SelfRecovery.register` uses, so the button and the boundary
-        # cannot disagree.
-        offered = repair if (repair and not ok and is_self_repairable(repair)) else None
+        # Only offer a repair that is permitted **and wired to something**. The first version
+        # asked `is_self_repairable` alone, which answers whether a repair is allowed — so a
+        # permitted repair nobody had implemented was offered as a button that, when pressed,
+        # replied that there is no automatic repair for this part. `can` asks both.
+        offered = repair if (repair and not ok and _can(container, repair)) else None
         result.findings.append(
             Finding(
                 component=component,
@@ -226,6 +275,7 @@ async def check(container: Any) -> Checkup:
                 ok=ok,
                 repair=offered,
                 technical=str(raw.get("detail", "")),
+                remedy="" if ok else REMEDIES.get(component, ""),
             )
         )
 
@@ -301,7 +351,7 @@ async def repair(container: Any, component: str, action: str) -> dict:
             "technical": outcome.reason,
         }
 
-    verified = await _is_healthy_now(container, component)
+    verified = await _worked(container, component, action)
     if verified is True:
         message = f"ซ่อม{label}เรียบร้อย"
     elif verified is False:
@@ -322,6 +372,29 @@ async def repair(container: Any, component: str, action: str) -> dict:
         "needs_a_person": False,
         "technical": outcome.reason,
     }
+
+
+async def _worked(container: Any, component: str, action: str) -> bool | None:
+    """Whether the repair restored what it claims to restore. None if nothing can say.
+
+    Re-checking the component is the right question for a repair that **heals** it, and the
+    wrong one for a repair that **routes around** it. Switching to another model leaves the
+    broken provider exactly as broken, so asking whether `model:ollama` is healthy would
+    report every successful switch as a failure — the repair's whole point is that Thursday
+    works without it.
+
+    So a repair may bring its own way of asking, registered beside it, and the component
+    check is the default for everything else. Either way the answer comes from an
+    observation and never from the handler returning (ADR 0012).
+    """
+    recovery = getattr(container, "recovery", None)
+    verify = recovery.verification(action) if recovery is not None else None
+    if verify is not None:
+        result = verify()
+        if hasattr(result, "__await__"):
+            result = await result
+        return None if result is None else bool(result)
+    return await _is_healthy_now(container, component)
 
 
 async def _is_healthy_now(container: Any, component: str) -> bool | None:

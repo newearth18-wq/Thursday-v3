@@ -212,14 +212,20 @@ async def test_an_unregistered_but_allowed_repair_is_reported_honestly(container
 async def test_a_repair_that_ran_but_fixed_nothing_does_not_report_success(container):
     """§194: "No task marked success without verification." It applies to repairs too.
 
-    The container wires `reconnect_node` to a placeholder that does nothing. The first
-    version of this module ran it, saw no exception, and told the owner
+    The property is unchanged and so are the assertions; what changed is what stands in for a
+    repair that does nothing. This used to lean on the container wiring `reconnect_node` to a
+    placeholder — and that wiring has gone, because ADR 0072 found the repair could never have
+    worked at all. A do-nothing repair registered here on purpose tests the same thing without
+    depending on a bug to supply it.
+
+    The first version of this module ran such a handler, saw no exception, and told the owner
     "ซ่อมการเชื่อมต่อกับเครื่องเรียบร้อย" — about a machine in exactly the state it was in.
-    `ok` follows the health check now, not the handler's return.
+    `ok` follows the observation now, not the handler's return.
     """
     assert not container.hub.online()  # nothing connected, so `devices` is genuinely down
+    container.recovery.register("clear_cache", lambda: None)
 
-    result = await checkup.repair(container, "devices", "reconnect_node")
+    result = await checkup.repair(container, "devices", "clear_cache")
 
     assert result["attempted"] is True  # the handler did run
     assert result["verified"] is False  # and it changed nothing
