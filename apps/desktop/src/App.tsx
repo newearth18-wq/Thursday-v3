@@ -9,6 +9,7 @@ import { MemoryPanel } from "@/components/MemoryPanel";
 import { PermissionPanel } from "@/components/PermissionPanel";
 import { ServerConnect } from "@/components/ServerConnect";
 import { TaskPanel } from "@/components/TaskPanel";
+import { WorkflowBuilder } from "@/components/WorkflowBuilder";
 import { useMind } from "@/hooks/useMind";
 import { useRealtime } from "@/hooks/useRealtime";
 import { api } from "@/lib/api";
@@ -19,6 +20,7 @@ const DRAWERS = {
   devices: { label: "devices", render: () => <DevicePanel /> },
   memory: { label: "memory", render: () => <MemoryPanel /> },
   permissions: { label: "permissions", render: () => <PermissionPanel /> },
+  workflows: { label: "workflows", render: () => <WorkflowBuilder /> },
 } as const;
 
 type Drawer = keyof typeof DRAWERS;

@@ -259,3 +259,52 @@ def test_the_late_sprint_modules_say_what_they_do_not_do(module):
         phrase in doc
         for phrase in ("not ", "never", "cannot", "does not", "deliberately", "rather than")
     ), module
+
+
+async def test_the_readme_does_not_overstate_the_api(settings, container):
+    """The README claimed 80 REST operations while the app served 126 — a number written
+    once, never checked, and wrong in the flattering direction by the time anyone read it.
+
+    Counted from the running application rather than from the router files, because the
+    question a reader is asking is what the server actually exposes.
+    """
+    from thursday_api.app import create_app
+
+    app = create_app(settings, container=container)
+    app.state.container = container
+    spec = app.openapi()
+    served = sum(
+        len([m for m in methods if m in ("get", "post", "put", "patch", "delete")])
+        for methods in spec["paths"].values()
+    )
+
+    readme = Path("README.md").read_text(encoding="utf-8")
+    match = re.search(r"(\d+) REST operations", readme)
+    assert match, "the README no longer states a REST operation count"
+    assert int(match.group(1)) == served, (
+        f"README says {match.group(1)} REST operations; the app serves {served}"
+    )
+
+
+def test_the_readme_does_not_overstate_the_desktop_suite():
+    """The README said 62 desktop tests while the app had 155 — the same drift the Python
+    count test was written for, in the window nothing was counting.
+
+    Counted statically, like its Python sibling: every `it(` or `test(` in a spec file is
+    what vitest collects, so the README claiming more than that is a claim nothing backs.
+    """
+    specs = [
+        *Path("apps/desktop/src").rglob("*.test.ts"),
+        *Path("apps/desktop/src").rglob("*.test.tsx"),
+    ]
+    assert specs, "the desktop suite has moved; this test is looking in the wrong place"
+    written = sum(
+        len(re.findall(r"^\s*(?:it|test)\(", spec.read_text(encoding="utf-8"), re.MULTILINE))
+        for spec in specs
+    )
+
+    readme = Path("README.md").read_text(encoding="utf-8")
+    match = re.search(r"plus ([\d,]+) in the desktop app", readme)
+    assert match, "the README no longer states a desktop test count"
+    claimed = int(match.group(1).replace(",", ""))
+    assert claimed <= written, f"README claims {claimed} desktop tests; {written} are written"

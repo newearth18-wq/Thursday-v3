@@ -637,6 +637,7 @@ def build_container(settings: Settings | None = None, *, configure_logs: bool = 
         tasks=c.tasks,
         world=c.world,
         gate=ProactivityGate(settings.proactivity),
+        timezone=settings.timezone,
     )
     c.automations.attach()
     c.routines = RoutineLearner()

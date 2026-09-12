@@ -2,6 +2,7 @@
 
 import { API_ORIGIN } from "./origin";
 import type { Approval, Device, MemoryRecord, Policy, Task } from "./types";
+import type { Consequence, Graph, Problem } from "./workflow";
 
 const BASE = `${API_ORIGIN}/api/v1`;
 
@@ -83,4 +84,54 @@ export const api = {
   health: () => request<{ ok: boolean; checks: { component: string; ok: boolean; detail: string }[] }>(
     "/health",
   ),
+
+  // V15. `preview` is called on every edit and writes nothing; everything else is a
+  // deliberate act by the owner, and saving is not one of the acts that arms a rule.
+  automations: () => request<{ automations: StoredWorkflow[] }>("/automations"),
+  automationCatalogue: () => request<Catalogue>("/automations/catalogue"),
+  previewWorkflow: (graph: Graph) =>
+    request<WorkflowReport>("/automations/preview", {
+      method: "POST",
+      body: JSON.stringify(graph),
+    }),
+  saveWorkflow: (graph: Graph, id?: string) =>
+    request<WorkflowReport & { id: string; enabled: boolean }>(
+      id ? `/automations/${id}` : "/automations",
+      { method: id ? "PUT" : "POST", body: JSON.stringify(graph) },
+    ),
+  enableWorkflow: (id: string, enabled: boolean) =>
+    request<{ id: string; enabled: boolean }>(
+      `/automations/${id}/enable?enabled=${enabled}`,
+      { method: "POST" },
+    ),
+  runWorkflow: (id: string) =>
+    request<{ ran: boolean; steps: number }>(`/automations/${id}/run`, { method: "POST" }),
+  deleteWorkflow: (id: string) => request(`/automations/${id}`, { method: "DELETE" }),
+  describeCron: (cron: string) =>
+    request<{ reads_as: string; valid: boolean; problem?: string }>(
+      `/automations/schedule/describe?cron=${encodeURIComponent(cron)}`,
+    ),
 };
+
+export interface WorkflowReport {
+  valid: boolean;
+  problems: Problem[];
+  consequences: Consequence[];
+  explanation: string;
+}
+
+export interface StoredWorkflow extends Graph {
+  automation_id: string | null;
+  enabled: boolean;
+  created_by: string;
+  run_count: number;
+  last_run_at: string | null;
+  explanation: string;
+}
+
+export interface Catalogue {
+  triggers: { kind: string; unavailable: string }[];
+  conditions: string[];
+  actions: { kind: string; needs: string; unavailable: string }[];
+  tools: { name: string; level: string; decision: string; blocked: boolean }[];
+}

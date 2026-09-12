@@ -92,6 +92,10 @@ class JobSchedule:
     health_check_s: float = 60.0
     device_liveness_s: float = 30.0
     approval_sweep_s: float = 30.0
+    #: Schedules are minute-granular, so this must run at least once a minute. It is not
+    #: minute-aligned and does not need to be — the engine remembers which minute each rule
+    #: was served, so ticking twice inside one minute fires once.
+    schedule_sweep_s: float = 30.0
 
 
 class BackgroundWorker:
@@ -115,6 +119,9 @@ class BackgroundWorker:
             ),
             asyncio.create_task(
                 self._loop(self.schedule.approval_sweep_s, self.sweep_approvals), name="approvals"
+            ),
+            asyncio.create_task(
+                self._loop(self.schedule.schedule_sweep_s, self.sweep_schedules), name="schedules"
             ),
         ]
         log.info("worker_started", jobs=[t.get_name() for t in self._tasks])
@@ -169,6 +176,15 @@ class BackgroundWorker:
                     "device_stale", device=summary.name, last_seen=str(summary.last_seen_at)
                 )
                 await self.c.hub.unregister(summary.id)  # type: ignore[attr-defined]
+
+    async def sweep_schedules(self) -> None:
+        """Fire automations whose cron minute has come.
+
+        Until this job existed, `Trigger(kind="schedule")` was stored, listed and never run:
+        `should_fire` answers only for event triggers and nothing anywhere looked at a
+        clock. A rule saying *every weekday at 07:30* did nothing, silently, forever.
+        """
+        await self.c.automations.sweep()  # type: ignore[attr-defined]
 
     async def sweep_approvals(self) -> None:
         """Expire pending approvals. Silence is never consent (§38)."""

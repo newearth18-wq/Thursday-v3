@@ -69,6 +69,19 @@ no module outside `risk.py` builds an order.
 **Not done:** market data, broker connectivity, prediction, portfolio optimisation — and
 none of them are next. Unblocking live execution is a reviewed pull request, not a setting.
 
+## Workflow builder (done in this repo)
+The brief's node-based builder for the automation engine — built runner-first, because
+`Trigger(kind="schedule")` had been in the type since Phase 4 and **nothing had ever fired
+one**. Five-field cron in the owner's timezone, a worker sweep, then a canvas that can only
+draw the shape the engine runs and shows each action's permission decision while the rule is
+still being drawn; see
+[§26](26-workflows.md) and
+[ADR 0064](architecture/decisions/0064-a-canvas-may-not-draw-what-the-engine-cannot-run.md).
+**Exit:** a weekday 07:30 rule that actually fires, and a blocked verb that reads ห้ามถาวร on
+the canvas rather than failing at 3am.
+**Not done:** branching, loops, sub-workflows, variables between actions. Each needs engine
+support that does not exist, and drawing the picture first is how a builder starts lying.
+
 ## Phase 5 — Learning (6–8 weeks)
 Knowledge graph · timeline queries · skill capture from demonstration · skill sandbox
 testing · skill versioning + rollback · dynamic agents · self-evaluation · quality-aware
