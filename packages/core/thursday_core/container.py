@@ -790,6 +790,34 @@ def _build_device_auth(settings: Settings, pairing: Any = None) -> DeviceAuthent
     )
 
 
+def api_token(settings: Settings) -> str:
+    """The owner's API token, or "" for loopback-only (ADR 0073).
+
+    Refuses one configuration outright, because it is the shape where the control silently
+    stops working: **a trusted proxy in front of a deployment with no token.** Loopback-only
+    mode decides by the immediate peer, and every request through a proxy on this machine
+    arrives from 127.0.0.1 — so the whole internet would look like the owner sitting at the
+    keyboard. That is worse than either setting alone, and it fails here, at startup, where
+    somebody is looking.
+    """
+    token = _secret(settings.api_token_handle) or ""
+    expected = _secret_env(settings.api_token_handle)
+
+    if not token and settings.trusted_proxies:
+        raise ConfigurationError(
+            "trusted_proxies is set but no API token is configured. Requests through a proxy "
+            f"arrive from loopback, so every caller would be treated as local. Set {expected}, "
+            "or remove trusted_proxies."
+        )
+    if not token and settings.require_api_token:
+        raise ConfigurationError(
+            f"require_api_token is set but {expected} is not. Nothing here generates a token."
+        )
+    if not token:
+        log.info("api_token_not_configured", mode="loopback only", expected_env=expected)
+    return token
+
+
 def _secret_env(handle: str) -> str:
     return EnvVault().prefix + handle.upper().replace("-", "_").replace(".", "_")
 

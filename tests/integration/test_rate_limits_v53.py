@@ -147,7 +147,12 @@ def test_the_emergency_stop_still_answers_a_caller_who_is_over_every_budget(sett
     """Not a restatement of the classifier: this drives it through the app, because the
     exemption is worth nothing if the middleware never consults it."""
     app = app_with(settings, rate_limit_default_per_minute=1, rate_limit_expensive_per_minute=1)
-    with TestClient(app) as client:
+    with TestClient(
+        app,
+        base_url="http://127.0.0.1:8000",
+        client=("127.0.0.1", 50000),
+        headers={"host": "127.0.0.1:8000"},
+    ) as client:
         assert client.get("/api/v1/agents").status_code == 200
         assert client.get("/api/v1/agents").status_code == 429
 
@@ -160,7 +165,12 @@ def test_the_device_socket_is_not_touched_by_the_limiter(settings):
     """HTTP middleware does not see a WebSocket, and a node reconnecting after a session
     expiry must never be answered with a 429 it has no way to read."""
     app = app_with(settings, rate_limit_default_per_minute=1)
-    with TestClient(app) as client:
+    with TestClient(
+        app,
+        base_url="http://127.0.0.1:8000",
+        client=("127.0.0.1", 50000),
+        headers={"host": "127.0.0.1:8000"},
+    ) as client:
         client.get("/api/v1/agents")
         assert client.get("/api/v1/agents").status_code == 429
 
@@ -178,7 +188,12 @@ def test_an_expensive_route_is_limited_before_a_cheap_one(settings):
     """The point of separate classes. Asking questions is what costs money; listing agents
     is not, and the two must not share a budget."""
     app = app_with(settings, rate_limit_expensive_per_minute=2, rate_limit_default_per_minute=100)
-    with TestClient(app) as client:
+    with TestClient(
+        app,
+        base_url="http://127.0.0.1:8000",
+        client=("127.0.0.1", 50000),
+        headers={"host": "127.0.0.1:8000"},
+    ) as client:
         codes = [
             client.post("/api/v1/conversations", json={"text": "hello"}).status_code
             for _ in range(3)
@@ -191,7 +206,12 @@ def test_the_refusal_follows_the_error_format_and_says_how_long_to_wait(settings
     """§48, and the header a well-behaved client needs. Without `Retry-After` a caller backs
     off by guessing, and the common guess — retry immediately — keeps the limit tripped."""
     app = app_with(settings, rate_limit_default_per_minute=1)
-    with TestClient(app) as client:
+    with TestClient(
+        app,
+        base_url="http://127.0.0.1:8000",
+        client=("127.0.0.1", 50000),
+        headers={"host": "127.0.0.1:8000"},
+    ) as client:
         client.get("/api/v1/agents")
         refused = client.get("/api/v1/agents", headers={"x-trace-id": "caller-chose-this"})
 
@@ -213,7 +233,12 @@ def test_pairing_keeps_its_own_budget_underneath_the_http_limit(settings):
     service's guess budget stops a six-digit code being brute-forced, and it counts across
     *all* codes because the ones an attacker guesses do not exist."""
     app = app_with(settings, rate_limit_pairing_per_minute=100)
-    with TestClient(app) as client:
+    with TestClient(
+        app,
+        base_url="http://127.0.0.1:8000",
+        client=("127.0.0.1", 50000),
+        headers={"host": "127.0.0.1:8000"},
+    ) as client:
         codes = [
             client.post("/api/v1/devices/pair/complete", json={"code": f"{n:06d}"}).status_code
             for n in range(12)

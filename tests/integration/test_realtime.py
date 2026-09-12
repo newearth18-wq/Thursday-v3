@@ -12,7 +12,12 @@ from thursday_realtime.gateway import client_event
 def ws_client(settings, container, office_pc):
     app = create_app(settings, container=container)
     app.state.container = container
-    with TestClient(app) as client:
+    with TestClient(
+        app,
+        base_url="http://127.0.0.1:8000",
+        client=("127.0.0.1", 50000),
+        headers={"host": "127.0.0.1:8000"},
+    ) as client:
         yield client
 
 

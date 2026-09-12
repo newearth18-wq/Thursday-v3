@@ -24,7 +24,12 @@ from thursday_shared.models import Event
 def ws_client(settings, container, office_pc):
     app = create_app(settings, container=container)
     app.state.container = container
-    with TestClient(app) as test_client:
+    with TestClient(
+        app,
+        base_url="http://127.0.0.1:8000",
+        client=("127.0.0.1", 50000),
+        headers={"host": "127.0.0.1:8000"},
+    ) as test_client:
         yield test_client
 
 
@@ -32,7 +37,7 @@ def ws_client(settings, container, office_pc):
 async def client(settings, container, office_pc):
     app = create_app(settings, container=container)
     async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://thursday.test"
+        transport=ASGITransport(app=app), base_url="http://127.0.0.1:8000"
     ) as http:
         app.state.container = container
         yield http

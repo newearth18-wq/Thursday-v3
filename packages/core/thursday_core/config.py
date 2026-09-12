@@ -409,6 +409,14 @@ class Settings(BaseSettings):
     #: ISO-8601 instant at which the retiring token stops being accepted. A retiring token
     #: with no date is refused at build time rather than accepted for ever.
     device_enrolment_retires_at: str = ""
+    #: The owner's API token, by handle — read from the environment like every other secret
+    #: and, like every other secret here, never generated (ADR 0073). Not configured is not a
+    #: hole: the API then answers only on the machine it runs on.
+    api_token_handle: str = "api_token"  # noqa: S105
+    #: Fail at startup rather than at the first request if no token is configured. For a
+    #: deployment that is meant to be reachable, where silently falling back to loopback-only
+    #: would look like a network fault for as long as anybody cared to debug it.
+    require_api_token: bool = False
 
     @classmethod
     def settings_customise_sources(

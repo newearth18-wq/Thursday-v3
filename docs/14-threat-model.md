@@ -126,6 +126,30 @@ by whoever runs the dashboard — so label values are declared in advance and an
 collapses to `other`. Only outcomes are labelled: decisions, verdicts, agent and action names,
 redaction pattern names. Never a path, a resource or anything the owner typed.
 
+### T3/T15 as built (Sprint 104 · ADR 0073)
+
+**The HTTP API asks who the caller is.** Until this sprint it did not, and the consequence was
+measurable rather than theoretical: an unauthenticated `POST /devices/{id}/actions` with
+`app.open` returned `200, ok, verified` and opened an application on the owner's machine. The
+device channel authenticates every node with an Ed25519 key; the HTTP surface beside it ran the
+same catalogue for anybody who could reach the port.
+
+One owner, so one shared token — nothing here generates it, and **not configured means loopback
+only**, which is the deployment §23 always described. Loopback is not itself a credential: a
+page in the owner's browser reaches 127.0.0.1 by resolving its own hostname there, so the `Host`
+header has to name this machine too.
+
+`/realtime` is checked by the same function, because HTTP middleware does not run for a
+WebSocket and that socket reaches the reasoning engine.
+
+Two endpoints answer without it, each because a node is not the owner and cannot hold the
+owner's token: `pair/start`, which yields a code a person must confirm, and `tls-handover`,
+whose document defends itself (ADR 0071).
+
+Still outstanding: the token says *the owner* and not *which device* — the per-node keys do
+that — and a token on a plaintext network is readable by anyone on it. Terminating TLS for the
+HTTP surface is the operator's job; the device channel is pinned.
+
 ### T13 as built (ADR 0041)
 
 The node pins the core's SubjectPublicKeyInfo — learned at pairing, where a person is

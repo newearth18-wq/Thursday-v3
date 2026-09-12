@@ -6,7 +6,7 @@ a multi-user or internet-exposed installation.**
 That sentence is the whole document in one line. What follows is the evidence for it, and —
 more usefully — the evidence against.
 
-Written at Sprint 50 and kept current since, against 2,435 tests that need no database, no
+Written at Sprint 50 and kept current since, against 2,473 tests that need no database, no
 network and no model credentials. `./scripts/check.sh` runs lint, format, types, the suite and the migrations.
 
 ---
@@ -56,6 +56,7 @@ container, not a unit test of the class in isolation.
 | A backtest whose trade count the Supervisor recomputes, an order type no module outside `risk.py` can construct, and a live stage with no adapter behind it | `tests/integration/test_trading_agent_v14.py` |
 | A workflow saved disabled whatever the request said, with each action's permission decision resolved before it is armed | `tests/integration/test_workflow_api_v15.py` |
 | Schedule triggers that fire — five-field cron in the owner's timezone, swept by the worker | `tests/unit/test_schedule_sweep_v15.py` |
+| An unauthenticated caller who cannot open an app on the owner's machine, on the HTTP surface and on the socket that bypasses its middleware | `tests/integration/test_api_auth_v25.py` |
 | A core whose TLS key changes while nobody walks to a machine, followed over a real handshake against a certificate that really was replaced | `tests/integration/test_tls_rotation_live_v23.py` |
 
 ## 23.2 What is not ready, and what that would take
@@ -254,9 +255,33 @@ believed; until it does, every request behind it shares one bucket, which is a v
 degradation rather than a silent hole. §134's emergency stop is never limited, because a kill
 switch an attacker can hold shut by making requests is not a kill switch.
 
-This does not make the API safe to expose. It is single-process and in-memory, so it does not
-survive a restart or coordinate across workers, and it is a bound on *rate* rather than
-authentication — of which there is still none.
+**The API now knows whether the caller is the owner** (ADR 0073), which is the half that
+sentence used to end on. The hole was measured rather than argued about: an unauthenticated
+`POST /devices/{id}/actions` with `app.open` came back `200, ok, verified` and Chrome opened on
+the owner's machine. The device channel demands an Ed25519 signature from every node before it
+carries a frame; the HTTP API beside it ran the same catalogue for anybody who could reach the
+port.
+
+One owner, so one token — `Authorization: Bearer`, compared with `compare_digest`, and nothing
+here generates it. **Not configured means loopback only**, which turns this document's own
+"must not be exposed beyond localhost" from a warning into a control, and leaves the ordinary
+install needing no ceremony. **And loopback is not a credential:** a page in the owner's browser
+can be made to arrive on 127.0.0.1 by resolving its own hostname there, so loopback-only mode
+requires a loopback `Host` too.
+
+The WebSocket was nearly a way round all of it — `@app.middleware("http")` does not run for one,
+and `/realtime` takes a turn straight into the reasoning engine. It calls the same `admit` the
+middleware does; a browser cannot set a header on a WebSocket, so the token may arrive as a
+subprotocol instead.
+
+*Breaking:* a deployment reachable from another machine now needs a token, and a trusted proxy
+in front of a tokenless one fails at startup rather than making the whole internet look like
+the owner at the keyboard.
+
+*Still open:* the rate limiter itself is single-process and in-memory, so it does not survive a
+restart or coordinate across workers. And a token on a plaintext network is a token anybody on
+that network can read — the device channel is pinned (ADR 0041), and terminating TLS for the
+HTTP surface is the operator's job.
 
 **Local AI compute is built and has never met a local AI.** The addendum's six sprints
 (ADRs 0044–0047) plus Wake-on-LAN and benchmarks (ADR 0048) are complete and tested, and

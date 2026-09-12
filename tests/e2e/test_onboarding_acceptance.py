@@ -33,7 +33,7 @@ API = "/api/v1"
 async def client(settings, container, office_pc):
     app = create_app(settings, container=container)
     async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://thursday.test"
+        transport=ASGITransport(app=app), base_url="http://127.0.0.1:8000"
     ) as http:
         app.state.container = container
         yield http

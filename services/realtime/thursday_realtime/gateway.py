@@ -14,6 +14,7 @@ from typing import Any
 from uuid import UUID
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+from thursday_core.auth import WS_TOKEN_PREFIX, admit, subprotocol_token
 from thursday_core.expression import Turn, express
 from thursday_core.logging import get_logger
 from thursday_shared.enums import ApprovalScope
@@ -121,7 +122,35 @@ def client_event(kind: str) -> str | None:
 @router.websocket("/realtime")
 async def realtime(websocket: WebSocket) -> None:
     container = websocket.app.state.container
-    await websocket.accept()
+
+    # Checked here rather than in middleware, because `@app.middleware("http")` does not run
+    # for a WebSocket — and this socket takes `type: "turn"` straight into the reasoning
+    # engine. An HTTP surface that requires the owner's token while the channel that can
+    # *ask Thursday to do things* takes anyone would be the same hole moved sideways
+    # (ADR 0073).
+    #
+    # The same `admit` the middleware calls, so the two cannot drift into disagreeing about
+    # who the owner is. A browser cannot set a header on a WebSocket, so the token may also
+    # arrive as a subprotocol; `accept` echoes it back, which the handshake requires.
+    offered = websocket.headers.get("sec-websocket-protocol")
+    token = getattr(websocket.app.state, "api_token", "")
+    refusal = admit(
+        path=websocket.url.path,
+        peer=getattr(websocket.client, "host", None),
+        host_header=websocket.headers.get("host"),
+        authorization=websocket.headers.get("authorization"),
+        subprotocol=subprotocol_token(offered),
+        token=token,
+    )
+    if refusal is not None:
+        log.warning("realtime_refused", status=refusal.status, note=refusal.note)
+        # 1008 is "policy violation", which is what this is. The close happens before
+        # `accept`, so nothing is ever sent to a caller that did not prove who it was.
+        await websocket.close(code=1008, reason=refusal.message)
+        return
+
+    echo = subprotocol_token(offered)
+    await websocket.accept(subprotocol=f"{WS_TOKEN_PREFIX}{echo}" if echo else None)
     session_id: UUID = new_id()
     outbox: asyncio.Queue[dict] = asyncio.Queue(maxsize=256)
 
