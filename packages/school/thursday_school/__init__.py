@@ -16,22 +16,45 @@ one who has to defend the result.
 from thursday_school.blueprint import Blueprint, BlueprintError
 from thursday_school.blueprint import Row as BlueprintRow
 from thursday_school.blueprint import build as build_blueprint
+from thursday_school.circulation import CirculationError, Loan
+from thursday_school.circulation import build as build_loans
+from thursday_school.circulation import summarise as summarise_loans
+from thursday_school.collection import CollectionError, Item
+from thursday_school.collection import analyse as analyse_collection
+from thursday_school.collection import build as build_items
+from thursday_school.collection import gaps as collection_gaps
 from thursday_school.lesson import Activity, Lesson, LessonError
 from thursday_school.lesson import build as build_lesson
 from thursday_school.rubric import Criterion, Rubric, RubricError
 from thursday_school.rubric import build as build_rubric
+from thursday_school.runsheet import Item as RunSheetItem
+from thursday_school.runsheet import RunSheet, RunSheetError
+from thursday_school.runsheet import build as build_runsheet
 
 __all__ = [
     "Activity",
     "Blueprint",
     "BlueprintError",
     "BlueprintRow",
+    "CirculationError",
+    "CollectionError",
     "Criterion",
+    "Item",
     "Lesson",
     "LessonError",
+    "Loan",
     "Rubric",
     "RubricError",
+    "RunSheet",
+    "RunSheetError",
+    "RunSheetItem",
+    "analyse_collection",
     "build_blueprint",
+    "build_items",
     "build_lesson",
+    "build_loans",
     "build_rubric",
+    "build_runsheet",
+    "collection_gaps",
+    "summarise_loans",
 ]

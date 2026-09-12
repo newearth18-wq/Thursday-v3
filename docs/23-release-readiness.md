@@ -6,7 +6,7 @@ a multi-user or internet-exposed installation.**
 That sentence is the whole document in one line. What follows is the evidence for it, and —
 more usefully — the evidence against.
 
-Written at Sprint 50 and kept current since, against 2,088 tests that need no database, no
+Written at Sprint 50 and kept current since, against 2,151 tests that need no database, no
 network and no model credentials. `./scripts/check.sh` runs lint, format, types, the suite and the migrations.
 
 ---
@@ -50,6 +50,8 @@ container, not a unit test of the class in isolation.
 | A promotional video assembled, narrated, subtitled and rendered, then judged by opening the file | `tests/e2e/test_v11_media_acceptance.py` |
 | Every editing operation against a real ffmpeg, each asserted on a probe of its output | `tests/integration/test_media_editing_v11.py` |
 | A rubric, a blueprint and a lesson plan whose arithmetic the Supervisor recomputes for itself | `tests/integration/test_teacher_agent_v13.py` |
+| Circulation and collection counted from records, with overdue answered as at a stated date | `tests/integration/test_library_agent_v13.py` |
+| A run sheet whose clock times are computed, and the person rostered onto two consecutive items | `tests/integration/test_event_agent_v13.py` |
 | A script spoken by Thursday, timed off the real audio, rendered, and the finished video's soundtrack checked for being audible | `tests/e2e/test_v12_narration_acceptance.py` |
 
 ## 23.2 What is not ready, and what that would take

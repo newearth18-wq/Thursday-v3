@@ -45,6 +45,17 @@ follow-me output routing · notification intelligence · proactive assistant wit
 proactivity levels · automation engine + routine learning proposals.
 **Exit:** §92 demo — from the phone, "is the home PC still on?"
 
+## School agents (done in this repo)
+Teacher, library and event — the three the brief names, built on one rule: **the artefacts
+whose correctness is arithmetic, and no more.** Rubrics, exam blueprints, timed lesson
+plans, circulation and collection reports, run sheets. Each refuses rather than corrects,
+and hands its figures to the Supervisor to recompute; see
+[ADR 0062](architecture/decisions/0062-a-school-document-is-arithmetic-somebody-is-held-to.md).
+**Exit:** a rubric whose weights the Supervisor checks, a run sheet that finds the teacher
+rostered onto two consecutive items.
+**Not done:** worksheets, publicity, stage scripts, evaluation forms — prose with no
+checkable property, and the document agent's job.
+
 ## Phase 5 — Learning (6–8 weeks)
 Knowledge graph · timeline queries · skill capture from demonstration · skill sandbox
 testing · skill versioning + rollback · dynamic agents · self-evaluation · quality-aware

@@ -22,8 +22,10 @@ from thursday_agents.computer import ComputerAgent
 from thursday_agents.data import DataAgent
 from thursday_agents.design import DesignAgent
 from thursday_agents.document import DocumentAgent
+from thursday_agents.event import EventAgent
 from thursday_agents.factory import AgentFactory
 from thursday_agents.files import FileAgent
+from thursday_agents.library import LibraryAgent
 from thursday_agents.media import MediaAgent
 from thursday_agents.ports import LocalCalendar, LocalOutbox
 from thursday_agents.registry import AgentRegistry
@@ -565,6 +567,8 @@ def build_container(settings: Settings | None = None, *, configure_logs: bool = 
     c.agents.register(DesignAgent())
     c.agents.register(MediaAgent(c.editor))
     c.agents.register(TeacherAgent())
+    c.agents.register(LibraryAgent())
+    c.agents.register(EventAgent())
     c.agent_factory = AgentFactory(c.agents)
     c.supervisor = Supervisor(c.models, use_llm_critique=not settings.offline)
 

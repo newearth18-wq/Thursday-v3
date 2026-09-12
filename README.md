@@ -20,7 +20,7 @@ ready, what is not, and what closing each gap would take is in
 [docs/23-release-readiness.md](docs/23-release-readiness.md).
 
 **Phase 1 is implemented and runnable**: the vertical slice from
-[docs/15-vertical-slice.md](docs/15-vertical-slice.md) works end to end, with 2,088 tests that
+[docs/15-vertical-slice.md](docs/15-vertical-slice.md) works end to end, with 2,151 tests that
 need no database, no network and no model credentials — plus 62 in the desktop app, which
 is where the decisions about what a person is actually shown now live.
 
@@ -204,7 +204,7 @@ conventions, so neither can be forgotten by a new caller.
 
 Full design in [`docs/`](docs/) — the twenty-four deliverables, written before the code
 (§24 came after, describing what V11 built), plus the
-[V2 review](docs/architecture/00-v2-review.md) and sixty-one
+[V2 review](docs/architecture/00-v2-review.md) and sixty-two
 [architecture decisions](docs/architecture/decisions/) recording what was chosen and what
 each choice cost:
 
@@ -289,12 +289,18 @@ each choice cost:
 - The same shell on Android, as a screen onto a Thursday running somewhere else rather than
   a second backend on the phone (ADR 0057) — a "Connect to Thursday" prompt reached by
   repeated real connection failure, never by asking what platform this is
-- Teaching documents whose correctness is arithmetic rather than opinion: scoring rubrics,
-  exam blueprints (ตารางวิเคราะห์ข้อสอบ) and timed lesson plans. Every figure is computed in
+- Three school agents — teacher, library, event — built on the same rule: **do the
+  artefacts whose correctness is arithmetic, and leave the prose to the document agent.**
+  Rubrics, exam blueprints (ตารางวิเคราะห์ข้อสอบ), timed lesson plans, circulation and
+  collection reports, and run sheets whose clock times are computed from durations. A run
+  sheet also finds the person rostered onto two consecutive items — zero minutes to move,
+  invisible in a list, and the thing that goes wrong on the day. Every figure is computed in
   Python and handed to the Supervisor as `percentages`/`count` for it to recompute — so
   "the weights total 100%" is a claim something else can catch being wrong. Weights that
-  miss 100 are **refused, never rescaled**; a lesson that overruns its period is refused,
-  never trimmed. Which criterion to reweight is teaching, and the teacher defends the result
+  miss 100 are **refused, never rescaled**; a lesson or an event that overruns is refused,
+  never trimmed. Which criterion to reweight and which item loses five minutes is the
+  owner's call, and they are the person who has to defend the result — so the gap between a
+  topic's share of the marks and its share of the teaching time is *reported, never judged*
 - A voice on a fresh install: eSpeak NG as a library in a wheel — Thai included, no model
   file to fetch — sitting under Piper in the same chain, so "offline mode still has a voice"
   stops being conditional on a download. Thursday speaks a script into audio files and reads
@@ -366,7 +372,7 @@ the verification loop, the audit chain and the device round-trip are all real.
 
 ```bash
 ./scripts/check.sh           # everything CI runs: lint, format, types, tests, migrations
-pytest                       # 2,088 tests, no infrastructure
+pytest                       # 2,151 tests, no infrastructure
 ruff check . && ruff format .
 mypy packages services
 alembic upgrade head && alembic revision --autogenerate -m "what changed"
