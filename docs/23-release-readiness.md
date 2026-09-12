@@ -304,7 +304,22 @@ not — each needs hardware or a second machine this container has never had, an
 lesson that has never been run against the thing it teaches is how the camera lesson would
 come to describe a camera nobody tested.
 
-**The mobile client is a scaffold.** The desktop app is built and works.
+**The phone shows status and answers approvals; everything else §64 lists is not built.**
+"Scaffold" was generous until Sprint 100: `apps/mobile/` held one README describing a Flutter
+app nobody was building, while the real Android client shipped from `apps/desktop` — CI has
+cross-compiled an `.apk` on every commit since Sprint 87 (ADR 0057). What it lacked was a
+layout, so at phone width the owner got a desktop window: a nav pinned to the bottom-left, a
+21rem drawer over a 900-unit canvas.
+
+There is now a phone layout with two things on it, and one rule that is not about layout:
+**a phone may approve, but may not grant standing permission** (ADR 0069). It is enforced in
+the client and stated as such — the core cannot tell which surface a request came from without
+trusting a header the client sets, and a header the client sets is not a security control. It
+protects against the owner in a hurry, not against a stolen phone; for that, revoke the device.
+
+*Still open:* voice remote, conversation, camera input, device control and push notifications.
+Device control especially needs its own decision rather than an answer by analogy — "shut down
+the home PC" from a phone raises the same question ADR 0069 answers for approvals.
 
 ## 23.3 The security position
 

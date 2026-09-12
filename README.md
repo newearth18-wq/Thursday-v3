@@ -21,7 +21,7 @@ ready, what is not, and what closing each gap would take is in
 
 **Phase 1 is implemented and runnable**: the vertical slice from
 [docs/15-vertical-slice.md](docs/15-vertical-slice.md) works end to end, with 2,366 tests that
-need no database, no network and no model credentials — plus 186 in the desktop app, which
+need no database, no network and no model credentials — plus 209 in the desktop app, which
 is where the decisions about what a person is actually shown now live.
 
 ```
@@ -204,7 +204,7 @@ conventions, so neither can be forgotten by a new caller.
 
 Full design in [`docs/`](docs/) — the twenty-four deliverables, written before the code
 (§24–§26 came after, describing what V11, V14 and V15 built), plus the
-[V2 review](docs/architecture/00-v2-review.md) and sixty-eight
+[V2 review](docs/architecture/00-v2-review.md) and sixty-nine
 [architecture decisions](docs/architecture/decisions/) recording what was chosen and what
 each choice cost:
 
@@ -361,6 +361,11 @@ each choice cost:
   test that fails if a lesson names a control the app no longer has. A control that is not on
   screen gets no arrow and a sentence saying so, because an arrow is a claim about where
   something is and a wrong one costs the next one too. It points; it does not press
+- A phone layout for the Android build that has shipped this same frontend since Sprint 87 and
+  never had one — what is happening, and what needs an answer — with one rule that is not about
+  layout: **a phone may approve, but may not grant standing permission.** "Always allow" is
+  never offered there, the absence is explained rather than merely enforced, and it is stated
+  as a discipline in the client rather than dressed up as a boundary the core enforces
 - 126 REST operations, two WebSockets, 29-table schema with working migrations and seeds
 
 **Designed, ported, not yet implemented** — every one has an interface and a Phase in

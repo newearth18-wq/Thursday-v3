@@ -8,6 +8,7 @@ import { Hud } from "@/components/Hud";
 import { LearningCenter } from "@/components/LearningCenter";
 import { MemoryPanel } from "@/components/MemoryPanel";
 import { PermissionPanel } from "@/components/PermissionPanel";
+import { Phone } from "@/components/Phone";
 import { ServerConnect } from "@/components/ServerConnect";
 import { TaskPanel } from "@/components/TaskPanel";
 import { WorkflowBuilder } from "@/components/WorkflowBuilder";
@@ -15,6 +16,7 @@ import { useMind } from "@/hooks/useMind";
 import { useRealtime } from "@/hooks/useRealtime";
 import { api } from "@/lib/api";
 import { IS_TAURI } from "@/lib/origin";
+import { type Surface, surfaceFor } from "@/lib/surface";
 
 /** What a drawer may read from the window around it. Passed rather than fetched again, so
  *  a lesson checking "did you get a real reply" is checking the reply the owner actually
@@ -63,6 +65,16 @@ export default function App() {
     setApprovals,
   } = useRealtime();
   const live = useMind(agents, approvals);
+  // The Android build ships this same frontend (ADR 0057), so the width decides the layout
+  // rather than a build flag: one app, told which surface it is on.
+  const [surface, setSurface] = useState<Surface>(() =>
+    surfaceFor(typeof window === "undefined" ? 1440 : window.innerWidth),
+  );
+  useEffect(() => {
+    const measure = () => setSurface(surfaceFor(window.innerWidth));
+    window.addEventListener("resize", measure);
+    return () => window.removeEventListener("resize", measure);
+  }, []);
   // The last thing Thursday actually said. A lesson that asks "did you get a real turn back"
   // is answered with the turn the owner saw, not with a claim from this component.
   const lastReply = [...messages].reverse().find((m) => m.role === "thursday")?.text;
@@ -103,6 +115,13 @@ export default function App() {
   // unreachable.
   if (IS_TAURI && needsSetup) {
     return <ServerConnect />;
+  }
+
+  // §64. Two things, not seven: what is happening, and what needs an answer. The desktop
+  // layout below assumes a window — an absolutely positioned nav, a 21rem drawer, a 900-unit
+  // canvas — and at phone width the owner got all of it, overlapping.
+  if (surface === "phone") {
+    return <Phone connected={connected} />;
   }
 
   const submit = (event: React.FormEvent) => {
