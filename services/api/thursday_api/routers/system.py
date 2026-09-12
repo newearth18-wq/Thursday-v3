@@ -72,8 +72,11 @@ async def check_thursday(advanced: bool = False, c: Container = Depends(get_cont
     The same checks `/health` runs, said in the owner's language. Two endpoints over one
     source rather than two health checks: the one that drifts is the one nobody watches.
 
-    A problem carries a `repair` only when `SelfRecovery` would actually accept that action,
-    so the button and the security boundary cannot disagree.
+    A problem carries a `repair` only when the recovery layer would accept that action **and
+    has something wired to it**, so the button and what happens when it is pressed cannot
+    disagree. Where no repair can exist, the problem carries a `remedy` instead — the sentence
+    that says what a person has to do, shown in normal mode because it is the whole point of
+    not offering a control (ADR 0072).
     """
     return (await checkup_module.check(c)).render(advanced=advanced)
 
@@ -94,8 +97,11 @@ async def repair_thursday(
     to post it. "ห้ามแก้ไข security-sensitive state โดยไม่มี confirmation" holds here as
     something stronger than a confirmation: there is no automatic path to that state at all.
 
-    `ok` says whether the thing works now, not whether the handler returned — a repair is
-    verified by re-running the component's health check (ADR 0051).
+    `ok` says whether the thing works now, not whether the handler returned. The default is
+    re-running the component's health check (ADR 0051); a repair that works by **routing
+    around** the failure registers its own way of being observed instead, because switching to
+    another model leaves the broken provider broken and re-checking it would report every
+    successful switch as a failure (ADR 0072).
     """
     result = await checkup_module.repair(c, component, action)
     if not advanced:

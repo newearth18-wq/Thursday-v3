@@ -174,6 +174,35 @@ class ModelRouter:
             return False
         return True
 
+    def park(self, name: str, *, now: datetime | None = None) -> bool:
+        """Hold a provider out of selection now, without waiting for it to fail three times.
+
+        The breaker exists so a provider that keeps failing stops being chosen. It needs
+        three failures to decide that, which is right when nothing but the provider is
+        talking — but when the **owner** has looked at a health check and pressed Repair,
+        that evidence is already in. This is the same park, reached by a different route.
+
+        **It will not park the last provider that can still be chosen.** A repair that leaves
+        `choose` with nothing has not routed around the failure, it has turned a degraded
+        Thursday into one that raises `ProviderError` at every request — worse than what it
+        was called to fix, which is the one thing a repair may never be. Returns whether it
+        parked, so a caller that could not help says so rather than reporting success.
+        """
+        survivors = [
+            other
+            for other in self.providers.values()
+            if getattr(other, "name", "") != name
+            and not self.parked(getattr(other, "name", ""), now=now)
+        ]
+        if not survivors:
+            log.info("model_park_refused", provider=name, reason="nothing else could be chosen")
+            return False
+
+        self._breaker[name] = BREAKER_TRIP
+        self._tripped_at[name] = now or datetime.now(UTC)
+        log.info("model_parked", provider=name, remaining=len(survivors))
+        return True
+
     # ------------------------------------------------------------------ execution
 
     async def complete(

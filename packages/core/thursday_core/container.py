@@ -107,6 +107,7 @@ from thursday_core.projects import ProjectManager
 from thursday_core.reasoning import ReasoningEngine
 from thursday_core.recovery import SelfRecovery
 from thursday_core.reflection import FeedbackLog, SelfEvaluator
+from thursday_core.repairs import register_repairs
 from thursday_core.resumption import interrupted
 from thursday_core.setup import SetupWizard
 from thursday_core.state import build_state_store
@@ -659,8 +660,12 @@ def build_container(settings: Settings | None = None, *, configure_logs: bool = 
     # Only repairs that restore a capability Thursday already had. `register` refuses
     # anything on the never-automatic list, so a forbidden repair cannot be wired in
     # here by accident and found later.
-    c.recovery.register("reconnect_node", lambda: None)
-    c.recovery.register("switch_model", lambda: None)
+    #
+    # One repair, and the count is the finding rather than a shortfall: `reconnect_node` and
+    # `restart_worker` were wired here as placeholders for several sprints and neither could
+    # ever have worked — a node dials the core, and the background worker is a process the
+    # core does not own. `repairs.py` says why for each; ADR 0072 says what replaced them.
+    register_repairs(c.recovery, router=c.models)
     c.priorities = PriorityQueue(c.tasks, c.goals)
     c.journal = DecisionJournal()
     c.briefer = Briefer(

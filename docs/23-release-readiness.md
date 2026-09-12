@@ -6,7 +6,7 @@ a multi-user or internet-exposed installation.**
 That sentence is the whole document in one line. What follows is the evidence for it, and —
 more usefully — the evidence against.
 
-Written at Sprint 50 and kept current since, against 2,418 tests that need no database, no
+Written at Sprint 50 and kept current since, against 2,435 tests that need no database, no
 network and no model credentials. `./scripts/check.sh` runs lint, format, types, the suite and the migrations.
 
 ---
@@ -289,14 +289,39 @@ already-awake case and the timeout are all tested; nothing has ever gone on a re
 real NIC. `_send` is injected precisely so the test suite does not broadcast magic packets
 from CI at whatever machines are listening. Model cache eviction (§23) is not built at all.
 
-**"Repair Thursday" can currently repair nothing.** The check is real: it reads the same
-`health()` every probe reads, translates it, and offers a button only where `SelfRecovery`
-would accept the action. The three handlers behind those buttons — `reconnect_node`,
-`switch_model`, `restart_worker` — are placeholders the container wires as no-ops, left from
-V10. Because the outcome is now derived from re-running the health check rather than from the
-handler returning, pressing one answers "ลองซ่อมแล้ว แต่ยังไม่กลับมาทำงาน", which is true.
-*To close:* three real handlers. The verification step is what makes their absence visible
-instead of reporting success.
+**"Repair Thursday" now repairs one thing, and the count is the finding** (ADR 0072). This
+document asked for three real handlers to replace the placeholders left from V10. Building
+them established that **two of the three could never have worked**, which is a better outcome
+than three handlers would have been.
+
+`reconnect_node` cannot exist: a node **dials the core**, so there is no address to dial back
+and no way to start a process on somebody else's machine — and the `devices` check is
+all-or-nothing, unhealthy only when nothing at all is connected, so there is not even a stale
+session to close. `restart_worker` cannot either: the background worker is a separate process
+with its own container, and starting a process the core does not own is the neighbourhood of
+"install a system component", which is on the never-automatic list for good reasons.
+
+`switch_model` can, because the router owns provider selection in this process. Pressing
+Repair parks the failing provider immediately rather than waiting for the breaker's three
+consecutive failures — the same park, reached by a different route, because the owner reading
+a health check *is* the evidence the breaker was waiting for. It will not park the last
+provider that can still be chosen: a repair that leaves `choose` raising `ProviderError` at
+every request has made things worse than the failure it was called to fix.
+
+Two things changed around it. **A button is offered only where a repair is both permitted and
+wired to something** — the old predicate asked only whether an action was *allowed*, so a
+permitted repair nobody had implemented appeared as a button that, when pressed, replied that
+there is no automatic repair for this part. And **a repair is verified against what it
+restores, not against what broke**: switching models leaves the failing provider failing, so
+re-checking that provider would have reported every successful switch as a failure.
+
+Where a button was removed, the sentence saying what a person has to do is shown in its place,
+in normal mode rather than in Developer Options — which is the whole point of not offering a
+control that cannot work.
+
+*Still open:* nothing else is repairable from the core, and that is the position rather than a
+gap. A future repair earns a button by being wired to something that works, not by being on
+the permitted list.
 
 **No face or voice has ever been recognised.** Sprints 73-79 built the identity layer:
 the secure template store, enrolment, liveness, the fusion engine, presence, the gate and
