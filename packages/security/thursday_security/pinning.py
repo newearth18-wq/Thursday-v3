@@ -55,6 +55,16 @@ class PinUnavailable(Exception):
     """A pin could not be read from the peer. Not the same as a mismatch."""
 
 
+def pin_for_spki(spki_der: bytes) -> str:
+    """The pin for a SubjectPublicKeyInfo that is already in hand.
+
+    Split out from `spki_pin` because a hand-over (ADR 0071) carries the bare SPKI rather
+    than a certificate, and two places computing "the pin" with two copies of the hash is how
+    they drift apart.
+    """
+    return base64.b64encode(hashlib.sha256(spki_der).digest()).decode("ascii")
+
+
 def spki_pin(certificate_der: bytes) -> str:
     """The standard pin: base64 of the SHA-256 of the SubjectPublicKeyInfo.
 
@@ -70,7 +80,7 @@ def spki_pin(certificate_der: bytes) -> str:
         encoding=serialization.Encoding.DER,
         format=serialization.PublicFormat.SubjectPublicKeyInfo,
     )
-    return base64.b64encode(hashlib.sha256(spki).digest()).decode("ascii")
+    return pin_for_spki(spki)
 
 
 @dataclass(frozen=True)

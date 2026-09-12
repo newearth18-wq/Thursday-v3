@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
@@ -43,6 +44,12 @@ from thursday_api.schemas import (
 log = get_logger(__name__)
 router = APIRouter(tags=["devices"])
 
+#: Where the operator's signing tool writes hand-overs, under the data directory. A plain
+#: file rather than a table: it is written by a command run on the host, read by an endpoint,
+#: and never by the application itself — a database row would need a migration to hold
+#: something no part of Thursday reasons about.
+HANDOVER_FILE = "tls_handovers.json"
+
 
 @router.get("/devices")
 async def list_devices(c: Container = Depends(get_container)) -> dict:
@@ -81,6 +88,46 @@ async def list_credentials(
             for cred in c.pairing.credentials(include_revoked=include_revoked)
         ]
     }
+
+
+# Same declaration-order rule as `/devices/credentials` above.
+@router.get("/devices/tls-handover")
+async def tls_handover(c: Container = Depends(get_container)) -> dict:
+    """The signed path from the core's old TLS keys to its current one (§117, ADR 0071).
+
+    A node pins the core's SubjectPublicKeyInfo at pairing (ADR 0041) and refuses anything
+    else, so replacing that key used to lock every node out at once, each needing somebody to
+    walk to it. A hand-over is a statement signed by the retiring key naming the next one; a
+    node holding nothing but the old pin can check it, because a pin is a commitment to a
+    public key.
+
+    **Unauthenticated on purpose.** The caller is a node that could not open the channel it
+    would authenticate on — that is why it is here. Nothing below is secret: public keys, and
+    the dates they changed. And it cannot be abused by serving lies, because a node verifies
+    every link against the pin it already holds and a chain the core's key did not sign moves
+    nothing.
+
+    Thursday does not write this file. It is produced by `python -m apps.server
+    --sign-handover`, run by whoever holds the retiring TLS private key — which is not
+    Thursday, because the core is served behind whatever terminates TLS for it.
+    """
+    path = c.settings.data_dir / HANDOVER_FILE
+    if not path.exists():
+        # Not a 404. "No key has ever been handed over" is the ordinary state of a healthy
+        # deployment, and a node should read it as an empty list rather than as an error.
+        return {"handovers": [], "note": "no TLS hand-over has been published"}
+
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        log.error("tls_handover_unreadable", path=str(path), error=str(exc))
+        raise HTTPException(500, f"the published TLS hand-over file will not read: {exc}") from exc
+
+    # Served as stored, with no attempt to validate or re-order it here. The core has no
+    # business vouching for these: the only verification that means anything happens on the
+    # node, against the pin the node holds, and a check here would invite the reader to
+    # think one had been done for them.
+    return {"handovers": raw.get("handovers", [])}
 
 
 # Declared above `/devices/{device_id}` for the same reason `/devices/credentials` is:
