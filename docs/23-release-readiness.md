@@ -6,7 +6,7 @@ a multi-user or internet-exposed installation.**
 That sentence is the whole document in one line. What follows is the evidence for it, and —
 more usefully — the evidence against.
 
-Written at Sprint 50 and kept current since, against 2,317 tests that need no database, no
+Written at Sprint 50 and kept current since, against 2,342 tests that need no database, no
 network and no model credentials. `./scripts/check.sh` runs lint, format, types, the suite and the migrations.
 
 ---
@@ -101,8 +101,21 @@ at twelve hours, with no setting that removes the bound.
 Key age is **reported and never enforced**, and that is a decision rather than an omission: a
 device key that expired on its own would lock the owner out of their own machines on a timer.
 
-*Still open:* the other three rotations §117 lists — the shared enrolment token, the core's
-TLS key, and provider API keys.
+The **shared enrolment token** now rotates too (ADR 0066), and the reason it took until
+Sprint 97 is worth recording: the rotation was not hard to implement, it was hard to
+implement honestly. Changing the variable and restarting refuses every un-paired node
+mid-enrolment with a message that reads as a typo, and tells nobody whether the old secret is
+still in use. So a rotation is a **window with a stated end**: both tokens are accepted until
+`retires_at`, every acceptance names by fingerprint which token let the node in, a node that
+arrives late is told the date the old one stopped working, and a half-configured rotation
+fails at startup rather than at the first HELLO months later. Nothing generates a secret —
+there is no token generator, and a test asserts there is none.
+
+*Still open:* the other two rotations §117 lists — the core's TLS key and provider API keys.
+The TLS key is the harder one and not for want of effort: a node pins the core's
+SubjectPublicKeyInfo, learned at pairing where a person was present (ADR 0041), so rotating
+it invalidates every node's pin at once. That needs a signed hand-over from the retiring key,
+which is a different design rather than a longer window.
 
 **Thursday can speak, and it sounds like a machine.** eSpeak NG (ADR 0061) is a real local
 synthesiser that installs as a wheel with no model file, covers Thai, and produces audio

@@ -402,6 +402,13 @@ class Settings(BaseSettings):
     # security ------------------------------------------------------------------
     vault_backend: str = "env"  # env | memory | keychain
     device_shared_secret_handle: str = "device_enrollment_secret"  # noqa: S105
+    #: The handle of the token being replaced, during a rotation (§117, ADR 0066). Set
+    #: alongside `device_enrolment_retires_at` and both are read from the vault the same
+    #: way the current one is — never from a file, and never generated.
+    device_retiring_secret_handle: str = "device_enrollment_secret_previous"  # noqa: S105
+    #: ISO-8601 instant at which the retiring token stops being accepted. A retiring token
+    #: with no date is refused at build time rather than accepted for ever.
+    device_enrolment_retires_at: str = ""
 
     @classmethod
     def settings_customise_sources(

@@ -73,3 +73,4 @@ done this way?" and have no answer.
 | [0063](0063-a-trading-module-that-cannot-trade.md) | A trading module that cannot trade | Two independent refusals of one act: no live adapter to reach, and a verb no grant unblocks |
 | [0064](0064-a-canvas-may-not-draw-what-the-engine-cannot-run.md) | A canvas may not draw what the engine cannot run | Schedule triggers had never fired; a builder would have multiplied that silence by every rule |
 | [0065](0065-a-document-that-cannot-be-checked-will-be-wrong.md) | A document that cannot be checked will be wrong | Five stale claims, all flattering — including an agent bench understating a permission ceiling |
+| [0066](0066-a-shared-secret-rotates-through-a-window-not-an-instant.md) | A shared secret rotates through a window, not an instant | Changing the variable and restarting refuses every node mid-enrolment, and tells nobody what still held the old one |

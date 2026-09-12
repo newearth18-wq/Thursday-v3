@@ -20,7 +20,7 @@ ready, what is not, and what closing each gap would take is in
 [docs/23-release-readiness.md](docs/23-release-readiness.md).
 
 **Phase 1 is implemented and runnable**: the vertical slice from
-[docs/15-vertical-slice.md](docs/15-vertical-slice.md) works end to end, with 2,317 tests that
+[docs/15-vertical-slice.md](docs/15-vertical-slice.md) works end to end, with 2,342 tests that
 need no database, no network and no model credentials — plus 169 in the desktop app, which
 is where the decisions about what a person is actually shown now live.
 
@@ -204,7 +204,7 @@ conventions, so neither can be forgotten by a new caller.
 
 Full design in [`docs/`](docs/) — the twenty-four deliverables, written before the code
 (§24–§26 came after, describing what V11, V14 and V15 built), plus the
-[V2 review](docs/architecture/00-v2-review.md) and sixty-five
+[V2 review](docs/architecture/00-v2-review.md) and sixty-six
 [architecture decisions](docs/architecture/decisions/) recording what was chosen and what
 each choice cost:
 
@@ -345,6 +345,12 @@ each choice cost:
   their real policy decisions. It has **no control that marks a lesson complete** — `done`
   comes from the server, `/attempt` takes evidence rather than a verdict, and the step's own
   check reads the machine
+- An enrolment token that rotates through a **window with a stated end**, not an instant:
+  both secrets are accepted until the retirement date, every acceptance names by fingerprint
+  which one let the node in — so "is anything still using the old token?" is a question the
+  logs answer — and a node that arrives late is told the date the old one stopped working
+  rather than that its signature is wrong. Half a rotation fails at startup, and nothing
+  anywhere generates a secret
 - 126 REST operations, two WebSockets, 29-table schema with working migrations and seeds
 
 **Designed, ported, not yet implemented** — every one has an interface and a Phase in
@@ -398,7 +404,7 @@ the verification loop, the audit chain and the device round-trip are all real.
 
 ```bash
 ./scripts/check.sh           # everything CI runs: lint, format, types, tests, migrations
-pytest                       # 2,317 tests, no infrastructure
+pytest                       # 2,342 tests, no infrastructure
 ruff check . && ruff format .
 mypy packages services
 alembic upgrade head && alembic revision --autogenerate -m "what changed"

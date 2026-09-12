@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass, field
+from datetime import datetime
 from typing import Any
 
 from thursday_agents.automation import AutomationAgent
@@ -57,6 +58,7 @@ from thursday_security.approvals import ApprovalService
 from thursday_security.audit import AuditLog
 from thursday_security.credentials import FileCredentialStore
 from thursday_security.device_auth import DeviceAuthenticator
+from thursday_security.enrolment import Rotation, RotationRefused
 from thursday_security.pairing import PairingService
 from thursday_security.permissions import PermissionEngine
 from thursday_security.policy import PolicyTable
@@ -757,16 +759,81 @@ def _build_device_auth(settings: Settings, pairing: Any = None) -> DeviceAuthent
 
     Reading it here rather than per-HELLO keeps the secret out of the request path, and
     keeps the one place that knows its name next to the one place that checks it.
+
+    A rotation (§117, ADR 0066) is the same read twice: the token being replaced is
+    accepted alongside the current one until its stated retirement, so a node caught
+    mid-enrolment is not cut off by the owner deciding to rotate. Both halves are
+    required together — a previous token with no retirement date is refused here rather
+    than quietly accepted for ever, which would be two tokens wearing a rotation's name.
     """
-    handle = settings.device_shared_secret_handle
-    key = EnvVault().prefix + handle.upper().replace("-", "_").replace(".", "_")
-    token = os.environ.get(key)
-    if settings.require_device_signature and not token:
+    current = _secret(settings.device_shared_secret_handle)
+    if settings.require_device_signature and not current:
         # Not fatal at build time — a test container and the CLI's loopback node never
         # open the socket. It becomes fatal at the first unsigned HELLO, which is where
         # refusing is actually useful.
-        log.warning("device_token_not_configured", expected_env=key)
-    return DeviceAuthenticator(token, required=settings.require_device_signature, pairing=pairing)
+        log.warning(
+            "device_token_not_configured",
+            expected_env=_secret_env(settings.device_shared_secret_handle),
+        )
+
+    rotation = _build_rotation(settings, current)
+    return DeviceAuthenticator(
+        current,
+        required=settings.require_device_signature,
+        pairing=pairing,
+        rotation=rotation,
+    )
+
+
+def _secret_env(handle: str) -> str:
+    return EnvVault().prefix + handle.upper().replace("-", "_").replace(".", "_")
+
+
+def _secret(handle: str) -> str | None:
+    return os.environ.get(_secret_env(handle))
+
+
+def _build_rotation(settings: Settings, current: str | None) -> Rotation | None:
+    """A rotation, when one is configured and complete. Refuses a half-configured one.
+
+    Half-configured is the dangerous shape: a previous token set with no retirement date
+    would be a second live secret with no end, and the owner would believe the rotation
+    was finished. So it fails at startup, where a person is looking, rather than at the
+    first HELLO months later.
+    """
+    retiring = _secret(settings.device_retiring_secret_handle)
+    stated = (settings.device_enrolment_retires_at or "").strip()
+    if not retiring and not stated:
+        return None
+    if not current:
+        raise ConfigurationError(
+            "a previous enrolment token is configured but the current one is not. "
+            "Set the current token, or clear the previous one and its retirement date."
+        )
+    if not retiring or not stated:
+        raise ConfigurationError(
+            "an enrolment rotation needs both the previous token and "
+            "device_enrolment_retires_at. A previous token with no retirement date is "
+            "two live secrets, not a rotation."
+        )
+    try:
+        retires_at = datetime.fromisoformat(stated)
+    except ValueError as exc:
+        raise ConfigurationError(
+            f"device_enrolment_retires_at is not an ISO-8601 instant: {stated!r} ({exc})"
+        ) from None
+    if retires_at.tzinfo is None:
+        # A naive instant would be compared against an aware one and raise at the first
+        # HELLO — and 'which timezone did they mean' is not a question to guess at for
+        # the moment a secret stops working.
+        raise ConfigurationError(
+            "device_enrolment_retires_at needs a timezone offset, so the moment the old "
+            "token stops working is not open to interpretation."
+        )
+    try:
+        return Rotation(current=current, retiring=retiring, retires_at=retires_at)
+    except RotationRefused as exc:
+        raise ConfigurationError(str(exc)) from None
 
 
 def _build_vault(settings: Settings) -> Any:
