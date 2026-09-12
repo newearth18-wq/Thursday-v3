@@ -6,7 +6,7 @@ a multi-user or internet-exposed installation.**
 That sentence is the whole document in one line. What follows is the evidence for it, and —
 more usefully — the evidence against.
 
-Written at Sprint 50 and kept current since, against 2,366 tests that need no database, no
+Written at Sprint 50 and kept current since, against 2,375 tests that need no database, no
 network and no model credentials. `./scripts/check.sh` runs lint, format, types, the suite and the migrations.
 
 ---
@@ -317,9 +317,23 @@ the client and stated as such — the core cannot tell which surface a request c
 trusting a header the client sets, and a header the client sets is not a security control. It
 protects against the owner in a hurry, not against a stolen phone; for that, revoke the device.
 
-*Still open:* voice remote, conversation, camera input, device control and push notifications.
-Device control especially needs its own decision rather than an answer by analogy — "shut down
-the home PC" from a phone raises the same question ADR 0069 answers for approvals.
+**Device control landed in Sprint 101 (ADR 0070), and closing it found something bigger.**
+§20's own headline scenario did not work from *anywhere*: `POST /devices/{id}/actions` answered
+anything the engine did not call AUTO with 403, so "ปิดเครื่องให้หน่อย" (`system.power`,
+ASK_ALWAYS) was refused rather than asked about — and so was locking a screen, which is
+ASK_ONCE, LOW and reversible. Eight of the catalogue's thirty actions were unreachable that
+way, for every caller. The endpoint now raises the approval and returns 202; BLOCK is still
+403, because that is the engine saying no rather than asking.
+
+From a phone the rule is narrower and the criterion is *can the surface that took the action
+undo it?* Lock and wake, yes — both recoverable. Sleep, restart and shut down, no: the owner is
+in another building, unsaved work is gone immediately, and the apparent undo is wake-on-LAN,
+which this document says has never actually woken a machine. It is an allowlist, so a verb
+added to the catalogue later is off the phone until somebody decides otherwise.
+
+*Still open:* voice remote, conversation, camera input and push notifications. Each needs its
+own decision about what a phone is allowed to do; ADR 0070 is the shape those decisions should
+take rather than a precedent for assuming them.
 
 ## 23.3 The security position
 

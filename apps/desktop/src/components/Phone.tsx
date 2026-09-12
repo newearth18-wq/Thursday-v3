@@ -1,5 +1,11 @@
 import { useCallback, useEffect, useState } from "react";
-import { NO_STANDING_ON_PHONE, machineFor, mayGrantStanding } from "@/lib/surface";
+import {
+  NO_STANDING_ON_PHONE,
+  PHONE_DEVICE_ACTIONS,
+  machineFor,
+  mayGrantStanding,
+  refusalFor,
+} from "@/lib/surface";
 import { api } from "@/lib/api";
 import type { Approval, Device, Task } from "@/lib/types";
 
@@ -30,6 +36,7 @@ export function Phone({ connected }: { connected: boolean }) {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [approvals, setApprovals] = useState<Approval[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [note, setNote] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     try {
@@ -101,6 +108,9 @@ export function Phone({ connected }: { connected: boolean }) {
             </li>
           ))}
         </ul>
+        {devices.map((device) => (
+          <DeviceControls key={`${device.id}-controls`} device={device} onActed={setNote} />
+        ))}
       </section>
 
       <section>
@@ -126,7 +136,67 @@ export function Phone({ connected }: { connected: boolean }) {
         </ul>
       </section>
 
+      {note && <p className="text-[11px] text-state-speaking">{note}</p>}
       {error && <p className="text-[11px] text-state-warning">{error}</p>}
+    </div>
+  );
+}
+
+/**
+ * What a phone may do *to* a machine: lock it, wake it, and nothing that cannot be taken
+ * back from where the owner is standing. `system.power` is shown and refused with the
+ * reason rather than left off — a control that is silently absent teaches nothing.
+ *
+ * A gated action does not run here. It comes back as an approval, which appears at the top
+ * of this same screen for the owner to answer once.
+ */
+function DeviceControls({
+  device,
+  onActed,
+}: {
+  device: Device;
+  onActed: (note: string) => void;
+}) {
+  const [busy, setBusy] = useState("");
+  const refused = refusalFor("system.power", "phone");
+
+  const run = async (action: string, label: string) => {
+    setBusy(action);
+    try {
+      const outcome = await api.deviceAction(device.id, action, {}, label);
+      onActed(
+        outcome.approval_id
+          ? `${label} ${device.name}: รออนุมัติอยู่ด้านบน`
+          : `${label} ${device.name}: เรียบร้อย`,
+      );
+    } catch (e) {
+      onActed(`${label} ${device.name}: ${String(e).replace(/^Error: \d+ [^:]+: /, "")}`);
+    } finally {
+      setBusy("");
+    }
+  };
+
+  return (
+    <div className="mt-1 flex flex-wrap items-center gap-2 px-1">
+      <span className="text-[10px] text-slate-600">{device.name}</span>
+      {PHONE_DEVICE_ACTIONS.map((action) => (
+        <button
+          key={action}
+          disabled={busy !== ""}
+          onClick={() => run(action, action === "system.lock" ? "ล็อกหน้าจอ" : "ปลุกเครื่อง")}
+          className="rounded bg-ink-900 px-2 py-1.5 text-[11px] text-slate-400 disabled:opacity-50"
+        >
+          {action === "system.lock" ? "ล็อกหน้าจอ" : "ปลุกเครื่อง"}
+        </button>
+      ))}
+      <button
+        disabled
+        title={refused}
+        className="cursor-not-allowed rounded bg-ink-900 px-2 py-1.5 text-[11px] text-slate-700 line-through"
+      >
+        ปิดเครื่อง
+      </button>
+      <p className="w-full text-[10px] text-slate-600">{refused}</p>
     </div>
   );
 }

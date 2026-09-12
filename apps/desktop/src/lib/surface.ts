@@ -78,3 +78,53 @@ export const NO_STANDING_ON_PHONE =
 export function machineFor(deviceName: string | null | undefined): string {
   return deviceName?.trim() || "ไม่ได้ระบุเครื่อง";
 }
+
+/**
+ * ## What a phone may do *to a machine*
+ *
+ * ADR 0069 settled approvals and said this needed its own decision rather than an answer by
+ * analogy. It does, because the criterion turns out to be different.
+ *
+ * For approvals the question was what kind of answer the conditions allow. Here it is:
+ * **can the surface that took the action undo it?**
+ *
+ * | | worst case if it was a mistake |
+ * |---|---|
+ * | lock the screen | type a password. Seconds, in person, nothing lost |
+ * | wake a machine | a machine is on. Electricity, fixable whenever |
+ * | sleep / restart / shut down | unsaved work is gone **now**, and the machine is then unreachable from the phone |
+ *
+ * The third row is the whole rule. It is not that shutting down is high-risk in the
+ * abstract — it is that the owner is in a different building and **cannot take it back**. The
+ * apparent undo is wake-on-LAN, and §23 says plainly that waking a machine has never woken a
+ * machine: the packet is sent, the confirmation is honest about being unproven. Allowing a
+ * shutdown on the strength of an undo that has never been observed to work would be exactly
+ * the kind of promise this project keeps refusing to make.
+ *
+ * So: **lock and wake, yes. Power, no.** And `system.power` is *shown* and refused with the
+ * reason rather than left off the list — the same choice the workflow builder makes for a
+ * trigger with no runner and the walkthrough makes for a control that is not on screen. A
+ * control that is silently absent teaches nothing.
+ */
+export const PHONE_DEVICE_ACTIONS: readonly string[] = ["system.lock", "device.wake"];
+
+/** Why an action the phone will not take is refused, in the owner's words. */
+export const PHONE_DEVICE_REFUSALS: Readonly<Record<string, string>> = {
+  "system.power":
+    "ปิดหรือรีสตาร์ตเครื่องจากมือถือไม่ได้ — งานที่ยังไม่ได้บันทึกจะหายทันที และคุณอยู่ไกลเครื่อง " +
+    "จะเปิดกลับเองก็ไม่ได้ ต้องไปกดที่เครื่อง",
+};
+
+export function mayActFromPhone(action: string, surface: Surface): boolean {
+  if (surface === "desktop") return true;
+  return PHONE_DEVICE_ACTIONS.includes(action);
+}
+
+/** The reason a phone will not take this action, or empty when it will. */
+export function refusalFor(action: string, surface: Surface): string {
+  if (mayActFromPhone(action, surface)) return "";
+  return (
+    PHONE_DEVICE_REFUSALS[action] ??
+    "คำสั่งนี้ทำจากมือถือไม่ได้ — ต้องสั่งตอนอยู่หน้าเครื่อง"
+  );
+}
