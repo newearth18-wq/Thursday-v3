@@ -15,6 +15,7 @@ from thursday_core.logging import get_logger
 from thursday_shared.enums import NotificationPriority, ProactivityLevel
 from thursday_shared.models import Event, ToolCall
 
+from thursday_automation.cron import CronRefused, parse, zone
 from thursday_automation.rules import Automation
 
 log = get_logger(__name__)
@@ -91,6 +92,7 @@ class AutomationEngine:
         tasks: object | None = None,
         world: object | None = None,
         gate: ProactivityGate | None = None,
+        timezone: str = "Asia/Bangkok",
     ) -> None:
         self._bus = bus
         self._executor = executor
@@ -98,6 +100,14 @@ class AutomationEngine:
         self._world = world
         self.gate = gate or ProactivityGate()
         self._automations: dict[UUID, Automation] = {}
+        self.timezone = timezone
+        # Resolved once, here, so an unknown timezone is a startup error naming the setting
+        # rather than a sweep that raises every thirty seconds while schedules quietly never
+        # fire — which is the exact silence this whole sweep exists to end.
+        self._zone = zone(timezone)
+        #: The last minute each schedule was fired for, so a sweep that runs twice inside
+        #: one minute — which it will, the loop is not minute-aligned — fires once.
+        self._fired_minute: dict[UUID, datetime] = {}
 
     def attach(self) -> None:
         self._bus.subscribe("*", self.on_event)  # type: ignore[attr-defined]
@@ -119,11 +129,49 @@ class AutomationEngine:
 
     def remove(self, automation_id: UUID) -> None:
         self._automations.pop(automation_id, None)
+        # Otherwise a long-lived process accumulates one entry per rule ever deleted, and a
+        # recreated rule could inherit a "already fired this minute" it never earned.
+        self._fired_minute.pop(automation_id, None)
 
     def list(self, *, enabled_only: bool = False) -> Automations:
         return [a for a in self._automations.values() if a.enabled or not enabled_only]
 
     # ------------------------------------------------------------------ execution
+
+    async def due(self, now: datetime | None = None) -> Automations:
+        """Enabled schedule automations whose minute has come and has not been served.
+
+        Returns rather than runs, so the sweep is testable without a bus and so a caller
+        can see what would fire. A rule whose cron will not parse is skipped and logged —
+        it was accepted by whatever wrote it, and refusing at fire time is too late to tell
+        anybody, but running it on a guessed schedule is worse.
+        """
+        moment = (now or datetime.now(UTC)).astimezone(self._zone)
+        minute = moment.replace(second=0, microsecond=0)
+        ready: Automations = []
+        for automation in list(self._automations.values()):
+            if not automation.enabled or automation.trigger.kind != "schedule":
+                continue
+            if self.gate.level < automation.proactivity_min:
+                continue
+            if self._fired_minute.get(automation.id) == minute:
+                continue
+            try:
+                schedule = parse(automation.trigger.cron or "")
+            except CronRefused as exc:
+                log.warning("automation_schedule_unreadable", name=automation.name, error=str(exc))
+                continue
+            if schedule.matches(minute):
+                self._fired_minute[automation.id] = minute
+                ready.append(automation)
+        return ready
+
+    async def sweep(self, now: datetime | None = None) -> Automations:
+        """Fire every schedule that is due. The worker calls this once a minute."""
+        fired = await self.due(now)
+        for automation in fired:
+            await self.run(automation)
+        return fired
 
     async def on_event(self, event: Event) -> None:
         world = self._world.snapshot().model_dump(mode="json") if self._world else {}

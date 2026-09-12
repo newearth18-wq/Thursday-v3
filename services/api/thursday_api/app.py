@@ -29,6 +29,7 @@ from thursday_api.limits import (
 )
 from thursday_api.routers import (
     approvals,
+    automations,
     conversation,
     devices,
     memory,
@@ -153,6 +154,7 @@ def create_app(settings: Settings | None = None, container: Container | None = N
         devices.router,
         memory.router,
         approvals.router,
+        automations.router,
         projects.router,
         skills.router,
         system.router,

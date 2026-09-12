@@ -71,3 +71,4 @@ done this way?" and have no answer.
 | [0061](0061-a-voice-that-needs-no-download.md) | A voice that needs no download, and a duration measured rather than guessed | Thursday could describe speech and not make any, so every video was timed by guesswork |
 | [0062](0062-a-school-document-is-arithmetic-somebody-is-held-to.md) | A school document is arithmetic somebody is held to | Twenty prompts would each be wrong in a way nothing checks; seven have a number that must come out right |
 | [0063](0063-a-trading-module-that-cannot-trade.md) | A trading module that cannot trade | Two independent refusals of one act: no live adapter to reach, and a verb no grant unblocks |
+| [0064](0064-a-canvas-may-not-draw-what-the-engine-cannot-run.md) | A canvas may not draw what the engine cannot run | Schedule triggers had never fired; a builder would have multiplied that silence by every rule |
