@@ -20,7 +20,7 @@ ready, what is not, and what closing each gap would take is in
 [docs/23-release-readiness.md](docs/23-release-readiness.md).
 
 **Phase 1 is implemented and runnable**: the vertical slice from
-[docs/15-vertical-slice.md](docs/15-vertical-slice.md) works end to end, with 2,032 tests that
+[docs/15-vertical-slice.md](docs/15-vertical-slice.md) works end to end, with 2,088 tests that
 need no database, no network and no model credentials — plus 62 in the desktop app, which
 is where the decisions about what a person is actually shown now live.
 
@@ -289,6 +289,12 @@ each choice cost:
 - The same shell on Android, as a screen onto a Thursday running somewhere else rather than
   a second backend on the phone (ADR 0057) — a "Connect to Thursday" prompt reached by
   repeated real connection failure, never by asking what platform this is
+- Teaching documents whose correctness is arithmetic rather than opinion: scoring rubrics,
+  exam blueprints (ตารางวิเคราะห์ข้อสอบ) and timed lesson plans. Every figure is computed in
+  Python and handed to the Supervisor as `percentages`/`count` for it to recompute — so
+  "the weights total 100%" is a claim something else can catch being wrong. Weights that
+  miss 100 are **refused, never rescaled**; a lesson that overruns its period is refused,
+  never trimmed. Which criterion to reweight is teaching, and the teacher defends the result
 - A voice on a fresh install: eSpeak NG as a library in a wheel — Thai included, no model
   file to fetch — sitting under Piper in the same chain, so "offline mode still has a voice"
   stops being conditional on a download. Thursday speaks a script into audio files and reads
@@ -360,7 +366,7 @@ the verification loop, the audit chain and the device round-trip are all real.
 
 ```bash
 ./scripts/check.sh           # everything CI runs: lint, format, types, tests, migrations
-pytest                       # 2,032 tests, no infrastructure
+pytest                       # 2,088 tests, no infrastructure
 ruff check . && ruff format .
 mypy packages services
 alembic upgrade head && alembic revision --autogenerate -m "what changed"
@@ -377,7 +383,7 @@ extending the node protocol need the same misbehaving node the tests use.
 ```
 apps/        server · node · cli · worker · desktop (Tauri) · mobile (planned)
 packages/    shared · core · agents · tools · memory · devices · security
-             voice · vision · automation · models · media
+             voice · vision · automation · models · media · school
 services/    api · realtime · worker
 database/    migrations · seeds
 docker/      api and node images; docker-compose.yml at the root

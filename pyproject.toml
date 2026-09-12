@@ -81,6 +81,7 @@ packages = [
     "packages/devices/thursday_devices",
     "packages/models/thursday_models",
     "packages/media/thursday_media",
+    "packages/school/thursday_school",
     "services/api/thursday_api",
     "services/worker/thursday_worker",
     "services/realtime/thursday_realtime",
@@ -138,5 +139,6 @@ pythonpath = [
     "packages/shared", "packages/core", "packages/agents", "packages/tools",
     "packages/memory", "packages/voice", "packages/vision", "packages/security",
     "packages/automation", "packages/devices", "packages/models", "packages/media",
+    "packages/school",
     "services/api", "services/worker", "services/realtime",
 ]

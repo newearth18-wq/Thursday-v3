@@ -28,6 +28,7 @@ from thursday_agents.media import MediaAgent
 from thursday_agents.ports import LocalCalendar, LocalOutbox
 from thursday_agents.registry import AgentRegistry
 from thursday_agents.research import ResearchAgent
+from thursday_agents.teacher import TeacherAgent
 from thursday_agents.tutor import TutorAgent
 from thursday_agents.vision import VisionAgent
 from thursday_automation.engine import AutomationEngine, ProactivityGate
@@ -563,6 +564,7 @@ def build_container(settings: Settings | None = None, *, configure_logs: bool = 
     c.agents.register(CodingAgent())
     c.agents.register(DesignAgent())
     c.agents.register(MediaAgent(c.editor))
+    c.agents.register(TeacherAgent())
     c.agent_factory = AgentFactory(c.agents)
     c.supervisor = Supervisor(c.models, use_llm_critique=not settings.offline)
 
