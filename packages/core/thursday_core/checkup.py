@@ -65,6 +65,11 @@ COMPONENTS: dict[str, tuple[str, str | None]] = {
     "automations": ("งานอัตโนมัติ", None),
     "voice": ("เสียง", None),
     "skills": ("ทักษะที่เรียนรู้", None),
+    # No repair. Fixing this means installing ffmpeg, and installing software is exactly
+    # what a repair button may never do on its own (ADR 0051, and §SECURITY's "never
+    # silently install software"). The health detail already names the remedy, which is the
+    # most this is allowed to do.
+    "media": ("การตัดต่อวิดีโอ", None),
 }
 
 #: Model checks arrive as `model:<provider>:<model>`. The provider id is never shown, but it

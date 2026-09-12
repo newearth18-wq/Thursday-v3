@@ -164,10 +164,17 @@ down as its input schema.
 local adapters — real behaviour, nothing leaving the machine, and *not the owner's actual
 calendar or inbox*. A Google or Outlook adapter is a new class behind the same protocol.
 
-**Media editing of any kind.** There is no Pillow, no ffmpeg and no codec here, so the media
-agent identifies files from their headers and says outright that it cannot convert, resize
-or generate. Editing belongs behind a port when the libraries exist; it is not bolted onto
-that agent and not claimed.
+**Media *generation* of any kind.** Editing was built in V11 and is real — see
+[§24](24-media.md) and [ADR 0060](architecture/decisions/0060-an-edit-never-writes-over-its-input.md).
+It arrived exactly where this section said it should: behind the `MediaEditor` port, with an
+ffmpeg adapter and an honest refusal when there is no ffmpeg, rather than bolted onto the
+agent. The agent still identifies files from their headers with no library at all, because
+that half works on every machine.
+
+What is still absent is anything that *makes* material rather than moving it: no
+text-to-image, no text-to-video, no text-to-speech. So the creative workflow takes pictures
+and narration as inputs and names what is missing rather than inventing it. Image handling
+outside ffmpeg is also still absent — there is no Pillow.
 
 **Images from the design agent.** It writes the specification — tokens, layout, components,
 with contrast actually computed — which is the half of design work that survives being

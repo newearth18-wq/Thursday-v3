@@ -20,7 +20,7 @@ ready, what is not, and what closing each gap would take is in
 [docs/23-release-readiness.md](docs/23-release-readiness.md).
 
 **Phase 1 is implemented and runnable**: the vertical slice from
-[docs/15-vertical-slice.md](docs/15-vertical-slice.md) works end to end, with 1,850 tests that
+[docs/15-vertical-slice.md](docs/15-vertical-slice.md) works end to end, with 2,151 tests that
 need no database, no network and no model credentials — plus 62 in the desktop app, which
 is where the decisions about what a person is actually shown now live.
 
@@ -45,7 +45,8 @@ sent; it says what it *observed*.
 
 ```bash
 uv venv && source .venv/bin/activate      # or: python -m venv .venv
-uv pip install -e ".[dev]"
+uv pip install -e ".[dev,media]"          # `media` adds ffmpeg; without it Thursday
+                                          # reports video editing as unavailable
 alembic upgrade head                      # SQLite by default; no server needed
 
 python -m apps.cli                        # embedded core + local node, one command
@@ -117,7 +118,7 @@ See [.env.example](.env.example).
 
 ---
 
-## The nine rules the code enforces
+## The ten rules the code enforces
 
 These are the design, and they are tested rather than documented and hoped for.
 
@@ -133,7 +134,8 @@ Paths below are relative to `packages/<name>/thursday_<name>/`.
 | 6 | **Everything is audited and, where possible, reversible.** | `security/audit.py`, `core/undo.py` |
 | 7 | **Providers are swappable.** Every port has a real adapter and an offline one. | `shared/interfaces.py`, `core/container.py` |
 | 8 | **Thursday proposes; the owner decides.** Learned routines arrive disabled; risky skills cannot self-activate. | `automation/routines.py`, `automation/skills/registry.py` |
-| 9 | **Untrusted content is data, never instruction.** A page or a file cannot widen what Thursday may do. | `agents/browser.py`, [ADR 0010](docs/architecture/decisions/0010-untrusted-content-is-data.md) |
+| 9 | **An edit never writes over its input.** A render is reported from the finished file, never from an exit code. | `media/ffmpeg.py`, `media/quality.py`, [ADR 0060](docs/architecture/decisions/0060-an-edit-never-writes-over-its-input.md) |
+| 10 | **Untrusted content is data, never instruction.** A page or a file cannot widen what Thursday may do. | `agents/browser.py`, [ADR 0010](docs/architecture/decisions/0010-untrusted-content-is-data.md) |
 
 Rule 1, concretely:
 
@@ -200,8 +202,9 @@ The one path worth tracing: **nothing reaches a device without passing Authorize
 nothing completes without passing Verify.** Both are single choke points rather than
 conventions, so neither can be forgotten by a new caller.
 
-Full design in [`docs/`](docs/) — the twenty-four deliverables, written before the code,
-plus the [V2 review](docs/architecture/00-v2-review.md) and fifty-nine
+Full design in [`docs/`](docs/) — the twenty-four deliverables, written before the code
+(§24 came after, describing what V11 built), plus the
+[V2 review](docs/architecture/00-v2-review.md) and sixty-two
 [architecture decisions](docs/architecture/decisions/) recording what was chosen and what
 each choice cost:
 
@@ -212,7 +215,7 @@ each choice cost:
 | [Device protocol](docs/09-device-protocol.md) | [Events](docs/10-event-architecture.md) | [API](docs/11-api-spec.md) | [MVP scope](docs/12-mvp-scope.md) |
 | [Roadmap](docs/13-roadmap.md) | [Threat model](docs/14-threat-model.md) | [Vertical slice](docs/15-vertical-slice.md) | [Persona](docs/16-persona.md) |
 | [Voice](docs/17-voice.md) | [Vision](docs/18-vision.md) | [Gesture](docs/19-gestures.md) | [Multi-device](docs/20-multi-device.md) |
-| [Agents & skills](docs/21-agents-and-skills.md) | [Proactive](docs/22-proactive.md) | | |
+| [Agents & skills](docs/21-agents-and-skills.md) | [Proactive](docs/22-proactive.md) | [Release readiness](docs/23-release-readiness.md) | [Media](docs/24-media.md) |
 
 ---
 
@@ -286,6 +289,36 @@ each choice cost:
 - The same shell on Android, as a screen onto a Thursday running somewhere else rather than
   a second backend on the phone (ADR 0057) — a "Connect to Thursday" prompt reached by
   repeated real connection failure, never by asking what platform this is
+- Three school agents — teacher, library, event — built on the same rule: **do the
+  artefacts whose correctness is arithmetic, and leave the prose to the document agent.**
+  Rubrics, exam blueprints (ตารางวิเคราะห์ข้อสอบ), timed lesson plans, circulation and
+  collection reports, and run sheets whose clock times are computed from durations. A run
+  sheet also finds the person rostered onto two consecutive items — zero minutes to move,
+  invisible in a list, and the thing that goes wrong on the day. Every figure is computed in
+  Python and handed to the Supervisor as `percentages`/`count` for it to recompute — so
+  "the weights total 100%" is a claim something else can catch being wrong. Weights that
+  miss 100 are **refused, never rescaled**; a lesson or an event that overruns is refused,
+  never trimmed. Which criterion to reweight and which item loses five minutes is the
+  owner's call, and they are the person who has to defend the result — so the gap between a
+  topic's share of the marks and its share of the teaching time is *reported, never judged*
+- A voice on a fresh install: eSpeak NG as a library in a wheel — Thai included, no model
+  file to fetch — sitting under Piper in the same chain, so "offline mode still has a voice"
+  stops being conditional on a download. Thursday speaks a script into audio files and reads
+  their real durations back, which is what turns a video's subtitles from **estimated** into
+  **measured**: each scene is exactly as long as the line spoken over it, and every cue lands
+  on the frame the voice starts
+- Media editing that is local, deterministic and reversible by construction: trim, join,
+  resize to 16:9/9:16/1:1, burn in subtitles, dub narration and looped music, normalise
+  loudness, strip silence, overlay, crossfade, cover frame. An edit writes a **new** file and
+  never the one it read, so undo is deleting what the call created and no original is at risk
+- A render judged by the file it produced — dimensions against the preset asked for, audio
+  against whether narration was planned, cue times against the real duration — so a render
+  that finished and produced the wrong thing comes back `verified=False` rather than as a
+  success with a caveat. Subtitle timings say whether they were **measured** against real
+  narration or **estimated** from reading speed, and nothing promotes one into the other
+- Edit plans that checkpoint: a step is skipped on resume only when the file it produced is
+  still exactly the size that was recorded, so a render killed midway resumes and a
+  half-written file is re-rendered rather than handed to the next step
 - 80 REST operations, two WebSockets, 29-table schema with working migrations and seeds
 
 **Designed, ported, not yet implemented** — every one has an interface and a Phase in
@@ -305,9 +338,19 @@ each choice cost:
 - Real calendar and mail accounts. `CalendarProvider` and `MessageProvider` are ports with
   local adapters — real behaviour, nothing leaving the machine, and *not* the owner's actual
   calendar or inbox. A Google or Outlook adapter is a new class behind the same protocol.
-- Media editing of any kind. No Pillow, no ffmpeg, no codec, so the media agent identifies
-  files from their headers and says outright that it cannot convert, resize or generate.
-  The design agent writes specifications with contrast computed, and does not draw.
+- **Pictures** Thursday makes itself. Narration it now speaks (ADR 0061), but there is no
+  text-to-image and no text-to-video, so storyboard frames stay an input and the creative
+  workflow names what it is missing rather than inventing it. The synthesised voice is
+  formant synthesis and sounds like one; a better voice is a Piper model file rather than a
+  design change.
+- Media *generation* of any kind. Editing is built (ADR 0060) and needs a local ffmpeg,
+  which the container discovers at startup — a machine without one gets an editor that
+  refuses every operation with the remedy in the sentence, and `health()` says so. What
+  remains unbuilt is everything that makes a picture rather than moving one: no
+  text-to-image, no text-to-video, no TTS, so the creative workflow takes pictures and
+  narration as *inputs* and names what is missing rather than inventing it. Image handling
+  outside ffmpeg is still absent — no Pillow — and the design agent writes specifications
+  with contrast computed, and does not draw.
 - Mobile client (scaffold in `apps/mobile`). The desktop app is built — conversation,
   approvals, tasks, devices, memory and permissions — but has no voice capture and no
   embedded device node yet
@@ -329,7 +372,7 @@ the verification loop, the audit chain and the device round-trip are all real.
 
 ```bash
 ./scripts/check.sh           # everything CI runs: lint, format, types, tests, migrations
-pytest                       # 1,850 tests, no infrastructure
+pytest                       # 2,151 tests, no infrastructure
 ruff check . && ruff format .
 mypy packages services
 alembic upgrade head && alembic revision --autogenerate -m "what changed"
@@ -346,7 +389,7 @@ extending the node protocol need the same misbehaving node the tests use.
 ```
 apps/        server · node · cli · worker · desktop (Tauri) · mobile (planned)
 packages/    shared · core · agents · tools · memory · devices · security
-             voice · vision · automation · models
+             voice · vision · automation · models · media · school
 services/    api · realtime · worker
 database/    migrations · seeds
 docker/      api and node images; docker-compose.yml at the root

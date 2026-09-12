@@ -109,3 +109,21 @@ Real microphone and speaker capture (`sounddevice` is an extra; the ports are re
 cloud STT/TTS adapter to sit at the head of the chain, and openWakeWord on raw audio. The
 shipped `KeywordWakeWord` matches on a transcript, which is enough to prove the gating but
 is not a wake-word engine.
+
+## A voice on a fresh install (V12)
+
+`PiperTTS` needs a neural voice file per language, so "offline mode still has a voice" was
+conditional on somebody having downloaded one. `EspeakTTS` is the floor under that: eSpeak NG
+as a shared library in a pip wheel, 114 dictionaries including Thai, nothing to fetch. It
+sounds like a machine and it is always there, so the chain is Piper where a voice file
+exists and eSpeak where none does — see
+[ADR 0061](architecture/decisions/0061-a-voice-that-needs-no-download.md).
+
+Two things in that adapter are load-bearing and were found by measuring: eSpeak must be
+initialised with `AUDIO_OUTPUT_SYNCHRONOUS` rather than `AUDIO_OUTPUT_RETRIEVAL`, which
+synthesises on its own thread and leaks audio between utterances; and its rate must be
+clamped at 100 wpm, below which Thai durations stop tracking it. Both produce wrong
+*durations* rather than errors, and a duration is what times every subtitle the media
+pipeline burns in.
+
+It writes files. No microphone or speaker has been opened at any point.

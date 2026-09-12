@@ -15,6 +15,18 @@ task state machine, memory v1, Obsidian writer, orchestrator + supervisor, resea
 computer agents, model router with offline rule-based tier.
 **Exit:** §89 demo passes as an automated integration test.
 
+## Media editing (done in this repo, out of sequence)
+Local, deterministic video assembly behind the `MediaEditor` port — trim, join, resize to
+16:9/9:16/1:1, burn in subtitles, dub narration and music, normalise loudness, strip
+silence, overlay, crossfade, cover frame — with checkpointed plans, a quality gate that
+judges the finished file, and an honest refusal on a machine with no ffmpeg. Brought
+forward because it is the capability the brief leads with; see [§24](24-media.md) and
+[ADR 0060](architecture/decisions/0060-an-edit-never-writes-over-its-input.md).
+**Exit:** a promotional video assembled, narrated, subtitled and rendered, then verified by
+opening the output — `tests/e2e/test_v11_media_acceptance.py`.
+**Not done:** generation of any kind — no text-to-image, text-to-video or TTS, so pictures
+and narration are inputs.
+
 ## Phase 2 — Real work (4–6 weeks)
 Postgres+pgvector in place of SQLite · Redis bus/queue · real STT (faster-whisper) and TTS
 (Piper) · Windows node hardening (UIA, COM for Office) · Data + Document agents · file
@@ -32,6 +44,17 @@ Multi-device continuity · device router with confidence-gated questions · mobi
 follow-me output routing · notification intelligence · proactive assistant with
 proactivity levels · automation engine + routine learning proposals.
 **Exit:** §92 demo — from the phone, "is the home PC still on?"
+
+## School agents (done in this repo)
+Teacher, library and event — the three the brief names, built on one rule: **the artefacts
+whose correctness is arithmetic, and no more.** Rubrics, exam blueprints, timed lesson
+plans, circulation and collection reports, run sheets. Each refuses rather than corrects,
+and hands its figures to the Supervisor to recompute; see
+[ADR 0062](architecture/decisions/0062-a-school-document-is-arithmetic-somebody-is-held-to.md).
+**Exit:** a rubric whose weights the Supervisor checks, a run sheet that finds the teacher
+rostered onto two consecutive items.
+**Not done:** worksheets, publicity, stage scripts, evaluation forms — prose with no
+checkable property, and the document agent's job.
 
 ## Phase 5 — Learning (6–8 weeks)
 Knowledge graph · timeline queries · skill capture from demonstration · skill sandbox
