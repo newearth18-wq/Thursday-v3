@@ -633,6 +633,17 @@ def pair(identity: NodeIdentity, *, core_url: str, name: str, os_name: str) -> i
     return 0
 
 
+class CoreRefused(Exception):
+    """The core answered the HELLO with something other than a WELCOME.
+
+    Named rather than a bare `RuntimeError` because `run_forever` has to be able to catch
+    exactly this and nothing else. A refusal is an ordinary state of the world — a pairing
+    code nobody confirmed yet, a revoked identity, a core still starting up — and it belongs
+    in the backing-off path with every other reason a session ended. A `RuntimeError` from
+    somewhere else in `_session` is a defect, and defects should still crash loudly.
+    """
+
+
 class NodeClient:
     def __init__(
         self,
@@ -702,6 +713,15 @@ class NodeClient:
                 if await self._follow_handover():
                     delay = RECONNECT_BASE_S
                     continue
+                delay = await self._back_off(exc, delay)
+            except CoreRefused as exc:
+                # Backed off rather than allowed out of this loop, which is where it used to
+                # go. `run_forever` is gathered with the diagnostics server in `main`, so an
+                # escaping exception took the whole process down — including `GET /health`,
+                # the one place that would have told the owner *why* the node is refused.
+                # The repo's own rule for close codes already says it: expiry after a healthy
+                # session reconnects at once, and everything else backs off.
+                self.connected = False
                 delay = await self._back_off(exc, delay)
             except (OSError, websockets.WebSocketException) as exc:
                 self.connected = False
@@ -838,7 +858,7 @@ class NodeClient:
                         " — this node has paired but the code may not have been confirmed"
                         " yet, or its identity has been revoked"
                     )
-                raise RuntimeError(self.last_error)
+                raise CoreRefused(self.last_error)
             self.connected = True
             self.last_error = None
             log.info(
