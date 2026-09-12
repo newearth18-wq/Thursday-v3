@@ -338,12 +338,61 @@ class AnthropicLLM:
         yield response.text
 
     async def health(self) -> HealthStatus:
+        """Whether a key is *registered* — which is not whether it works.
+
+        This used to report `detail="ok"`, which reads as "the provider is working" and
+        is true of a revoked key, a key from another account, and a key with a trailing
+        newline. Reaching the provider on every health check would put a paid network
+        call behind `/health`, so the check stays cheap and the wording stops
+        overclaiming: use `probe()` when the question is whether the key actually works.
+        """
         has_key = await self._vault.has(self._key_handle)  # type: ignore[attr-defined]
         return HealthStatus(
             name=self.name,
             ok=bool(has_key),
-            detail="ok" if has_key else f"no secret registered for {self._key_handle!r}",
+            detail=(
+                "a key is registered (not checked against the provider)"
+                if has_key
+                else f"no secret registered for {self._key_handle!r}"
+            ),
         )
+
+    async def probe(self, api_key: str) -> bool:
+        """Does this key actually work? One real, minimal call to the provider.
+
+        The verification behind an API key rotation (ADR 0067). It takes the candidate
+        key rather than reading the stored one, because the whole point is to find out
+        whether a key works *before* it is written over the one that does.
+
+        A format check would be cheaper and would pass for a revoked key, a key from
+        another account, and a key with a trailing newline — three of the four ways this
+        goes wrong in practice. So it is a request, with the smallest body the API will
+        accept, and only a 2xx counts.
+        """
+        import httpx
+
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                response = await client.post(
+                    "https://api.anthropic.com/v1/messages",
+                    headers={
+                        "x-api-key": api_key,
+                        "anthropic-version": "2023-06-01",
+                        "content-type": "application/json",
+                    },
+                    json={
+                        "model": self.model,
+                        "max_tokens": 1,
+                        "messages": [{"role": "user", "content": "hi"}],
+                    },
+                )
+        except Exception as exc:
+            # A network failure is not a bad key, and saying so matters: rotating on a
+            # flaky connection must not discard a working key. The caller refuses the
+            # rotation either way, which is the safe direction.
+            log.warning("provider_probe_failed", provider=self.name, error=str(exc))
+            return False
+        return response.is_success
 
 
 def _safe_json(text: str) -> dict | None:
