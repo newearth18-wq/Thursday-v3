@@ -20,7 +20,7 @@ ready, what is not, and what closing each gap would take is in
 [docs/23-release-readiness.md](docs/23-release-readiness.md).
 
 **Phase 1 is implemented and runnable**: the vertical slice from
-[docs/15-vertical-slice.md](docs/15-vertical-slice.md) works end to end, with 2,342 tests that
+[docs/15-vertical-slice.md](docs/15-vertical-slice.md) works end to end, with 2,359 tests that
 need no database, no network and no model credentials — plus 169 in the desktop app, which
 is where the decisions about what a person is actually shown now live.
 
@@ -204,7 +204,7 @@ conventions, so neither can be forgotten by a new caller.
 
 Full design in [`docs/`](docs/) — the twenty-four deliverables, written before the code
 (§24–§26 came after, describing what V11, V14 and V15 built), plus the
-[V2 review](docs/architecture/00-v2-review.md) and sixty-six
+[V2 review](docs/architecture/00-v2-review.md) and sixty-seven
 [architecture decisions](docs/architecture/decisions/) recording what was chosen and what
 each choice cost:
 
@@ -351,6 +351,11 @@ each choice cost:
   logs answer — and a node that arrives late is told the date the old one stopped working
   rather than that its signature is wrong. Half a rotation fails at startup, and nothing
   anywhere generates a secret
+- Provider API keys that rotate by being **proven first**: the incoming key is checked with a
+  real call to the provider — not a format check, which passes for a revoked key, a key from
+  another account, and a key with a trailing newline — before the working one is touched, and
+  the outgoing key is kept so there is a way back. Every rotation carries the sentence naming
+  what Thursday cannot do: revoke the old key at the provider
 - 126 REST operations, two WebSockets, 29-table schema with working migrations and seeds
 
 **Designed, ported, not yet implemented** — every one has an interface and a Phase in
@@ -404,7 +409,7 @@ the verification loop, the audit chain and the device round-trip are all real.
 
 ```bash
 ./scripts/check.sh           # everything CI runs: lint, format, types, tests, migrations
-pytest                       # 2,342 tests, no infrastructure
+pytest                       # 2,359 tests, no infrastructure
 ruff check . && ruff format .
 mypy packages services
 alembic upgrade head && alembic revision --autogenerate -m "what changed"

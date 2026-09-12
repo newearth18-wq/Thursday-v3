@@ -6,7 +6,7 @@ a multi-user or internet-exposed installation.**
 That sentence is the whole document in one line. What follows is the evidence for it, and —
 more usefully — the evidence against.
 
-Written at Sprint 50 and kept current since, against 2,342 tests that need no database, no
+Written at Sprint 50 and kept current since, against 2,359 tests that need no database, no
 network and no model credentials. `./scripts/check.sh` runs lint, format, types, the suite and the migrations.
 
 ---
@@ -111,11 +111,24 @@ arrives late is told the date the old one stopped working, and a half-configured
 fails at startup rather than at the first HELLO months later. Nothing generates a secret —
 there is no token generator, and a test asserts there is none.
 
-*Still open:* the other two rotations §117 lists — the core's TLS key and provider API keys.
-The TLS key is the harder one and not for want of effort: a node pins the core's
-SubjectPublicKeyInfo, learned at pairing where a person was present (ADR 0041), so rotating
-it invalidates every node's pin at once. That needs a signed hand-over from the retiring key,
-which is a different design rather than a longer window.
+**Provider API keys** rotate too (ADR 0067), in the opposite shape to the enrolment token.
+One party holds the key, so replacing it cuts nothing off and needs no window; the danger is
+entirely that the replacement does not work — copied short, pasted with a newline, revoked
+before it was installed, or from a different account. So the incoming key is proven against
+the provider with a **real call** before anything is written, the outgoing key is kept rather
+than deleted so there is a way back, and every rotation carries the sentence naming what
+Thursday cannot do: **revoke the old key at the provider.** That is a button in the provider's
+console and nothing here can press it, so a rotation reporting success without saying so
+would leave the owner believing a compromised key was dead.
+
+`AnthropicLLM.health()` stopped reporting `"ok"` for a registered key in the same sprint — the
+old wording read as "the provider is working" and was true of a revoked one.
+
+*Still open:* the core's TLS key, and only that. It is the harder one and not for want of
+effort: a node pins the core's SubjectPublicKeyInfo, learned at pairing where a person was
+present (ADR 0041), so rotating it invalidates every node's pin at once. That needs a signed
+hand-over from the retiring key, which is a different design rather than a longer window or a
+verified swap.
 
 **Thursday can speak, and it sounds like a machine.** eSpeak NG (ADR 0061) is a real local
 synthesiser that installs as a wheel with no model file, covers Thai, and produces audio
