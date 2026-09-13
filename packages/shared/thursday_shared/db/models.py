@@ -681,6 +681,36 @@ class ModelRow(Base, IdMixin, TimestampMixin):
     )
 
 
+class BenchmarkProfileRow(Base, IdMixin, TimestampMixin):
+    """What real calls measured about one model on one machine (ADDENDUM §25).
+
+    Deliberately *not* the ``models.tokens_per_second`` column, which looks like the obvious
+    home and is not. That column carries what the node reported about itself and is written
+    by the registry on every reconnect; a second writer putting measurements into it would
+    produce exactly the two-stores-that-disagree failure ``persistence.py`` warns about, with
+    the reconnect winning at random.
+
+    ``fingerprint`` is what makes restoring safe: a measurement describes a model running on
+    particular hardware, so it is kept only while that hardware still answers to the same
+    description.
+    """
+
+    __tablename__ = "benchmark_profiles"
+
+    #: ``device_id|model`` — the same key the in-memory book uses.
+    key: Mapped[str] = mapped_column(String(280), unique=True, index=True)
+    device_id: Mapped[uuid.UUID | None] = mapped_column(GUID(), nullable=True, index=True)
+    model_name: Mapped[str] = mapped_column(String(200), index=True)
+    #: The machine this was measured on, as it described itself. "cloud" for a provider,
+    #: whose hardware Thursday cannot see at all.
+    fingerprint: Mapped[str] = mapped_column(String(120), default="")
+    #: Up to ``WINDOW`` samples; the in-memory deque caps it, so this row stays small.
+    samples: Mapped[list[dict[str, Any]]] = mapped_column(JSONColumn, default=list)
+    last_benchmarked_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+
 class ModelRun(Base, IdMixin):
     """One inference call, wherever it ran (ADDENDUM §50).
 

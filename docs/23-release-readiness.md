@@ -6,7 +6,7 @@ a multi-user or internet-exposed installation.**
 That sentence is the whole document in one line. What follows is the evidence for it, and —
 more usefully — the evidence against.
 
-Written at Sprint 50 and kept current since, against 2,489 tests that need no database, no
+Written at Sprint 50 and kept current since, against 2,506 tests that need no database, no
 network and no model credentials. `./scripts/check.sh` runs lint, format, types, the suite and the migrations.
 
 ---
@@ -60,6 +60,7 @@ container, not a unit test of the class in isolation.
 | A core whose TLS key changes while nobody walks to a machine, followed over a real handshake against a certificate that really was replaced | `tests/integration/test_tls_rotation_live_v23.py` |
 | A device key that never touches disk, migrated out of a file into a real, unmocked Linux Secret Service and read back from it after a restart | `tests/integration/test_keychain_live_v26.py` |
 | A machine bounded by what Thursday sent it rather than by what it last reported, and independent stages that overlap without it | `tests/integration/test_device_capacity_v76.py` |
+| A measurement that survives a restart and dies with the GPU it described, proved across real processes against a real database | `tests/integration/test_benchmark_persistence_v77.py` |
 
 ## 23.2 What is not ready, and what that would take
 
@@ -341,10 +342,28 @@ Within that layer, four things are deliberately absent rather than unfinished:
 - **Escalation (§13–§14) is supported, not automatic.** `ComputeExecutor` accepts a quality
   gate and walks to a stronger model when an answer fails it, and nothing in the agent layer
   passes one yet. Tier 0–5 is a policy this router can serve rather than one it runs.
-- **Benchmarks do not survive a restart.** The `models` table has `tokens_per_second` and
-  `last_benchmarked_at` waiting for them. Persisting needs a decision about whether a
-  measurement taken before a hardware change should outlive it, and guessing that is worse
-  than restarting the window.
+- **Benchmarks survive a restart, and the decision this document was waiting for did not
+  need a guess** (ADR 0077). `BenchmarkBook.__init__` took a `repository`, assigned it, and
+  never read it again — a persistence hook that persisted nothing. Measured: five real calls
+  gave 500 tok/s, a restart gave 0.0, and `0.0` is what the router reads as *never measured*.
+  So every restart returned the whole house to unmeasured, and `MAX_AGE` — fourteen days,
+  filtered on every read — **had never once applied**, because nothing could live long enough
+  to reach it. The same shape this document already records for the spend ledger.
+
+  The blocking question was whether a measurement taken before a hardware change should
+  outlive it. It should not, and the machine can say so: a measurement is a fact about a model
+  running on particular hardware, so it is kept while the machine still answers to the same
+  description — GPU, VRAM, RAM, cores, stamped at record time. Not the hostname; renaming a
+  machine does not make last week's throughput wrong. A provider is never discarded for
+  hardware because there is nothing to compare, and the window is its only bound.
+
+  Not the `models` table this document pointed at: `models.tokens_per_second` carries what the
+  node reported about *itself* and the registry rewrites it on every reconnect, so a second
+  writer there would be the two-stores-that-disagree failure `persistence.py` warns about.
+
+  *Still open:* a model re-quantised in place, or a driver update, changes what the number
+  means and changes nothing the machine reports. The fourteen-day window is the only thing
+  that catches those — which is what it was always for, and now it can actually reach.
 - **Model purpose is guessed from the model's name.** No runtime reports it. The owner can
   correct a wrong guess and the correction survives reconnects (ADR 0045), but the first
   guess for an unfamiliar name is a guess.

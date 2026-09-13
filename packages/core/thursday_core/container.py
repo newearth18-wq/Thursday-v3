@@ -512,7 +512,7 @@ def build_container(settings: Settings | None = None, *, configure_logs: bool = 
     c.remote_gate = RemoteCommandGate()
     c.hub = DeviceHub(c.bus, remote_gate=c.remote_gate, model_registry=c.model_registry)
     c.device_router = DeviceRouter(c.hub)
-    c.benchmarks = BenchmarkBook()
+    c.benchmarks = BenchmarkBook(repository=_benchmark_repository(settings, c), hub=c.hub)
     c.setup = SetupWizard()
     c.learning = LearningRecord(frequency=settings.teaching_frequency)
     c.lessons = LessonRunner(c.learning)
@@ -1174,6 +1174,30 @@ def _model_registry_repository(settings: Settings, container: Container) -> Any:
     )
 
 
+def _benchmark_repository(settings: Settings, container: Container) -> Any:
+    """Where measurements are kept between runs (ADDENDUM §25).
+
+    A separate table from `models`, whose `tokens_per_second` column looks like the obvious
+    home and is not: that column carries what the node reported about itself and the registry
+    rewrites it on every reconnect. A second writer putting measurements there would be the
+    two-stores-that-disagree failure this module's own docstring warns about, with the
+    reconnect winning at random.
+    """
+    if not settings.persist_benchmarks:
+        return None
+
+    from thursday_shared.db.models import BenchmarkProfileRow
+    from thursday_shared.db.session import init_engine, session_scope
+
+    init_engine(settings)
+    container.persistent = True
+    return SqlRepository(
+        BenchmarkProfileRow,
+        session_scope=session_scope,
+        order_by="key",
+    )
+
+
 def _spend_repository(settings: Settings, container: Container) -> Any:
     """Where the spend ledger is kept between runs (§61).
 
@@ -1271,10 +1295,12 @@ async def start(container: Container) -> Container:
     charges = await container.costs.restore()
     tasks = await container.tasks.restore()
     models = await container.model_registry.restore()
+    benchmarks = await container.benchmarks.restore()
     log.info(
         "thursday_state_loaded",
         persistent=container.persistent,
         models=models,
+        benchmarks=benchmarks,
         memories=memories,
         audit_entries=entries,
         audit_chain_intact=container.audit.verify_chain(),
