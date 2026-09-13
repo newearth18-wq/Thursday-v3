@@ -66,6 +66,7 @@ from thursday_security.privacy import PrivacyClassifier, PrivacyZoneRegistry
 from thursday_security.redaction import SecretRedactor
 from thursday_security.remote import RemoteCommandGate
 from thursday_security.vault import ChainVault, EnvVault, InMemoryVault, KeychainVault
+from thursday_shared.db.models import EMBEDDING_DIMENSIONS
 from thursday_shared.enums import ModelTier, NotificationPriority
 from thursday_shared.errors import ConfigurationError
 from thursday_shared.models import Event
@@ -1282,6 +1283,75 @@ def _memory_repository(settings: Settings, container: Container) -> Any:
     )
 
 
+async def _check_embedding_width(container: Container) -> int:
+    """Measure what the embedder actually produces, and say what it cannot reach.
+
+    Measured rather than read off `EmbeddingProvider.dimensions`, because that attribute is
+    a *declaration*: `OllamaEmbeddingProvider` announces 768 whatever model it is pointed
+    at, so an owner who switches to a 1024-wide model has a provider that is simply wrong
+    about itself. Embedding one short string answers the question instead of trusting it —
+    the same reason §12's verification reads the machine rather than taking a report.
+
+    Two disagreements are possible and they are different problems:
+
+    * **Against the stored memories.** A memory embedded at another width can no longer be
+      compared with anything, and used to score 0.0 — indistinguishable from "considered
+      and found irrelevant". It is still there, still recalled by text, and no longer
+      findable by meaning, which is worth a line the owner can see rather than a silence.
+    * **Against the column.** `EMBEDDING_DIMENSIONS` fixes the pgvector column width.
+      Postgres refuses a vector of the wrong width at insert; SQLite stores it as text and
+      refuses nothing. Naming it at startup beats finding out at the first write on one
+      backend and never on the other.
+
+    Never raises. An assistant that will not start because its recall is degraded is worse
+    than one that starts and says so — the memories are all still there, and every other
+    thing Thursday does still works.
+    """
+    embedder = getattr(container, "embedder", None)
+    if embedder is None:
+        return 0
+    try:
+        probe = await embedder.embed(["ตรวจความกว้างของเวกเตอร์"])
+    except Exception as exc:  # the provider is unreachable; health reports that separately
+        log.warning("embedding_width_unknown", error=str(exc))
+        return 0
+
+    width = len(probe[0]) if probe else 0
+    declared = getattr(embedder, "dimensions", width)
+    if width and declared != width:
+        log.warning(
+            "embedder_misdeclares_its_width",
+            provider=type(embedder).__name__,
+            declared=declared,
+            measured=width,
+        )
+
+    if width and width != EMBEDDING_DIMENSIONS:
+        log.warning(
+            "embedding_width_differs_from_the_column",
+            measured=width,
+            column=EMBEDDING_DIMENSIONS,
+            detail=(
+                "Postgres refuses a vector of the wrong width at insert; SQLite stores it "
+                "as text and refuses nothing"
+            ),
+        )
+
+    stranded = container.memory.unsearchable(width) if width else 0
+    if stranded:
+        log.warning(
+            "memories_no_longer_searchable_by_meaning",
+            stranded=stranded,
+            embedder_width=width,
+            stored_widths=container.memory.embedding_widths(),
+            detail=(
+                "these were written by an embedder of another width; they are still stored "
+                "and still recalled by text, but nothing can compare them by meaning"
+            ),
+        )
+    return stranded
+
+
 async def start(container: Container) -> Container:
     """Bring a built container up: load what was kept, then report what is real.
 
@@ -1291,6 +1361,7 @@ async def start(container: Container) -> Container:
     existed, which is why every existing test still passes without calling it.
     """
     memories = await container.memory.restore()
+    await _check_embedding_width(container)
     entries = await container.audit.restore()
     charges = await container.costs.restore()
     tasks = await container.tasks.restore()

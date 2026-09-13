@@ -40,7 +40,7 @@ from thursday_shared.models import (
     utcnow,
 )
 
-from thursday_memory.embeddings import cosine
+from thursday_memory.embeddings import comparable, cosine
 
 log = get_logger(__name__)
 
@@ -485,7 +485,7 @@ class MemoryManager:
             await self._vectors.upsert(  # type: ignore[attr-defined]
                 [(r.id, r.embedding or [], {"layer": str(r.layer)}) for r in self._records.values()]
             )
-            log.info("memory_restored", records=restored)
+            log.info("memory_restored", records=restored, widths=self.embedding_widths())
         if rows and not restored:
             # Not "nothing to restore". Every row that was there failed to load, and a
             # startup line reading `memories=0` looks identical to a first boot — which is
@@ -495,6 +495,25 @@ class MemoryManager:
                 "though there were none"
             )
         return restored
+
+    def embedding_widths(self) -> dict[int, int]:
+        """How many stored memories carry an embedding of each width.
+
+        More than one key means some of them were written by a different embedder and can
+        no longer be compared with the rest. The docstring on `restore` has always said a
+        change of embedding model "would silently re-score every memory the owner has" —
+        this is the number that stops it being silent.
+        """
+        widths: dict[int, int] = {}
+        for record in self._records.values():
+            widths[len(record.embedding or [])] = widths.get(len(record.embedding or []), 0) + 1
+        return widths
+
+    def unsearchable(self, width: int) -> int:
+        """How many stored memories a query embedded at `width` cannot be compared with."""
+        return sum(
+            1 for r in self._records.values() if not comparable([0.0] * width, r.embedding or [])
+        )
 
     async def get(self, memory_id: UUID) -> MemoryRecord | None:
         return self._records.get(memory_id)
@@ -595,7 +614,15 @@ class MemoryManager:
         pool = [
             r
             for r in self._records.values()
-            if r.layer is layer and r.is_current and (key is None or r.key == key)
+            if r.layer is layer
+            and r.is_current
+            and (key is None or r.key == key)
+            # Only records this embedding can actually be compared with. One written by a
+            # different embedder scores 0.0 against everything, so including them made
+            # `max` pick an arbitrary one and report it as the nearest match at similarity
+            # zero — and `_is_conflict`'s paraphrase test, which needs 0.90, could never
+            # fire again. The keyed test still would, which is what made it quiet.
+            and comparable(embedding, r.embedding or [])
         ]
         if not pool:
             return None

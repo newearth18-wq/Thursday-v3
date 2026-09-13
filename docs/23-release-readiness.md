@@ -6,7 +6,7 @@ a multi-user or internet-exposed installation.**
 That sentence is the whole document in one line. What follows is the evidence for it, and —
 more usefully — the evidence against.
 
-Written at Sprint 50 and kept current since, against 2,506 tests that need no database, no
+Written at Sprint 50 and kept current since, against 2,526 tests that need no database, no
 network and no model credentials. `./scripts/check.sh` runs lint, format, types, the suite and the migrations.
 
 ---
@@ -61,6 +61,8 @@ container, not a unit test of the class in isolation.
 | A device key that never touches disk, migrated out of a file into a real, unmocked Linux Secret Service and read back from it after a restart | `tests/integration/test_keychain_live_v26.py` |
 | A machine bounded by what Thursday sent it rather than by what it last reported, and independent stages that overlap without it | `tests/integration/test_device_capacity_v76.py` |
 | A measurement that survives a restart and dies with the GPU it described, proved across real processes against a real database | `tests/integration/test_benchmark_persistence_v77.py` |
+| A memory that cannot be compared reported as unreachable rather than scored zero, and every declaration of the embedding width made to agree | `tests/integration/test_embedding_width_v78.py` |
+| The shipped configuration writing a memory to a real PostgreSQL with pgvector, and the old default refused by the server itself | `tests/integration/test_postgres_live_v79.py` |
 
 ## 23.2 What is not ready, and what that would take
 
@@ -255,6 +257,58 @@ appears in the brief and at `GET /api/v1/tasks/interrupted`, and continuing is t
 call.
 
 All four stores — memory, audit, spend, tasks — report their durability through `health()`.
+
+**A restored memory can be stored and still be unreachable** (ADR 0078). Found by auditing
+for the shape three sprints running had each turned up — a private attribute assigned in
+`__init__` and never read again. Three hits in the tree; two benign, and the third ran
+further than the attribute. Four places declared the embedding width and three of them
+disagreed: `settings.yaml` shipped 256, `EMBEDDING_DIMENSIONS` fixes the column at 768, and
+`PgVectorStore` took a `dimensions` argument it never read — so the one object that knew how
+wide its column was wrote whatever it was handed. On SQLite that column is `Text()` and
+accepts anything, which is why the suite was green.
+
+What hid it is sharper than the mismatch. `cosine` returns `0.0` for vectors of different
+widths — the same number two genuinely orthogonal vectors get. Measured: a 256-wide memory
+searched with a 768-wide query came back **as a hit, scoring 0.0**, indistinguishable from
+one that was read and found irrelevant. `MemoryManager.restore`'s own docstring warned that
+changing the embedding model "would silently re-score every memory the owner has"; nothing
+checked. Quieter still, `_nearest` picked its conflict candidate with `max(pool, key=cosine)`,
+so against records of another width it returned an arbitrary one at similarity zero and the
+paraphrase test — which needs 0.90 — could never fire again.
+
+"Cannot be judged" and "is not similar" are now different answers. A vector search skips what
+it cannot compare and reports the count; a conflict check considers only comparable records;
+the production store refuses a vector its column cannot hold; and `start()` **measures** what
+the embedder really produces rather than reading `EmbeddingProvider.dimensions`, which is a
+declaration `OllamaEmbeddingProvider` makes whatever model it is pointed at. It never refuses
+to start over it — the memories are all still there and still recalled by text — but it never
+stays quiet either.
+
+**And that caveat was wrong about why** (ADR 0079). This document filed "needs a Postgres"
+alongside the camera and the macOS keychain. They are not the same kind of thing:
+`postgresql-16` and `postgresql-16-pgvector` are both in the distribution's package index and
+`asyncpg` and `pgvector` are both on PyPI. One `apt-get install` produced the observation:
+
+    ERROR:  expected 768 dimensions, not 256
+
+and then, through the real application against a real server, the shipped configuration wrote
+a memory (768 dims, Thai content intact) where the old 256 default could not write one at all.
+All 35 tables migrated clean, `alembic check` found no drift, and all three `vector` columns
+came back as `vector(768)` — none of which had ever been run, because every test in this
+project's history had executed against SQLite, where `Vector` is a `Text()` that refuses
+nothing.
+
+CI now runs a `pgvector/pgvector:pg16` service and asserts it is really there before the
+suite, the same discipline as ffmpeg, eSpeak NG and gnome-keyring. The suite still needs no
+database; what CI adds is the one environment where SQLite's permissiveness stops standing in
+for a real column type.
+
+The general point is about the audit rather than the database: **a documented limitation is a
+claim like any other, and "needs hardware" deserves the same check as "this is wired up".**
+Two lines of `apt-cache policy` would have retired this one several sprints ago.
+
+*Still open:* `PgVectorStore` is constructed nowhere — every deployment builds
+`InMemoryVectorStore`, so vector search is a brute-force scan over restored embeddings.
 
 The audit table grows without bound. A retention policy is deliberately absent: deleting audit
 rows is what the append-only design forbids, and how long the owner keeps their own record is

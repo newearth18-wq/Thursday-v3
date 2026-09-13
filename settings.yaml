@@ -124,7 +124,10 @@ media:
 
 memory:
   embedding_backend: hash        # hash (offline) | ollama
-  embedding_dimensions: 256
+  # Matches the pgvector column (EMBEDDING_DIMENSIONS) and nomic-embed-text. Was 256,
+  # which agreed with neither; `start()` now measures what the embedder really produces
+  # and says what a change strands.
+  embedding_dimensions: 768
   working_ttl_hours: 24
   obsidian_enabled: true
   obsidian_vault: thursday_vault

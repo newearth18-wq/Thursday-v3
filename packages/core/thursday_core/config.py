@@ -312,7 +312,12 @@ class Settings(BaseSettings):
 
     # memory --------------------------------------------------------------------
     embedding_backend: str = "hash"  # hash (offline) | ollama
-    embedding_dimensions: int = 256
+    #: Matches `EMBEDDING_DIMENSIONS`, the pgvector column width, and `nomic-embed-text`,
+    #: the local embedder §2 names. It was 256 — a number that agreed with nothing, worked
+    #: on SQLite because that column is text, and could not be written to the Postgres the
+    #: schema was drawn for. Changing it strands memories embedded at the old width, which
+    #: is why `start()` counts them and says so rather than letting recall quietly thin out.
+    embedding_dimensions: int = 768
     obsidian_vault: Path = Path("thursday_vault")
     obsidian_enabled: bool = True
     memory_working_ttl_hours: int = 24
