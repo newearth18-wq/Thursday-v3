@@ -6,7 +6,7 @@ a multi-user or internet-exposed installation.**
 That sentence is the whole document in one line. What follows is the evidence for it, and —
 more usefully — the evidence against.
 
-Written at Sprint 50 and kept current since, against 2,533 tests that need no database, no
+Written at Sprint 50 and kept current since, against 2,542 tests that need no database, no
 network and no model credentials. `./scripts/check.sh` runs lint, format, types, the suite and the migrations.
 
 ---
@@ -64,6 +64,7 @@ container, not a unit test of the class in isolation.
 | A memory that cannot be compared reported as unreachable rather than scored zero, and every declaration of the embedding width made to agree | `tests/integration/test_embedding_width_v78.py` |
 | The shipped configuration writing a memory to a real PostgreSQL with pgvector, and the old default refused by the server itself | `tests/integration/test_postgres_live_v79.py` |
 | The pgvector-backed store executed for the first time — searched, written to and deleted from against a real server | `tests/integration/test_pgvector_store_v80.py` |
+| Thai subtitles burned in and read back off the frame, and the identical input refused on a machine whose fonts cannot draw it | `tests/integration/test_subtitle_glyphs_v81.py` |
 
 ## 23.2 What is not ready, and what that would take
 
@@ -225,10 +226,28 @@ closed. `test_the_readiness_document_does_not_deny_a_capability_thursday_has` no
 Two smaller limits, both deliberate. **Silence removal refuses on video**: cutting silence
 from a soundtrack while leaving the picture alone desynchronises the two for the rest of the
 video, so it works on audio, where it is actually wanted, and says why it will not do the
-rest. And **subtitle burn-in depends on the machine's fonts** — libass renders what
-fontconfig can find, so a system with no Thai font produces boxes. The quality gate cannot
-see that, and this document says so rather than letting the test suite's green imply
-otherwise.
+rest. **Subtitle burn-in depended on the machine's fonts and said nothing about it** (ADR 0081).
+This document carried that as a stated limit for several sprints, and both halves of it were
+assumed — on a product whose first language is Thai. Measured by burning the same line twice
+and *looking at the frames*: with a Thai font the picture reads
+`แมวของฉันชื่อมะลิ กินปลาทูเป็นอาหารโปรด`; with fontconfig pointed at a Latin-only directory
+it is a row of empty boxes; and `check_output` answered **`ok=True, 2 checks passed` for
+both**.
+
+The gate is not at fault — it reads the finished file, where a box is pixels like any other.
+libass had already answered the question on stderr (`failed to find any fallback with glyph
+0xE41`), `_must_run` had returned that stderr since the day it was written, and
+`burn_subtitles` discarded it. ffmpeg exits 0 having produced a valid video of nothing
+readable, which is the exact case ADR 0060 exists for.
+
+Burn-in now refuses, naming the script and every undrawable character rather than the first,
+so installing one font and rendering again does not just reveal the next one. Only libass's
+*gave up* line counts: `Glyph 0x… not found` is how fallback begins, and treating it as a
+failure turns seven tests red.
+
+*Still open:* this catches a character no font can draw. It does not catch a font that draws
+it **badly** — wrong shaping, a tone mark in the wrong place. libass reports nothing there
+because from its side nothing failed, and judging it needs a human or a renderer comparison.
 
 **The updater cannot install.** It checks, verifies and refuses correctly, and no installer is
 wired (ADR 0033). This is deliberate — a half-built installer is worse than none — but it

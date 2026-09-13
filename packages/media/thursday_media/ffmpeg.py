@@ -23,6 +23,7 @@ import asyncio
 import re
 import shutil
 import tempfile
+import unicodedata
 from contextlib import suppress
 from pathlib import Path
 from typing import Any
@@ -560,7 +561,8 @@ class FFmpegEditor:
                 *audio,
                 str(out),
             ]
-            await self._must_run(args, what="burning in subtitles", cwd=Path(workspace))
+            stderr = await self._must_run(args, what="burning in subtitles", cwd=Path(workspace))
+        _refuse_unrenderable_text(stderr, subtitles=track)
         return await self._finish(out, what="burn_subtitles")
 
     async def dub(
@@ -875,6 +877,44 @@ _SUBTITLE_STYLE = (
     "FontSize=22,PrimaryColour=&H00FFFFFF,OutlineColour=&H90000000,"
     "BorderStyle=3,Outline=1,Shadow=0,MarginV=40"
 )
+
+
+#: libass reports a character it could not draw, then reports giving up on finding a font
+#: that can. The first line alone is not a failure — it is how fallback begins, and the next
+#: font in the chain usually has the glyph. The second is the one that matters.
+_GLYPH_GIVEN_UP = re.compile(r"failed to find any fallback with glyph 0x([0-9A-Fa-f]+)")
+
+
+def _refuse_unrenderable_text(stderr: str, *, subtitles: Path) -> None:
+    """Refuse a burn-in that drew boxes where the text should be (Sprint 107).
+
+    libass says this on its own: a character with no font to draw it becomes an empty box in
+    the picture, and ffmpeg exits 0 having written a perfectly valid video of nothing
+    readable. `_must_run` has had that stderr in hand since the day this was written and
+    threw it away.
+
+    Measured on this machine: the same subtitle line burned with and without a Thai font
+    produced a readable frame and a row of boxes, and `check_output` passed both with
+    "2 checks passed". It cannot see glyphs — it reads the finished file, where a box is
+    just pixels. The renderer is the only layer that knows, and it is told.
+
+    Refusing rather than warning, because this repository's own rule is that a render is
+    judged by what it produced rather than by an exit code, and because subtitles nobody can
+    read are not a lesser version of subtitles. The output file is left where `_finish` would
+    have checked it — an edit only ever writes new files (ADR 0060), so nothing was
+    overwritten and the caller can inspect it.
+    """
+    missing = sorted({int(code, 16) for code in _GLYPH_GIVEN_UP.findall(stderr)})
+    if not missing:
+        return
+    characters = "".join(chr(code) for code in missing)
+    scripts = sorted({unicodedata.name(chr(c), "?").split()[0] for c in missing})
+    raise OperationFailed(
+        f"{subtitles.name} contains characters no font on this machine can draw "
+        f"({', '.join(scripts).lower()}: {characters}) — they would be burned in as empty "
+        "boxes. Install a font covering them and render again.",
+        missing=[f"U+{code:04X}" for code in missing],
+    )
 
 
 def _size_of(path: Path) -> int | None:
