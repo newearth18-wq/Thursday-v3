@@ -77,8 +77,31 @@ class OllamaEmbeddingProvider:
             return out
 
 
+def comparable(a: Sequence[float], b: Sequence[float]) -> bool:
+    """Whether these two vectors can be compared at all (Sprint 104).
+
+    `cosine` returns 0.0 for vectors of different widths, which is the same number it
+    returns for two vectors that are genuinely orthogonal — so a caller cannot tell "these
+    are unrelated" from "I cannot judge these". That conflation is invisible until the
+    embedder changes width, and then every memory written before the change scores 0.0 for
+    ever while still being returned as a result.
+
+    Separated rather than made an exception, because most callers are right to carry on: a
+    recall blends similarity with recency and a lexical overlap, so an unscorable memory is
+    ranked worse rather than lost. The callers that must not carry on are the ones where
+    0.0 is a *decision* — a conflict check, or a vector search whose whole output is
+    similarity.
+    """
+    return bool(a) and bool(b) and len(a) == len(b)
+
+
 def cosine(a: Sequence[float], b: Sequence[float]) -> float:
-    if not a or not b or len(a) != len(b):
+    """Cosine similarity, or 0.0 when the two cannot be compared.
+
+    The 0.0 is deliberate and load-bearing for the blending callers; use `comparable` first
+    wherever the difference matters.
+    """
+    if not comparable(a, b):
         return 0.0
     dot = sum(x * y for x, y in zip(a, b, strict=True))
     na = math.sqrt(sum(x * x for x in a))
