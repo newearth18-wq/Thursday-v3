@@ -85,9 +85,14 @@ class Outcome[T]:
 class ComputeExecutor:
     """Walks a chain until something works."""
 
-    def __init__(self, *, registry: Any = None, hub: Any = None) -> None:
+    def __init__(self, *, registry: Any = None, hub: Any = None, capacity: Any = None) -> None:
         self._registry = registry
         self._hub = hub
+        #: §129. Holds a slot on the machine for the duration of the call. Taken here rather
+        #: than at routing time because the chain may fall through to a fallback: the slot
+        #: has to be on the machine that actually ran the work, and has to be released the
+        #: moment that step fails so the next one is not queued behind a job nobody is doing.
+        self._capacity = capacity
 
     async def run[T](
         self,
@@ -113,7 +118,11 @@ class ComputeExecutor:
                 continue
 
             try:
-                value = await work(step)
+                if self._capacity is None:
+                    value = await work(step)
+                else:
+                    async with self._capacity.hold(step.device_id):
+                        value = await work(step)
             except Exception as exc:
                 attempts.append(Attempt(step, ok=False, reason=f"{type(exc).__name__}: {exc}"))
                 log.warning("compute_step_failed", where=_where(step), error=str(exc))

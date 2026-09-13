@@ -350,6 +350,10 @@ class Settings(BaseSettings):
     #: Requests allowed per minute, per calling address, per class. Generous by design: this
     #: exists to stop a runaway loop, not to ration the owner. A limit tight enough to
     #: interrupt legitimate work is one somebody switches off, and then there is none.
+    #: §129. How many AI jobs Thursday may have in flight on one machine at once. One by
+    #: default: a second heavy inference on the same GPU shares VRAM with the first rather
+    #: than finishing sooner. Raise it for a machine that genuinely serves more.
+    device_concurrency: int = Field(default=1, ge=1)
     rate_limit_default_per_minute: int = Field(default=240, ge=1)
     #: Anything that can reach a model. The spend ledger caps the money after the fact; this
     #: caps the rate before the call.

@@ -146,13 +146,24 @@ class Rejection:
 class ComputeRouter:
     """Chooses the machine and the model. Never decides whether the action is allowed."""
 
-    def __init__(self, *, registry: Any = None, hub: Any = None, benchmarks: Any = None) -> None:
+    def __init__(
+        self,
+        *,
+        registry: Any = None,
+        hub: Any = None,
+        benchmarks: Any = None,
+        capacity: Any = None,
+    ) -> None:
         self._registry = registry
         self._hub = hub
         #: Measurements from real calls (ADDENDUM §25). Optional: without it every model
         #: reads as unmeasured, which is the state the router was designed to handle
         #: anyway — measurement improves routing rather than enabling it.
         self._benchmarks = benchmarks
+        #: §129. What *this process* has dispatched and not had back. Optional, and without
+        #: it the router falls back to the machine's own telemetry — which is what it used
+        #: to do, and which cannot see a job dispatched a millisecond ago.
+        self._capacity = capacity
 
     # ------------------------------------------------------------------ the decision
 
@@ -327,6 +338,13 @@ class ComputeRouter:
         gpu = 1 if (candidate.profile and candidate.profile.has_gpu) else 0
         # §22. A loaded model answers now; an unloaded one may take a minute to page in.
         warm = 1 if candidate.state is ModelState.LOADED else 0
+        # §129. Ahead of `idle` in every profile below, because the two measure the same
+        # thing at different ages: `spread` is what this process dispatched and has not had
+        # back, `idle` is what the machine said in its last heartbeat. Three stages sent at
+        # once are invisible to the second and exact in the first. Advisory only — two
+        # stages can read it before either takes a slot; `DeviceCapacity.hold` is what
+        # actually bounds a machine.
+        spread = -(self._capacity.in_flight(candidate.device_id) if self._capacity else 0)
         idle = -(candidate.load.gpu_percent if candidate.load else 0.0)
         # Zero means never measured (§25 has not run), and that must read as unknown rather
         # than as slow — otherwise a benchmarked mediocre model beats an unmeasured good one
@@ -334,17 +352,17 @@ class ComputeRouter:
         speed = candidate.tokens_per_second
 
         if request.profile is RoutingProfile.FAST:
-            return (explicit, warm, speed, gpu, locality, idle)
+            return (explicit, warm, speed, gpu, locality, spread, idle)
         if request.profile is RoutingProfile.QUALITY:
             # §26. When quality is what was asked for, a model that succeeds 96% of the time
             # beats one that succeeds 82%, and both beat the GPU a third model happens to sit
             # on. Ahead of `gpu` deliberately: the point of the profile is the answer, and
             # hardware is a means to it.
-            return (explicit, candidate.success_rate, gpu, locality, speed, warm, idle)
+            return (explicit, candidate.success_rate, gpu, locality, speed, warm, spread, idle)
         if request.profile is RoutingProfile.LOW_POWER:
             plugged = 0 if (candidate.load and candidate.load.on_battery) else 1
-            return (explicit, plugged, locality, warm, idle, speed)
-        return (explicit, locality, gpu, warm, idle, speed)
+            return (explicit, plugged, locality, warm, spread, idle, speed)
+        return (explicit, locality, gpu, warm, spread, idle, speed)
 
     def _reasons(self, candidate: Candidate, request: ComputeRequest) -> tuple[str, ...]:
         reasons = [f"{request.profile} profile"]

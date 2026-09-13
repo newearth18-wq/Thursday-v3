@@ -6,7 +6,7 @@ a multi-user or internet-exposed installation.**
 That sentence is the whole document in one line. What follows is the evidence for it, and —
 more usefully — the evidence against.
 
-Written at Sprint 50 and kept current since, against 2,473 tests that need no database, no
+Written at Sprint 50 and kept current since, against 2,489 tests that need no database, no
 network and no model credentials. `./scripts/check.sh` runs lint, format, types, the suite and the migrations.
 
 ---
@@ -59,6 +59,7 @@ container, not a unit test of the class in isolation.
 | An unauthenticated caller who cannot open an app on the owner's machine, on the HTTP surface and on the socket that bypasses its middleware | `tests/integration/test_api_auth_v25.py` |
 | A core whose TLS key changes while nobody walks to a machine, followed over a real handshake against a certificate that really was replaced | `tests/integration/test_tls_rotation_live_v23.py` |
 | A device key that never touches disk, migrated out of a file into a real, unmocked Linux Secret Service and read back from it after a restart | `tests/integration/test_keychain_live_v26.py` |
+| A machine bounded by what Thursday sent it rather than by what it last reported, and independent stages that overlap without it | `tests/integration/test_device_capacity_v76.py` |
 
 ## 23.2 What is not ready, and what that would take
 
@@ -310,11 +311,33 @@ the seams are ports, so nothing needs redesigning first.
 
 Within that layer, four things are deliberately absent rather than unfinished:
 
-- **Distributed stages run sequentially.** §21's example is naturally concurrent — vision on
-  one machine while embeddings run on another — and the `needs` graph carries the information
-  needed to parallelise. It waits on a per-device concurrency limit (§129), which does not
-  exist; running stages in parallel without one would let a task saturate the machine it is
-  running on.
+- **Distributed stages now overlap, and the blocker this document named was the smaller of
+  two** (ADR 0076). The per-device limit (§129) was real: measured against the shipped
+  router, two equally idle machines and three concurrent routing decisions produced
+  `['machine-A', 'machine-A', 'machine-A']` — one machine of the two available. Every load
+  signal the router had came from `ComputeLoad`, which a node sends *with its heartbeat*, so
+  three stages dispatched in the same millisecond were all routed against the same
+  pre-dispatch snapshot. The number was not too coarse, it was too late.
+
+  What this document did not name is the one that had to be fixed first: a stage was handed
+  the whole of `produced`, so `beta`, declaring `needs=()`, received `alpha`'s output.
+  Sequentially that is invisible; concurrently it makes the answer depend on which coroutine
+  finished first. A stage now receives exactly what it declared, which is what makes running
+  stages at once safe rather than lucky.
+
+  The limit that binds is Thursday's own count of what it dispatched and has not had back —
+  exact, current, and available before any heartbeat could carry it. The router reads it as a
+  *preference* (ahead of the stale telemetry) and `DeviceCapacity.hold` enforces it as a
+  *guarantee*, so racing the preference costs a worse spread and never saturation. Three
+  independent stages across two machines went from 0.60s to 0.40s, not 0.20s: peak concurrent
+  dispatch was 2, because the default limit is one job per machine. A second heavy inference
+  on one GPU shares VRAM with the first rather than finishing sooner, so the gain from
+  concurrency is *across* machines, which is what §21's example describes.
+
+  *Still open:* a slot is held for as long as the work runs, and an inference that never
+  returns holds it until it does — there is no timeout in `ComputeExecutor` to inherit one
+  from. And the ledger is per-process and in-memory like the rate limiter, so two API workers
+  would each permit the limit on the same machine.
 - **Escalation (§13–§14) is supported, not automatic.** `ComputeExecutor` accepts a quality
   gate and walks to a stronger model when an answer fails it, and nothing in the agent layer
   passes one yet. Tier 0–5 is a policy this router can serve rather than one it runs.

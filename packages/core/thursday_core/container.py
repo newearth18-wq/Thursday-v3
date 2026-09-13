@@ -83,6 +83,7 @@ from thursday_core.backup import BackupService, default_components
 from thursday_core.benchmarks import BenchmarkBook
 from thursday_core.briefing import Briefer, DecisionJournal
 from thursday_core.bus import InProcessEventBus
+from thursday_core.capacity import DeviceCapacity
 from thursday_core.composer import ResponseComposer
 from thursday_core.compute_execution import ComputeExecutor
 from thursday_core.compute_router import ComputeRouter
@@ -171,6 +172,7 @@ class Container:
     model_registry: Any = None
     #: Chooses which machine and which model (ADDENDUM §7). Decides nothing about whether an
     #: action is allowed — that stays with the Permission Engine (§30, §31).
+    device_capacity: Any = None
     compute_router: Any = None
     #: Runs what the router chose, walking the fallback chain (ADDENDUM §14, §38).
     compute_executor: Any = None
@@ -514,8 +516,19 @@ def build_container(settings: Settings | None = None, *, configure_logs: bool = 
     c.setup = SetupWizard()
     c.learning = LearningRecord(frequency=settings.teaching_frequency)
     c.lessons = LessonRunner(c.learning)
-    c.compute_router = ComputeRouter(registry=c.model_registry, hub=c.hub, benchmarks=c.benchmarks)
-    c.compute_executor = ComputeExecutor(registry=c.model_registry, hub=c.hub)
+    # §129. One ledger, read by the router to spread and held by the executor to bound. Two
+    # objects sharing it is the point: a preference that cannot see what was just dispatched
+    # is the hole Sprint 102 measured.
+    c.device_capacity = DeviceCapacity(default_limit=settings.device_concurrency)
+    c.compute_router = ComputeRouter(
+        registry=c.model_registry,
+        hub=c.hub,
+        benchmarks=c.benchmarks,
+        capacity=c.device_capacity,
+    )
+    c.compute_executor = ComputeExecutor(
+        registry=c.model_registry, hub=c.hub, capacity=c.device_capacity
+    )
     c.distributed = DistributedRunner(c.compute_router, c.compute_executor)
     c.wake = WakeOnLan(c.hub, broadcast=settings.wake_broadcast)
     c.device_focus = DeviceFocus()
