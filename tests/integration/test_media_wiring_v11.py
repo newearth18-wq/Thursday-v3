@@ -24,8 +24,18 @@ from thursday_media.unavailable import UnavailableEditor
 from thursday_shared.enums import PermissionLevel, PolicyDecision, RiskLevel
 from thursday_shared.models import ToolCall
 
+from tests.fonts import thai_font_available
+
 FFMPEG, _ = discover()
 needs_ffmpeg = pytest.mark.skipif(not FFMPEG, reason="no ffmpeg on this machine")
+
+#: Sprint 107. These burn Thai text into a picture, and on a machine whose fonts cannot draw
+#: it they used to pass while producing a video of empty boxes — ffmpeg exits 0 and boxes are
+#: pixels (ADR 0081). Burn-in now refuses, so the honest answer here is a skip, exactly as a
+#: machine with no ffmpeg skips. CI installs a Thai font and asserts it, so CI never skips.
+needs_thai_font = pytest.mark.skipif(
+    not thai_font_available(), reason="no font on this machine can draw Thai"
+)
 
 
 # ------------------------------------------------------------------------ always, either way
@@ -139,6 +149,7 @@ async def test_without_ffmpeg_the_tool_refuses_with_a_remedy_and_writes_nothing(
 
 
 @needs_ffmpeg
+@needs_thai_font
 async def test_an_edit_passes_the_permission_engine_and_lands_in_the_audit_chain(tmp_path):
     """The path that matters: nothing edits a file without going through Authorize, and
     everything that did is in the hash chain afterwards."""

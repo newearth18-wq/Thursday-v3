@@ -21,8 +21,18 @@ from thursday_media.ports import OperationFailed, Overlay, preset
 from thursday_media.quality import check_output
 from thursday_media.subtitles import from_lines, to_srt
 
+from tests.fonts import thai_font_available
+
 FFMPEG, _ = discover()
 needs_ffmpeg = pytest.mark.skipif(not FFMPEG, reason="no ffmpeg on this machine")
+
+#: Sprint 107. These burn Thai text into a picture, and on a machine whose fonts cannot draw
+#: it they used to pass while producing a video of empty boxes — ffmpeg exits 0 and boxes are
+#: pixels (ADR 0081). Burn-in now refuses, so the honest answer here is a skip, exactly as a
+#: machine with no ffmpeg skips. CI installs a Thai font and asserts it, so CI never skips.
+needs_thai_font = pytest.mark.skipif(
+    not thai_font_available(), reason="no font on this machine can draw Thai"
+)
 
 pytestmark = [needs_ffmpeg]
 
@@ -171,6 +181,7 @@ async def test_resizing_letterboxes_rather_than_cropping(editor, tmp_path):
     assert probe.seconds == pytest.approx(2.0, abs=0.2)
 
 
+@needs_thai_font
 async def test_burning_subtitles_actually_draws_pixels(editor, tmp_path):
     """Comparing a frame before and after. libass silently renders nothing when it cannot
     find the file, and the output is then a perfectly valid video with no subtitles in it —
@@ -356,6 +367,7 @@ async def test_dubbing_onto_something_with_no_picture_is_refused_clearly(editor,
         await editor.dub(str(narration), str(tmp_path / "out.mp4"), music=str(music))
 
 
+@needs_thai_font
 async def test_subtitles_burn_onto_a_silent_video_too(editor, tmp_path):
     """The `-c:a copy` branch has to disappear when there is no audio to copy."""
     source = await clip(editor, tmp_path / "silent.mp4", seconds=3.0, audio=False)

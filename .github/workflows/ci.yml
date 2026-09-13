@@ -118,6 +118,24 @@ jobs:
       # Same discipline as the ffmpeg/espeak step above, for the same reason: a skip here
       # means test_keychain_live_v26.py silently stopped proving anything and reverted to
       # exactly the gap §23 names — nobody would notice from a green run.
+      - name: A font that can draw Thai
+        run: sudo apt-get install -y --no-install-recommends fonts-tlwg-loma
+
+      # A Thai font, for the same reason and with a sharper edge. Until ADR 0081 this runner
+      # had none, `burn_subtitles` said nothing, and four tests asserting that Thai subtitles
+      # burn in passed for sprints while producing videos of empty boxes — ffmpeg exits 0 and
+      # boxes are pixels. Those tests now skip without a font, so CI must have one and must
+      # say so, or the coverage disappears the same way it did before.
+      - name: A font that can draw Thai is present, so those suites actually run
+        run: |
+          python -c "
+          import sys
+          from tests.fonts import thai_font_available
+          if not thai_font_available():
+              sys.exit('no font on this runner can draw Thai: the subtitle suites would skip')
+          print('thai rendering available')
+          "
+
       - name: A live Linux keychain is present, so that suite actually runs
         run: |
           python -c "

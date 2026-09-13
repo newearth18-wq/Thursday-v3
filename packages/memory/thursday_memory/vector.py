@@ -73,11 +73,29 @@ class InMemoryVectorStore:
         return len(self._items)
 
 
+def as_vector(values: Sequence[float]) -> str:
+    """pgvector's text input form: ``[0.1,0.2,...]`` (Sprint 106).
+
+    asyncpg has no encoder for a type its server registered at runtime, so a bound Python
+    list arrives as "expected str, got list" — which is what `PgVectorStore` did on the first
+    call anything ever made to it. The alternative is registering pgvector's codec on every
+    pooled connection through a SQLAlchemy event hook; the text form needs no hook, no import
+    of a driver-specific helper in this module, and is the form pgvector documents for input.
+    """
+    return "[" + ",".join(repr(float(v)) for v in values) + "]"
+
+
 class PgVectorStore:
     """pgvector-backed store. Requires the ``vector`` extension and an HNSW index.
 
     The table name is a constructor argument fixed by the container, never user input;
     every value is bound as a parameter. Hence the targeted ``noqa: S608`` below.
+
+    Until Sprint 106 nothing had ever constructed this class, and the first call made to it
+    failed on its first bound parameter. That is not a coincidence: `search` has no caller
+    anywhere in the system — `MemoryManager.recall` scores cosine in Python over its own
+    records — so the store is written to on every memory and read from by nobody, and code
+    nobody calls cannot be found to be broken.
     """
 
     name = "pgvector"
@@ -107,8 +125,10 @@ class PgVectorStore:
         async with self._session_factory() as session:
             for item_id, vector, _meta in items:
                 await session.execute(
-                    text(f"UPDATE {self._table} SET embedding = :v WHERE id = :id"),  # noqa: S608
-                    {"v": list(vector), "id": item_id},
+                    # The cast is not decoration: without it the parameter is an unknown
+                    # type to the server and the assignment is ambiguous.
+                    text(f"UPDATE {self._table} SET embedding = (:v)::vector WHERE id = :id"),  # noqa: S608
+                    {"v": as_vector(vector), "id": item_id},
                 )
             await session.commit()
 
@@ -118,14 +138,19 @@ class PgVectorStore:
         from sqlalchemy import text
 
         clauses = " AND ".join(f"{key} = :{key}" for key in (where or {}))
-        predicate = f"WHERE {clauses}" if clauses else ""
         # The table name is fixed by construction; every value is a bound parameter.
+        # `embedding IS NOT NULL` rather than letting NULLs sort: `<=>` against NULL is
+        # NULL, which orders last on Postgres but still occupies a row of the LIMIT, so a
+        # corpus with more forgotten memories than remembered ones returns fewer hits than
+        # it should and nothing says why.
+        null_guard = "embedding IS NOT NULL"
+        predicate = f"WHERE {clauses} AND {null_guard}" if clauses else f"WHERE {null_guard}"
         query = text(
-            f"SELECT id, 1 - (embedding <=> :v) AS score FROM {self._table} "  # noqa: S608
-            f"{predicate} ORDER BY embedding <=> :v LIMIT :k"
+            f"SELECT id, 1 - (embedding <=> (:v)::vector) AS score FROM {self._table} "  # noqa: S608
+            f"{predicate} ORDER BY embedding <=> (:v)::vector LIMIT :k"
         )
         async with self._session_factory() as session:
-            rows = await session.execute(query, {"v": list(vector), "k": k, **(where or {})})
+            rows = await session.execute(query, {"v": as_vector(vector), "k": k, **(where or {})})
             return [(row.id, float(row.score)) for row in rows]
 
     async def delete(self, ids: Sequence[UUID]) -> None:

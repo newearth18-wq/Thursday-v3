@@ -23,6 +23,17 @@ from thursday_media.plan import render
 from thursday_media.quality import check_output
 from thursday_shared.audio import wav_seconds
 
+from tests.fonts import thai_font_available
+
+#: Sprint 107. These burn Thai text into a picture, and on a machine whose fonts cannot draw
+#: it they used to pass while producing a video of empty boxes — ffmpeg exits 0 and boxes are
+#: pixels (ADR 0081). Burn-in now refuses, so the honest answer here is a skip, exactly as a
+#: machine with no ffmpeg skips. CI installs a Thai font and asserts it, so CI never skips.
+needs_thai_font = pytest.mark.skipif(
+    not thai_font_available(), reason="no font on this machine can draw Thai"
+)
+
+
 espeak = pytest.importorskip("thursday_voice.espeak")
 FFMPEG, _ = discover()
 pytestmark = [
@@ -68,6 +79,7 @@ async def _card(editor: FFmpegEditor, path: Path, colour: str) -> str:
     return str(path)
 
 
+@needs_thai_font
 async def test_thursday_speaks_a_script_into_a_finished_subtitled_video(editor, narrator, tmp_path):
     work = tmp_path / "work"
     work.mkdir()
@@ -113,6 +125,7 @@ async def test_thursday_speaks_a_script_into_a_finished_subtitled_video(editor, 
     assert "synced" in subtitle_check.detail, "these cues were measured against real speech"
 
 
+@needs_thai_font
 async def test_the_narration_in_the_file_is_audible_rather_than_silence(editor, narrator, tmp_path):
     """A render that laid down a silent track would pass every duration check above."""
     import array

@@ -6,7 +6,7 @@ a multi-user or internet-exposed installation.**
 That sentence is the whole document in one line. What follows is the evidence for it, and —
 more usefully — the evidence against.
 
-Written at Sprint 50 and kept current since, against 2,526 tests that need no database, no
+Written at Sprint 50 and kept current since, against 2,542 tests that need no database, no
 network and no model credentials. `./scripts/check.sh` runs lint, format, types, the suite and the migrations.
 
 ---
@@ -63,6 +63,8 @@ container, not a unit test of the class in isolation.
 | A measurement that survives a restart and dies with the GPU it described, proved across real processes against a real database | `tests/integration/test_benchmark_persistence_v77.py` |
 | A memory that cannot be compared reported as unreachable rather than scored zero, and every declaration of the embedding width made to agree | `tests/integration/test_embedding_width_v78.py` |
 | The shipped configuration writing a memory to a real PostgreSQL with pgvector, and the old default refused by the server itself | `tests/integration/test_postgres_live_v79.py` |
+| The pgvector-backed store executed for the first time — searched, written to and deleted from against a real server | `tests/integration/test_pgvector_store_v80.py` |
+| Thai subtitles burned in and read back off the frame, and the identical input refused on a machine whose fonts cannot draw it | `tests/integration/test_subtitle_glyphs_v81.py` |
 
 ## 23.2 What is not ready, and what that would take
 
@@ -224,10 +226,48 @@ closed. `test_the_readiness_document_does_not_deny_a_capability_thursday_has` no
 Two smaller limits, both deliberate. **Silence removal refuses on video**: cutting silence
 from a soundtrack while leaving the picture alone desynchronises the two for the rest of the
 video, so it works on audio, where it is actually wanted, and says why it will not do the
-rest. And **subtitle burn-in depends on the machine's fonts** — libass renders what
-fontconfig can find, so a system with no Thai font produces boxes. The quality gate cannot
-see that, and this document says so rather than letting the test suite's green imply
-otherwise.
+rest. **Subtitle burn-in depended on the machine's fonts and said nothing about it** (ADR 0081).
+This document carried that as a stated limit for several sprints, and both halves of it were
+assumed — on a product whose first language is Thai. Measured by burning the same line twice
+and *looking at the frames*: with a Thai font the picture reads
+`แมวของฉันชื่อมะลิ กินปลาทูเป็นอาหารโปรด`; with fontconfig pointed at a Latin-only directory
+it is a row of empty boxes; and `check_output` answered **`ok=True, 2 checks passed` for
+both**.
+
+The gate is not at fault — it reads the finished file, where a box is pixels like any other.
+libass had already answered the question on stderr (`failed to find any fallback with glyph
+0xE41`), `_must_run` had returned that stderr since the day it was written, and
+`burn_subtitles` discarded it. ffmpeg exits 0 having produced a valid video of nothing
+readable, which is the exact case ADR 0060 exists for.
+
+Burn-in now refuses, naming the script and every undrawable character rather than the first,
+so installing one font and rendering again does not just reveal the next one. Only libass's
+*gave up* line counts: `Glyph 0x… not found` is how fallback begins, and treating it as a
+failure turns seven tests red.
+
+**And turning it on found that CI had never had a Thai font.** Four tests asserting that Thai
+subtitles burn in had been passing for sprints while producing videos of empty boxes: ffmpeg
+exits 0, the assertions ask for pixels, and boxes are pixels. That is not a hypothetical this
+document was hedging against — it was happening on every run, and the green it warned about
+was exactly this one.
+
+A machine with no Thai font is still a legitimate machine, so those tests now **skip** there,
+the same way the media tests skip without ffmpeg. CI installs `fonts-tlwg-loma` and asserts
+`tests/fonts.thai_font_available()` before the suite, so a skip in CI means the install broke
+rather than the coverage quietly disappearing again (ADR 0074's rule, third dependency).
+
+The detector asks by **rendering** rather than by reading a font directory: `fc-list` says a
+font claims a Thai range, and whether libass finds it through fontconfig at render time is the
+question the tests actually depend on.
+
+*Still open:* this catches a character no font can draw. It does not catch a font that draws
+it **badly** — wrong shaping, a tone mark in the wrong place. libass reports nothing there
+because from its side nothing failed, and judging it needs a human or a renderer comparison.
+Separately, `test_the_same_script_spoken_twice_produces_the_same_timings` asserts eSpeak
+reproduces a clip to within 1ms and it varies by about 9ms on 4.2s in some run orders; that
+assertion predates this work and is only reachable on a machine with no Thai font, where the
+subtitle tests skip instead of running. It is a tolerance that was never true rather than a
+regression, and it is left for its own change rather than loosened here to make this one land.
 
 **The updater cannot install.** It checks, verifies and refuses correctly, and no installer is
 wired (ADR 0033). This is deliberate — a half-built installer is worse than none — but it
@@ -307,8 +347,31 @@ The general point is about the audit rather than the database: **a documented li
 claim like any other, and "needs hardware" deserves the same check as "this is wired up".**
 Two lines of `apt-cache policy` would have retired this one several sprints ago.
 
-*Still open:* `PgVectorStore` is constructed nowhere — every deployment builds
-`InMemoryVectorStore`, so vector search is a brute-force scan over restored embeddings.
+**And "constructed nowhere" understated it** (ADR 0080). The first call anything in this
+project's history made to `PgVectorStore` — the class its own docstring calls "the production
+path" — failed on its first bound parameter:
+
+    DataError: invalid input for query argument $1: [0.5, 0.5, ...] (expected str, got list)
+
+asyncpg has no encoder for a type the server registers at runtime, and `upsert` had the same
+bug. Three facts hid it, each explaining the next: **`search` has no caller anywhere in the
+system** (the manager calls `upsert` on every write and `delete` on every forget, and scores
+cosine in Python when recalling); so nothing ever constructed the class; so it had never been
+executed. A port with no reader is not exercised, a class nobody builds is not run, and code
+that is not run is not discovered to be broken.
+
+It works now, proved against a real server with memories written by the real application, and
+a forgotten memory stops being a result — `delete` nulls the embedding, and `<=>` against NULL
+sorts last but still occupies a row of the `LIMIT`, so a corpus with more forgotten memories
+than remembered ones used to return fewer hits than it asked for.
+
+*Still open, and deliberately:* **the vector-store port remains write-only.** Whether `recall`
+should route through it is a ranking question, not a repair — `recall` scores every candidate
+and blends similarity with recency, importance and a lexical overlap, where a store returns
+top-k by similarity alone and truncates before the blend. For the personal corpus this product
+is built for, the in-Python scan is what the module already calls "fast enough". What changed
+is that the decision is now available: wiring it no longer means debugging an unexecuted class
+at the same time as changing search quality.
 
 The audit table grows without bound. A retention policy is deliberately absent: deleting audit
 rows is what the append-only design forbids, and how long the owner keeps their own record is
