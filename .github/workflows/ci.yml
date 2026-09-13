@@ -8,6 +8,28 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+
+    # §2 names PostgreSQL with pgvector as the production store, and until Sprint 105 the
+    # whole suite had only ever run on SQLite — where `Vector` is a `Text()` column that
+    # accepts any width and refuses nothing. That is precisely what hid the defect ADR 0078
+    # fixed: a shipped 256-dimension default against a `vector(768)` column, which SQLite
+    # stores happily and Postgres rejects outright. A real server is the only place that
+    # difference is visible, so CI runs one.
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: thursday
+          POSTGRES_PASSWORD: thursday
+          POSTGRES_DB: thursday
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
     strategy:
       fail-fast: false
       matrix:
@@ -31,7 +53,10 @@ jobs:
           # Without them the media and narration suites skip themselves, and tests that
           # quietly do not run are worse than tests that fail — the step below makes sure
           # that cannot happen again.
-          uv pip install -e ".[dev,media,speech]"
+          # `postgres` brings asyncpg and pgvector, for the live-server suite below. §2
+          # names PostgreSQL as the production store and the suite had only ever proved
+          # itself on SQLite, whose `Vector` column is a `Text()` that refuses nothing.
+          uv pip install -e ".[dev,media,speech,postgres]"
 
       # Put the venv on PATH and call the tools directly rather than through `uv run`.
       # `uv run` re-resolves the whole dependency graph across every Python the project
@@ -104,10 +129,33 @@ jobs:
           print('secret service available via', keychain.name)
           "
 
-      # The suite needs no database, no Redis, no model credentials and no GUI —
-      # that is a design requirement, not a convenience.
+      # Same discipline as the ffmpeg, eSpeak and keyring steps above, and for the same
+      # reason: these tests skip themselves when there is no server, which is right on a
+      # laptop and wrong here. CI provides one on purpose, so a skip means the service
+      # stopped working and a green run would say nothing about Postgres at all.
+      - name: A live PostgreSQL with pgvector is present, so that suite actually runs
+        run: |
+          THURSDAY_DATABASE_URL="$PG_URL" alembic upgrade head
+          python -c "
+          import sys
+          from tests.integration.postgres_live import detect
+          live = detect()
+          if not live.available:
+              sys.exit(f'no live PostgreSQL with pgvector: {live.reason}')
+          print('postgres with pgvector available')
+          "
+        env:
+          PG_URL: postgresql+asyncpg://thursday:thursday@127.0.0.1:5432/thursday
+          THURSDAY_TEST_DATABASE_URL: postgresql+asyncpg://thursday:thursday@127.0.0.1:5432/thursday
+
+      # The suite needs no database, no Redis, no model credentials and no GUI — that is a
+      # design requirement, not a convenience, and it still holds: every test that needs the
+      # server above skips without it. What CI adds is the one environment where SQLite's
+      # permissiveness stops standing in for a real column type.
       - name: Test
         run: pytest -q --cov=packages --cov=services --cov-report=term-missing
+        env:
+          THURSDAY_TEST_DATABASE_URL: postgresql+asyncpg://thursday:thursday@127.0.0.1:5432/thursday
 
       - name: Migrations apply from empty, and match the models
         run: |

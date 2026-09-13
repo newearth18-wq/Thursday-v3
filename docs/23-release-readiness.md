@@ -6,7 +6,7 @@ a multi-user or internet-exposed installation.**
 That sentence is the whole document in one line. What follows is the evidence for it, and —
 more usefully — the evidence against.
 
-Written at Sprint 50 and kept current since, against 2,520 tests that need no database, no
+Written at Sprint 50 and kept current since, against 2,526 tests that need no database, no
 network and no model credentials. `./scripts/check.sh` runs lint, format, types, the suite and the migrations.
 
 ---
@@ -62,6 +62,7 @@ container, not a unit test of the class in isolation.
 | A machine bounded by what Thursday sent it rather than by what it last reported, and independent stages that overlap without it | `tests/integration/test_device_capacity_v76.py` |
 | A measurement that survives a restart and dies with the GPU it described, proved across real processes against a real database | `tests/integration/test_benchmark_persistence_v77.py` |
 | A memory that cannot be compared reported as unreachable rather than scored zero, and every declaration of the embedding width made to agree | `tests/integration/test_embedding_width_v78.py` |
+| The shipped configuration writing a memory to a real PostgreSQL with pgvector, and the old default refused by the server itself | `tests/integration/test_postgres_live_v79.py` |
 
 ## 23.2 What is not ready, and what that would take
 
@@ -283,10 +284,31 @@ declaration `OllamaEmbeddingProvider` makes whatever model it is pointed at. It 
 to start over it — the memories are all still there and still recalled by text — but it never
 stays quiet either.
 
-*Still open, and not observed:* pgvector is not installed here and there is no Postgres to run
-against, so "Postgres refuses a wrong-width insert" is read from the type shim and pgvector's
-documented behaviour rather than seen. And `PgVectorStore` is constructed nowhere — every
-deployment builds `InMemoryVectorStore`, so vector search is a brute-force scan.
+**And that caveat was wrong about why** (ADR 0079). This document filed "needs a Postgres"
+alongside the camera and the macOS keychain. They are not the same kind of thing:
+`postgresql-16` and `postgresql-16-pgvector` are both in the distribution's package index and
+`asyncpg` and `pgvector` are both on PyPI. One `apt-get install` produced the observation:
+
+    ERROR:  expected 768 dimensions, not 256
+
+and then, through the real application against a real server, the shipped configuration wrote
+a memory (768 dims, Thai content intact) where the old 256 default could not write one at all.
+All 35 tables migrated clean, `alembic check` found no drift, and all three `vector` columns
+came back as `vector(768)` — none of which had ever been run, because every test in this
+project's history had executed against SQLite, where `Vector` is a `Text()` that refuses
+nothing.
+
+CI now runs a `pgvector/pgvector:pg16` service and asserts it is really there before the
+suite, the same discipline as ffmpeg, eSpeak NG and gnome-keyring. The suite still needs no
+database; what CI adds is the one environment where SQLite's permissiveness stops standing in
+for a real column type.
+
+The general point is about the audit rather than the database: **a documented limitation is a
+claim like any other, and "needs hardware" deserves the same check as "this is wired up".**
+Two lines of `apt-cache policy` would have retired this one several sprints ago.
+
+*Still open:* `PgVectorStore` is constructed nowhere — every deployment builds
+`InMemoryVectorStore`, so vector search is a brute-force scan over restored embeddings.
 
 The audit table grows without bound. A retention policy is deliberately absent: deleting audit
 rows is what the append-only design forbids, and how long the owner keeps their own record is

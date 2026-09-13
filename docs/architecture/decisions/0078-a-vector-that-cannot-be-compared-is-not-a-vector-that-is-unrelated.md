@@ -111,12 +111,13 @@ Checked by reverting:
 | `settings.yaml` goes back to disagreeing with the column | 5 |
 | The check trusts the declared width instead of measuring | 1 |
 
-**What is still not proved here.** pgvector is not installed in this container and there is
-no Postgres to run against, so the claim that Postgres refuses a wrong-width insert is read
-from the type shim and pgvector's documented behaviour, **not observed**. What is observed is
-that the shim asks for `PGVector(768)` on the postgresql dialect and `Text()` otherwise, and
-that the default configuration produced 256. Closing that last step needs a Postgres, the
-same way the keychain and local-AI gaps need hardware.
+**Proved in Sprint 105, and the caveat was wrong.** This ADR originally ended by saying the
+Postgres half could not be observed here — no pgvector, no server, "the same way the keychain
+and local-AI gaps need hardware". That was a wrong reading of the constraint. What this
+environment blocks is fetching *model weights*; `postgresql-16` and `postgresql-16-pgvector`
+are both in the distribution's package index and `asyncpg` and `pgvector` are both on PyPI.
+It took one `apt-get install`, and the gap was in what had been tried rather than in what was
+possible. See [0079](0079-what-was-blocked-was-the-weights-not-the-database.md).
 
 `PgVectorStore` is still constructed nowhere: every deployment builds `InMemoryVectorStore`,
 so vector search is a brute-force scan over the restored embeddings. That is a separate gap
