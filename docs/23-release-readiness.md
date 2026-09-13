@@ -6,7 +6,7 @@ a multi-user or internet-exposed installation.**
 That sentence is the whole document in one line. What follows is the evidence for it, and —
 more usefully — the evidence against.
 
-Written at Sprint 50 and kept current since, against 2,526 tests that need no database, no
+Written at Sprint 50 and kept current since, against 2,533 tests that need no database, no
 network and no model credentials. `./scripts/check.sh` runs lint, format, types, the suite and the migrations.
 
 ---
@@ -63,6 +63,7 @@ container, not a unit test of the class in isolation.
 | A measurement that survives a restart and dies with the GPU it described, proved across real processes against a real database | `tests/integration/test_benchmark_persistence_v77.py` |
 | A memory that cannot be compared reported as unreachable rather than scored zero, and every declaration of the embedding width made to agree | `tests/integration/test_embedding_width_v78.py` |
 | The shipped configuration writing a memory to a real PostgreSQL with pgvector, and the old default refused by the server itself | `tests/integration/test_postgres_live_v79.py` |
+| The pgvector-backed store executed for the first time — searched, written to and deleted from against a real server | `tests/integration/test_pgvector_store_v80.py` |
 
 ## 23.2 What is not ready, and what that would take
 
@@ -307,8 +308,31 @@ The general point is about the audit rather than the database: **a documented li
 claim like any other, and "needs hardware" deserves the same check as "this is wired up".**
 Two lines of `apt-cache policy` would have retired this one several sprints ago.
 
-*Still open:* `PgVectorStore` is constructed nowhere — every deployment builds
-`InMemoryVectorStore`, so vector search is a brute-force scan over restored embeddings.
+**And "constructed nowhere" understated it** (ADR 0080). The first call anything in this
+project's history made to `PgVectorStore` — the class its own docstring calls "the production
+path" — failed on its first bound parameter:
+
+    DataError: invalid input for query argument $1: [0.5, 0.5, ...] (expected str, got list)
+
+asyncpg has no encoder for a type the server registers at runtime, and `upsert` had the same
+bug. Three facts hid it, each explaining the next: **`search` has no caller anywhere in the
+system** (the manager calls `upsert` on every write and `delete` on every forget, and scores
+cosine in Python when recalling); so nothing ever constructed the class; so it had never been
+executed. A port with no reader is not exercised, a class nobody builds is not run, and code
+that is not run is not discovered to be broken.
+
+It works now, proved against a real server with memories written by the real application, and
+a forgotten memory stops being a result — `delete` nulls the embedding, and `<=>` against NULL
+sorts last but still occupies a row of the `LIMIT`, so a corpus with more forgotten memories
+than remembered ones used to return fewer hits than it asked for.
+
+*Still open, and deliberately:* **the vector-store port remains write-only.** Whether `recall`
+should route through it is a ranking question, not a repair — `recall` scores every candidate
+and blends similarity with recency, importance and a lexical overlap, where a store returns
+top-k by similarity alone and truncates before the blend. For the personal corpus this product
+is built for, the in-Python scan is what the module already calls "fast enough". What changed
+is that the decision is now available: wiring it no longer means debugging an unexecuted class
+at the same time as changing search quality.
 
 The audit table grows without bound. A retention policy is deliberately absent: deleting audit
 rows is what the append-only design forbids, and how long the owner keeps their own record is
