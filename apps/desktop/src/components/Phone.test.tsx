@@ -199,3 +199,80 @@ describe("what a phone may do to a machine", () => {
     expect(screen.queryByText(/เรียบร้อย/)).not.toBeInTheDocument();
   });
 });
+
+describe("a phone may not authorise what it may not initiate (V27)", () => {
+  /**
+   * Found by measurement, not by reading. ADR 0070 disabled the shutdown *button* and left the
+   * *approval* alone, so the shipped screen showed both at once: `ปิดเครื่อง` struck through
+   * with its reason, and `อนุมัติครั้งนี้` on a pending `system.power` two inches above it,
+   * which ran the identical shutdown. `system.power` is ASK_ALWAYS for every caller, so that
+   * approval is the normal way it arrives — not an edge case somebody had to contrive.
+   */
+  const POWER: Partial<Approval> = {
+    id: "a-power",
+    action: "system.power",
+    resource: "Office-PC",
+    expected_outcome: "ปิดเครื่อง Office-PC",
+    scopes_offered: ["once"],
+  };
+
+  it("does not offer to approve a shutdown it refuses to press", async () => {
+    vi.spyOn(api, "approvals").mockResolvedValue({
+      approvals: [approval(POWER)],
+    } as never);
+    render(<Phone connected />);
+    await screen.findByText("system.power");
+
+    const labels = screen
+      .getAllByRole("button")
+      .map((b) => b.textContent ?? "");
+    expect(labels).not.toContain("อนุมัติครั้งนี้");
+  });
+
+  it("still offers to reject it, because that is the safe answer", async () => {
+    // An approval nobody can answer either way strands the owner rather than protecting them.
+    vi.spyOn(api, "approvals").mockResolvedValue({
+      approvals: [approval(POWER)],
+    } as never);
+    const reject = vi.spyOn(api, "reject").mockResolvedValue({} as never);
+    render(<Phone connected />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "ปฏิเสธ" }));
+    await waitFor(() => expect(reject).toHaveBeenCalledWith("a-power"));
+  });
+
+  it("says why, rather than leaving a missing button to be noticed", async () => {
+    vi.spyOn(api, "approvals").mockResolvedValue({
+      approvals: [approval(POWER)],
+    } as never);
+    render(<Phone connected />);
+
+    expect(
+      await screen.findByText(/อนุมัติเรื่องนี้ได้ตอนอยู่หน้าเครื่องเท่านั้น/),
+    ).toBeInTheDocument();
+  });
+
+  it("still shows the approval in full, so the owner knows it is waiting", async () => {
+    // Hiding it would trade one silence for another: the owner would never learn that
+    // something needs them at the desk.
+    vi.spyOn(api, "approvals").mockResolvedValue({
+      approvals: [approval(POWER)],
+    } as never);
+    render(<Phone connected />);
+
+    expect(await screen.findByText("system.power")).toBeInTheDocument();
+    expect(screen.getByText("ปิดเครื่อง Office-PC")).toBeInTheDocument();
+  });
+
+  it("leaves every other approval answerable, which is the phone's whole purpose", async () => {
+    // The denylist exists so §64 keeps working. An allowlist would make each new action
+    // unanswerable from a phone and teach the owner to walk to the desk for all of them.
+    render(<Phone connected />);
+    await screen.findByText("file.delete");
+
+    const labels = screen
+      .getAllByRole("button")
+      .map((b) => b.textContent ?? "");
+    expect(labels).toContain("อนุมัติครั้งนี้");
+  });
+});

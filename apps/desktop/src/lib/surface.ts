@@ -128,3 +128,54 @@ export function refusalFor(action: string, surface: Surface): string {
     "คำสั่งนี้ทำจากมือถือไม่ได้ — ต้องสั่งตอนอยู่หน้าเครื่อง"
   );
 }
+
+/**
+ * ## The rule is about the outcome, not the control (V27)
+ *
+ * ADR 0070 disabled the shutdown *button* on the phone and left the *approval* alone, and the
+ * two sat on the same screen: `ปิดเครื่อง` struck through with its reason, and two inches
+ * above it `อนุมัติครั้งนี้` on a pending `system.power`, which ran the identical shutdown.
+ * `system.power` is ASK_ALWAYS for every caller, so an approval is not an edge case there —
+ * it is the *normal* path, raised by whatever asked. The button was guarded and the doorway
+ * beside it was not.
+ *
+ * So a phone may not authorise what it may not initiate. Same list, same sentence, so the
+ * two cannot drift into disagreeing about what this surface may do.
+ *
+ * ### Why this is a denylist when the button's is an allowlist
+ *
+ * Not an inconsistency — the two fail in opposite directions.
+ *
+ * *Initiating* is a fixed, small set of controls this client draws itself. A verb added to the
+ * catalogue later should be **off** the phone until somebody decides otherwise, and failing
+ * closed there costs nothing: the owner uses the desktop.
+ *
+ * *Answering* is the phone's reason to exist (§64: see what is happening, answer what is being
+ * asked). An allowlist would make every action nobody had thought of unanswerable from a
+ * phone, which does not make the owner safer — it makes the phone useless and teaches them to
+ * walk to the desk for everything, including the approvals it handles well.
+ *
+ * The cost is stated rather than hidden: a future action that strands the owner the way
+ * `system.power` does is approvable from a phone until it joins this list. That is the price
+ * of the phone being able to answer anything at all, and it is the same list the button reads,
+ * so adding it once fixes both.
+ */
+export function mayApproveFromPhone(action: string, surface: Surface): boolean {
+  if (surface === "desktop") return true;
+  return !(action in PHONE_DEVICE_REFUSALS);
+}
+
+/**
+ * Why this approval cannot be answered here, in the owner's words.
+ *
+ * The approval is still *shown* in full — the owner is entitled to know something is waiting
+ * on them, and hiding it would trade one silence for another. What changes is that the only
+ * answer offered is the safe one.
+ */
+export function approvalRefusalFor(action: string, surface: Surface): string {
+  if (mayApproveFromPhone(action, surface)) return "";
+  return (
+    (PHONE_DEVICE_REFUSALS[action] ?? "คำสั่งนี้ตัดสินใจจากมือถือไม่ได้") +
+    " — อนุมัติเรื่องนี้ได้ตอนอยู่หน้าเครื่องเท่านั้น"
+  );
+}
