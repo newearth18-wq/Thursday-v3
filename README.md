@@ -21,7 +21,7 @@ ready, what is not, and what closing each gap would take is in
 
 **Phase 1 is implemented and runnable**: the vertical slice from
 [docs/15-vertical-slice.md](docs/15-vertical-slice.md) works end to end, with 2,473 tests that
-need no database, no network and no model credentials — plus 227 in the desktop app, which
+need no database, no network and no model credentials — plus 237 in the desktop app, which
 is where the decisions about what a person is actually shown now live.
 
 ```
@@ -204,7 +204,7 @@ conventions, so neither can be forgotten by a new caller.
 
 Full design in [`docs/`](docs/) — the twenty-four deliverables, written before the code
 (§24–§26 came after, describing what V11, V14 and V15 built), plus the
-[V2 review](docs/architecture/00-v2-review.md) and seventy-four
+[V2 review](docs/architecture/00-v2-review.md) and seventy-five
 [architecture decisions](docs/architecture/decisions/) recording what was chosen and what
 each choice cost:
 

@@ -4,8 +4,10 @@ import { describe, expect, it } from "vitest";
 import {
   NO_STANDING_ON_PHONE,
   PHONE_MAX_WIDTH,
+  approvalRefusalFor,
   machineFor,
   mayActFromPhone,
+  mayApproveFromPhone,
   mayGrantStanding,
   refusalFor,
   scopesFor,
@@ -98,5 +100,46 @@ describe("what a phone may do to a machine", () => {
   it("explains each refusal rather than leaving a control silently absent", () => {
     expect(refusalFor("system.power", "phone")).toContain("ยังไม่ได้บันทึกจะหาย");
     expect(refusalFor("shell.run", "phone")).not.toBe("");
+  });
+});
+
+describe("a phone may not authorise what it may not initiate (V27)", () => {
+  it("refuses the approval for exactly what the button refuses", () => {
+    // One list, read twice. ADR 0070 guarded the button and left the approval beside it open,
+    // and `system.power` being ASK_ALWAYS for every caller made that approval the normal path.
+    expect(mayActFromPhone("system.power", "phone")).toBe(false);
+    expect(mayApproveFromPhone("system.power", "phone")).toBe(false);
+  });
+
+  it("still lets a phone answer everything else, which is why it exists", () => {
+    // §64: see what is happening, answer what is being asked. An allowlist here would make
+    // every unfamiliar action unanswerable and teach the owner to walk to the desk for all
+    // of them — which does not make them safer.
+    for (const action of [
+      "file.delete",
+      "email.send",
+      "shell.run",
+      "some.future.verb",
+    ]) {
+      expect(mayApproveFromPhone(action, "phone")).toBe(true);
+    }
+  });
+
+  it("is a denylist, and that asymmetry with the button is deliberate", () => {
+    // Initiating fails closed for free — the owner uses the desktop. Answering fails closed
+    // at the cost of the phone's whole purpose, so the two lists point opposite ways.
+    expect(mayActFromPhone("some.future.verb", "phone")).toBe(false);
+    expect(mayApproveFromPhone("some.future.verb", "phone")).toBe(true);
+  });
+
+  it("does not narrow the desktop, where the owner is at the machine", () => {
+    expect(mayApproveFromPhone("system.power", "desktop")).toBe(true);
+    expect(approvalRefusalFor("system.power", "desktop")).toBe("");
+  });
+
+  it("says where the answer belongs rather than only that it is refused", () => {
+    const reason = approvalRefusalFor("system.power", "phone");
+    expect(reason).toContain("ยังไม่ได้บันทึกจะหาย");
+    expect(reason).toContain("หน้าเครื่อง");
   });
 });

@@ -437,6 +437,21 @@ in another building, unsaved work is gone immediately, and the apparent undo is 
 which this document says has never actually woken a machine. It is an allowlist, so a verb
 added to the catalogue later is off the phone until somebody decides otherwise.
 
+**And that rule guarded the button while the doorway beside it stood open** (ADR 0075). ADR 0070
+disabled `ปิดเครื่อง` on the phone and left the *approval* alone, so the shipped screen showed
+both at once: the shutdown button struck through with its reason, and `อนุมัติครั้งนี้` on a
+pending `system.power` two inches above it, which ran the identical shutdown. Because
+`system.power` is ASK_ALWAYS for **every** caller, that approval is not an edge case — it is
+the normal way the action arrives, from a desktop, an agent or a workflow. The phone refused to
+press it and offered to authorise it.
+
+A phone may now not authorise what it may not initiate: the approval reads the same list the
+button does, offers only *reject*, and says where the answer belongs. The approval is still
+shown in full, because hiding it would trade one silence for another. The two lists point
+opposite ways on purpose — an **allowlist** for initiating, where failing closed costs the
+owner nothing, and a **denylist** for answering, where failing closed would make every
+unfamiliar action unanswerable from a phone and defeat §64's whole purpose.
+
 *Still open:* voice remote, conversation, camera input and push notifications. Each needs its
 own decision about what a phone is allowed to do; ADR 0070 is the shape those decisions should
 take rather than a precedent for assuming them.

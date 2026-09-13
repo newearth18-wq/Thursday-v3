@@ -2,7 +2,9 @@ import { useCallback, useEffect, useState } from "react";
 import {
   NO_STANDING_ON_PHONE,
   PHONE_DEVICE_ACTIONS,
+  approvalRefusalFor,
   machineFor,
+  mayApproveFromPhone,
   mayGrantStanding,
   refusalFor,
 } from "@/lib/surface";
@@ -212,6 +214,11 @@ function PhoneApproval({
   // Always false here, and read from the shared rule rather than hardcoded, so the desktop
   // and the phone cannot drift into disagreeing about what a surface may offer.
   const standing = mayGrantStanding(approval.scopes_offered, "phone");
+  // V27. The same list the shutdown button reads. ADR 0070 disabled that button and left this
+  // one alone, so the phone refused to *press* `system.power` and offered to *authorise* it on
+  // the same screen — and since `system.power` is ASK_ALWAYS for every caller, an approval is
+  // the normal way it arrives rather than an edge case.
+  const mayAnswer = mayApproveFromPhone(approval.action, "phone");
 
   const decide = async (approve: boolean) => {
     setBusy(true);
@@ -260,14 +267,19 @@ function PhoneApproval({
       </dl>
 
       <div className="mt-3 flex gap-2">
-        <button
-          disabled={busy}
-          onClick={() => decide(true)}
-          className="flex-1 rounded-lg bg-state-speaking/20 px-3 py-2.5 text-xs font-medium
-                     text-state-speaking disabled:opacity-50"
-        >
-          อนุมัติครั้งนี้
-        </button>
+        {/* Offered only where this surface may actually answer it. Rejecting stays available
+            below: it is the safe answer, and an approval nobody can act on either way would
+            strand the owner rather than protect them. */}
+        {mayAnswer && (
+          <button
+            disabled={busy}
+            onClick={() => decide(true)}
+            className="flex-1 rounded-lg bg-state-speaking/20 px-3 py-2.5 text-xs font-medium
+                       text-state-speaking disabled:opacity-50"
+          >
+            อนุมัติครั้งนี้
+          </button>
+        )}
         <button
           disabled={busy}
           onClick={() => decide(false)}
@@ -277,7 +289,16 @@ function PhoneApproval({
         </button>
       </div>
 
-      {!standing && <p className="mt-1.5 text-[10px] text-slate-600">{NO_STANDING_ON_PHONE}</p>}
+      {/* Said, not merely absent — the same choice the struck-through shutdown button makes a
+          few lines down this screen. */}
+      {!mayAnswer && (
+        <p className="mt-1.5 text-[10px] text-state-warning">
+          {approvalRefusalFor(approval.action, "phone")}
+        </p>
+      )}
+      {mayAnswer && !standing && (
+        <p className="mt-1.5 text-[10px] text-slate-600">{NO_STANDING_ON_PHONE}</p>
+      )}
     </article>
   );
 }
