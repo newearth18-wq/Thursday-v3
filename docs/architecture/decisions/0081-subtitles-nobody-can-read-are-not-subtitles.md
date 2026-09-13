@@ -75,6 +75,15 @@ fontconfig up against a Latin-only directory and asserts the refusal.
 | It refuses on the fallback line too | 7 |
 | Only the first undrawable character is reported | 1 |
 
+**Turning it on found that CI had never had a Thai font.** Four tests asserting that Thai
+subtitles burn in went red the first time this ran on a GitHub runner — which is the finding,
+not the breakage: they had been passing for sprints while producing videos of boxes. Those
+tests now skip on a machine that cannot draw Thai, and CI installs `fonts-tlwg-loma` and
+asserts it can, so the coverage cannot disappear the quiet way a second time.
+
+The detector renders a probe rather than reading a font directory, because `fc-list` answers
+"a font claims this range" and the tests depend on "libass finds it at render time".
+
 **What this does not do.** It catches a character no font can draw. It does not catch a font
 that draws the character *badly* — wrong shaping, missing tone-mark positioning, a Thai glyph
 rendered without its vowel above it. libass does not report those because from its side

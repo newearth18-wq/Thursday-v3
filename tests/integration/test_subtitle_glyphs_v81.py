@@ -31,8 +31,13 @@ import pytest
 from thursday_media.ffmpeg import FFmpegEditor, _refuse_unrenderable_text, discover
 from thursday_media.ports import OperationFailed
 
+from tests.fonts import thai_font_available
+
 FFMPEG, FFPROBE = discover()
 needs_ffmpeg = pytest.mark.skipif(not FFMPEG, reason="no ffmpeg on this machine")
+needs_thai_font = pytest.mark.skipif(
+    not thai_font_available(), reason="no font on this machine can draw Thai"
+)
 
 THAI = "แมวของฉันชื่อมะลิ กินปลาทูเป็นอาหารโปรด"
 
@@ -144,6 +149,7 @@ async def _blue_video(editor: FFmpegEditor, workspace: Path) -> Path:
 
 
 @needs_ffmpeg
+@needs_thai_font
 async def test_thai_subtitles_burn_in_on_a_machine_that_has_a_thai_font(workspace: Path):
     """The half §23 could only assume. This machine has `tlwg/Loma`, so the render should
     succeed — and if it stops succeeding, this says so rather than the frame quietly

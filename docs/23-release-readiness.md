@@ -245,9 +245,29 @@ so installing one font and rendering again does not just reveal the next one. On
 *gave up* line counts: `Glyph 0x… not found` is how fallback begins, and treating it as a
 failure turns seven tests red.
 
+**And turning it on found that CI had never had a Thai font.** Four tests asserting that Thai
+subtitles burn in had been passing for sprints while producing videos of empty boxes: ffmpeg
+exits 0, the assertions ask for pixels, and boxes are pixels. That is not a hypothetical this
+document was hedging against — it was happening on every run, and the green it warned about
+was exactly this one.
+
+A machine with no Thai font is still a legitimate machine, so those tests now **skip** there,
+the same way the media tests skip without ffmpeg. CI installs `fonts-tlwg-loma` and asserts
+`tests/fonts.thai_font_available()` before the suite, so a skip in CI means the install broke
+rather than the coverage quietly disappearing again (ADR 0074's rule, third dependency).
+
+The detector asks by **rendering** rather than by reading a font directory: `fc-list` says a
+font claims a Thai range, and whether libass finds it through fontconfig at render time is the
+question the tests actually depend on.
+
 *Still open:* this catches a character no font can draw. It does not catch a font that draws
 it **badly** — wrong shaping, a tone mark in the wrong place. libass reports nothing there
 because from its side nothing failed, and judging it needs a human or a renderer comparison.
+Separately, `test_the_same_script_spoken_twice_produces_the_same_timings` asserts eSpeak
+reproduces a clip to within 1ms and it varies by about 9ms on 4.2s in some run orders; that
+assertion predates this work and is only reachable on a machine with no Thai font, where the
+subtitle tests skip instead of running. It is a tolerance that was never true rather than a
+regression, and it is left for its own change rather than loosened here to make this one land.
 
 **The updater cannot install.** It checks, verifies and refuses correctly, and no installer is
 wired (ADR 0033). This is deliberate — a half-built installer is worse than none — but it
