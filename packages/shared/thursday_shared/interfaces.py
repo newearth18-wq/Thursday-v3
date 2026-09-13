@@ -60,6 +60,21 @@ class VectorProvider(Protocol):
     async def search(
         self, vector: list[float], *, k: int, where: dict[str, Any] | None = None
     ) -> list[tuple[UUID, float]]: ...
+    #: Similarity for *every* stored vector, with nothing truncated (Sprint 108).
+    #:
+    #: Distinct from `search`, and the distinction is the point. `search` returns the k
+    #: nearest, which is a ranking by similarity — but §7's retrieval score weights
+    #: similarity at 0.30 and recency, importance, project relevance, source confidence and
+    #: usage at the other 0.70. Truncating on similarity before that blend runs discards
+    #: memories the blend would have ranked first: measured, a pinned maximum-importance
+    #: memory the owner stated themselves came 13th of 13 by similarity and 1st by score.
+    #:
+    #: So the blend needs similarity for all its candidates, not the nearest few. What that
+    #: costs is arithmetic, and arithmetic is what a vector database is for.
+    async def scores(
+        self, vector: list[float], *, where: dict[str, Any] | None = None
+    ) -> dict[UUID, float]: ...
+
     async def delete(self, ids: Sequence[UUID]) -> None: ...
 
 

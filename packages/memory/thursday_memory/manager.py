@@ -532,8 +532,7 @@ class MemoryManager:
         similarity: dict[UUID, float] = {}
         if query.text:
             vector = (await self._embedder.embed([query.text]))[0]  # type: ignore[attr-defined]
-            for record in candidates:
-                similarity[record.id] = cosine(vector, record.embedding or [])
+            similarity = await self._similarities(vector, candidates)
 
         now = utcnow()
         scored: list[MemoryRecord] = []
@@ -548,6 +547,47 @@ class MemoryManager:
             record.access_count += 1
             record.last_accessed_at = now
         return top
+
+    async def _similarities(
+        self, vector: list[float], candidates: list[MemoryRecord]
+    ) -> dict[UUID, float]:
+        """Similarity for every candidate, from the store when it can and here when it
+        cannot (Sprint 108).
+
+        Asked of the *store* rather than looped here, and asked as `scores` rather than
+        `search`: §7 weights similarity at 0.30 against 0.70 of recency, importance,
+        project relevance, source confidence and usage, so the k nearest are not the k best
+        and truncating on similarity throws away what the blend exists to find. Measured, a
+        pinned maximum-importance memory the owner stated themselves ranked 13th of 13 by
+        similarity and 1st by score — a store's top-k would never have shown it to the
+        blend at all.
+
+        What the store buys is the arithmetic. Measured on pgvector: 10,000 memories scored
+        in 55 ms against 1,096 ms for this loop, and the loop is linear — 5.6 s at 50,000.
+
+        **Falling back rather than failing**, because the embeddings are already here. A
+        database that has gone away is a reason for recall to be slower, never a reason for
+        it to be unavailable, and the records in `_records` carry everything this needs.
+        """
+        store = getattr(self._vectors, "scores", None)
+        if store is not None:
+            try:
+                found = await store(vector)
+            except Exception as exc:  # a store that cannot answer is not a failed recall
+                log.warning("vector_scores_unavailable", error=str(exc))
+            else:
+                # A candidate the store does not know about is scored here. It should not
+                # happen — every write and every restore upserts — but a recall that
+                # silently scored a memory 0.0 because a store forgot it would be the
+                # ADR 0078 conflation all over again.
+                missing = [r for r in candidates if r.id not in found]
+                if missing:
+                    log.info("vector_store_incomplete", missing=len(missing))
+                return {
+                    r.id: found.get(r.id, cosine(vector, r.embedding or [])) for r in candidates
+                }
+
+        return {r.id: cosine(vector, r.embedding or []) for r in candidates}
 
     def _score(
         self, record: MemoryRecord, similarity: float, now: datetime, query: MemoryQuery

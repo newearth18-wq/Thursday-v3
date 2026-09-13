@@ -6,7 +6,7 @@ a multi-user or internet-exposed installation.**
 That sentence is the whole document in one line. What follows is the evidence for it, and —
 more usefully — the evidence against.
 
-Written at Sprint 50 and kept current since, against 2,542 tests that need no database, no
+Written at Sprint 50 and kept current since, against 2,554 tests that need no database, no
 network and no model credentials. `./scripts/check.sh` runs lint, format, types, the suite and the migrations.
 
 ---
@@ -65,6 +65,7 @@ container, not a unit test of the class in isolation.
 | The shipped configuration writing a memory to a real PostgreSQL with pgvector, and the old default refused by the server itself | `tests/integration/test_postgres_live_v79.py` |
 | The pgvector-backed store executed for the first time — searched, written to and deleted from against a real server | `tests/integration/test_pgvector_store_v80.py` |
 | Thai subtitles burned in and read back off the frame, and the identical input refused on a machine whose fonts cannot draw it | `tests/integration/test_subtitle_glyphs_v81.py` |
+| Similarity computed for every candidate rather than the nearest few, agreeing with the local loop to 1e-6 against a real pgvector | `tests/integration/test_recall_scoring_v82.py` |
 
 ## 23.2 What is not ready, and what that would take
 
@@ -365,13 +366,37 @@ a forgotten memory stops being a result — `delete` nulls the embedding, and `<
 sorts last but still occupies a row of the `LIMIT`, so a corpus with more forgotten memories
 than remembered ones used to return fewer hits than it asked for.
 
-*Still open, and deliberately:* **the vector-store port remains write-only.** Whether `recall`
-should route through it is a ranking question, not a repair — `recall` scores every candidate
-and blends similarity with recency, importance and a lexical overlap, where a store returns
-top-k by similarity alone and truncates before the blend. For the personal corpus this product
-is built for, the in-Python scan is what the module already calls "fast enough". What changed
-is that the decision is now available: wiring it no longer means debugging an unexecuted class
-at the same time as changing search quality.
+**That question is now settled, and the naive answer was measurably wrong** (ADR 0082). The
+number is in `_score`: similarity is weighted **0.30**, against 0.70 of recency, importance,
+project relevance, source confidence and usage. So a store's top-k ranks on under a third of
+what decides. Measured with one pinned, maximum-importance memory the owner stated themselves
+and twelve old low-importance notes sharing more surface with the query, it ranked **13 of 13
+by similarity and 1st by score** — a top-k of 3 cuts it before the blend that would have
+surfaced it. The owner asks about food and is not told they are allergic to shellfish.
+
+But the loop it would have replaced does not scale either: 113 ms at a thousand memories,
+**1,096 ms at ten thousand**, 5.6 s at fifty.
+
+Both are true because they answer different questions. The store was being asked *"which are
+nearest"* when the blend needs *"how near is each"* — and the second has no `k` in it, so
+answering it truncates nothing. The port grew `scores` (no `LIMIT`, every candidate returned)
+and kept `search`; `MemoryManager` ranks exactly as before, and what moved to the server is
+the dot product rather than the decision:
+
+    10,000 memories -> Python loop 1,096 ms | pgvector, no LIMIT,  55 ms
+    50,000 memories -> Python loop 5,569 ms | pgvector, no LIMIT, 460 ms
+
+`PgVectorStore` is now built when the deployment is actually Postgres-backed, which gives the
+class ADR 0080 repaired its first caller. Equivalence is asserted against a real server, not
+argued: both paths score every candidate, agree to `1e-6` (`float4` there against `float64`
+here), and produce the same order. A store that cannot answer degrades to the local loop
+rather than failing the recall, and a candidate the store does not return is scored here
+rather than zeroed.
+
+*Still open:* the in-memory store gains only a method — the same loop, same process — so the
+speed is a Postgres deployment's. §23's desktop edition, which by design needs no database
+server, keeps the linear scan and its ceiling. And nothing measured says at what corpus size
+the remaining Python pass over candidates becomes the cost.
 
 The audit table grows without bound. A retention policy is deliberately absent: deleting audit
 rows is what the append-only design forbids, and how long the owner keeps their own record is

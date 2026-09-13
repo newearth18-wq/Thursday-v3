@@ -89,3 +89,4 @@ done this way?" and have no answer.
 | [0079](0079-what-was-blocked-was-the-weights-not-the-database.md) | What was blocked was the weights, not the database | A limitation filed under "needs hardware" that two lines of apt-cache would have retired sprints ago |
 | [0080](0080-code-nobody-calls-cannot-be-found-to-be-broken.md) | Code nobody calls cannot be found to be broken | The "production path" vector store failed on its first bound parameter, and three layers of no-caller hid it |
 | [0081](0081-subtitles-nobody-can-read-are-not-subtitles.md) | Subtitles nobody can read are not subtitles | The same Thai line burned as text and as boxes, and the quality gate passed both with "2 checks passed" |
+| [0082](0082-the-nearest-few-are-not-the-best-few.md) | The nearest few are not the best few | Similarity is 0.30 of the score, so a store's top-k cut the memory the blend ranked first |
