@@ -31,6 +31,7 @@ Engine still gates every action a model proposes (§30, §31).
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Any
@@ -148,33 +149,34 @@ class DistributedRunner:
         profile: RoutingProfile = RoutingProfile.BALANCED,
         cloud: Any = None,
         combine: Callable[[dict[str, Any]], Any] | None = None,
+        max_parallel: int = 0,
     ) -> DistributedResult:
-        """Run the stages in order, feeding each the outputs of the ones it needed.
+        """Run the stages, overlapping the ones that declared no reason not to.
 
-        Order is the caller's: dependencies are declared with `needs` and checked, not
-        inferred. A runner that topologically sorted its input would be hiding the plan from
-        the planner that produced it, and the planner is where a cycle should be caught
-        (§53).
+        Order is still the caller's, and still checked rather than inferred: a stage runs
+        only once every name in its `needs` has been produced. What changed in Sprint 102 is
+        that stages whose needs are *already* satisfied no longer wait for each other.
+        §21's example — vision on the GPU box while embeddings run on the server — is
+        naturally concurrent, and the `needs` graph already carried everything needed to say
+        so.
+
+        Nothing here topologically sorts. A wave is the set of not-yet-run stages whose
+        declared inputs exist, which uses only edges the planner wrote down; a cycle is
+        still the planner's to catch (§53), and appears here as a wave that comes up empty
+        with stages left over.
+
+        `max_parallel` bounds how many stages this runner starts at once — a ceiling on the
+        whole task, where `DeviceCapacity` is the per-machine one. Zero means every stage
+        that can run, runs; the machines are bounded individually and that is the bound that
+        protects them.
         """
         produced: dict[str, Any] = {}
         result = DistributedResult()
+        outcomes: dict[str, AIJobResult] = {}
+        done: set[str] = set()
+        gate = asyncio.Semaphore(max_parallel) if max_parallel > 0 else None
 
-        for job in jobs:
-            missing = [n for n in job.needs if n not in produced]
-            if missing:
-                # A stage whose inputs never arrived cannot run. Recorded rather than
-                # raising, so the result shows the whole cascade rather than only its head.
-                result.stages.append(
-                    AIJobResult(job=job, ok=False, error=f"missing input: {', '.join(missing)}")
-                )
-                if not job.optional:
-                    raise StageFailed(
-                        f"stage {job.name!r} needs {', '.join(missing)}, which did not run",
-                        stage=job.name,
-                        summary=result.summary(),
-                    )
-                continue
-
+        async def run_one(job: AIJob) -> AIJobResult:
             # The floor, not the stage's own claim. A vector derived from a secret reaches
             # the same place the secret would.
             request = ComputeRequest(
@@ -185,41 +187,83 @@ class DistributedRunner:
                 # nothing inherits rather than resetting to a default nobody chose.
                 profile=job.profile or profile,
             )
-
+            # Exactly what this stage declared, and nothing else. Handing it the whole of
+            # `produced` let an undeclared dependency work by accident of ordering — and an
+            # accident of ordering is not something to run stages concurrently on top of.
+            # See ADR 0076.
+            inputs = {name: produced[name] for name in job.needs}
             try:
                 target = self._router.choose(request, cloud=cloud)
 
-                async def stage_work(step: ExecutionTarget, j: AIJob = job) -> Any:
-                    # `j=job` binds this iteration's job. A closure over the loop variable
-                    # would run every stage with the last job in the list, which is the
-                    # classic version of this bug and is silent when the stages look alike.
-                    return await work(j, step, dict(produced))
+                async def stage_work(step: ExecutionTarget) -> Any:
+                    return await work(job, step, dict(inputs))
 
                 outcome = await self._executor.run(target, stage_work)
             except (ComputeExhausted, ThursdayError) as exc:
-                stage = AIJobResult(job=job, ok=False, error=str(exc))
-                result.stages.append(stage)
-                if job.optional:
+                return AIJobResult(job=job, ok=False, error=str(exc))
+            return AIJobResult(
+                job=job,
+                value=outcome.value,
+                device_id=outcome.target.device_id,
+                model=outcome.target.model,
+                degraded=outcome.degraded,
+            )
+
+        async def guarded(job: AIJob) -> AIJobResult:
+            if gate is None:
+                return await run_one(job)
+            async with gate:
+                return await run_one(job)
+
+        while True:
+            wave = [j for j in jobs if j.name not in done and set(j.needs) <= produced.keys()]
+            if not wave:
+                break
+            # `strict`: gather returns one result per coroutine, in order. If that ever
+            # stopped being true, pairing a stage with another stage's outcome is the kind
+            # of bug that reads as a routing mystery, so it fails here instead.
+            finished = await asyncio.gather(*(guarded(j) for j in wave))
+            for job, stage in zip(wave, finished, strict=True):
+                outcomes[job.name] = stage
+                done.add(job.name)
+                if stage.ok:
+                    produced[job.name] = stage.value
+                elif job.optional:
                     # §12's "cloud reasoning only if needed". A stage nobody depends on
                     # failing is a less complete answer, not a wrong one.
-                    log.info("stage_skipped", stage=job.name, reason=str(exc))
-                    continue
-                raise StageFailed(
-                    f"stage {job.name!r} could not run anywhere",
-                    stage=job.name,
-                    capability=job.capability,
-                    summary=result.summary(),
-                ) from exc
+                    log.info("stage_skipped", stage=job.name, reason=stage.error)
 
-            produced[job.name] = outcome.value
-            result.stages.append(
-                AIJobResult(
-                    job=job,
-                    value=outcome.value,
-                    device_id=outcome.target.device_id,
-                    model=outcome.target.model,
-                    degraded=outcome.degraded,
+        for job in jobs:
+            if job.name in outcomes:
+                continue
+            # Never became runnable: something it needed did not run. Recorded rather than
+            # raised on sight, so the result shows the whole cascade rather than only its
+            # head.
+            missing = [n for n in job.needs if n not in produced]
+            outcomes[job.name] = AIJobResult(
+                job=job, ok=False, error=f"missing input: {', '.join(missing)}"
+            )
+
+        result.stages = [outcomes[j.name] for j in jobs]
+
+        # Raised in the caller's order, so a wave that lost two stages reports the one the
+        # plan listed first rather than whichever coroutine happened to finish first.
+        for job in jobs:
+            stage = outcomes[job.name]
+            if stage.ok or job.optional:
+                continue
+            if stage.error.startswith("missing input:"):
+                raise StageFailed(
+                    f"stage {job.name!r} needs "
+                    f"{', '.join(n for n in job.needs if n not in produced)}, which did not run",
+                    stage=job.name,
+                    summary=result.summary(),
                 )
+            raise StageFailed(
+                f"stage {job.name!r} could not run anywhere",
+                stage=job.name,
+                capability=job.capability,
+                summary=result.summary(),
             )
 
         result.value = combine(produced) if combine else produced
