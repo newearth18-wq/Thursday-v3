@@ -96,6 +96,10 @@ class JobSchedule:
     #: minute-aligned and does not need to be — the engine remembers which minute each rule
     #: was served, so ticking twice inside one minute fires once.
     schedule_sweep_s: float = 30.0
+    #: §25. Measurements are written through in batches rather than on every inference: an
+    #: await on the path of every model call costs more than the handful of samples a crash
+    #: between flushes would lose out of a fifty-sample window.
+    benchmark_flush_s: float = 120.0
 
 
 class BackgroundWorker:
@@ -123,10 +127,18 @@ class BackgroundWorker:
             asyncio.create_task(
                 self._loop(self.schedule.schedule_sweep_s, self.sweep_schedules), name="schedules"
             ),
+            asyncio.create_task(
+                self._loop(self.schedule.benchmark_flush_s, self.flush_benchmarks),
+                name="benchmarks",
+            ),
         ]
         log.info("worker_started", jobs=[t.get_name() for t in self._tasks])
 
     async def stop(self) -> None:
+        # Before cancelling, not after: a clean shutdown is the one chance to lose nothing,
+        # and the flush is the only thing here whose skipping would silently discard work.
+        with contextlib.suppress(Exception):
+            await self.flush_benchmarks()
         for task in self._tasks:
             task.cancel()
         for task in self._tasks:
@@ -185,6 +197,18 @@ class BackgroundWorker:
         clock. A rule saying *every weekday at 07:30* did nothing, silently, forever.
         """
         await self.c.automations.sweep()  # type: ignore[attr-defined]
+
+    async def flush_benchmarks(self) -> int:
+        """Write measurements through to storage (ADDENDUM §25).
+
+        Until Sprint 103 the book's repository was assigned and never read, so every
+        measurement died with the process — under a fourteen-day freshness window that had
+        therefore never once applied.
+        """
+        written = await self.c.benchmarks.flush()  # type: ignore[attr-defined]
+        if written:
+            log.debug("benchmarks_flushed", profiles=written)
+        return written
 
     async def sweep_approvals(self) -> None:
         """Expire pending approvals. Silence is never consent (§38)."""

@@ -392,6 +392,10 @@ class Settings(BaseSettings):
     persist_costs: bool = False
     persist_tasks: bool = False
     persist_models: bool = False
+    #: §25. Measurements survive a restart when this is on. Off by default like every other
+    #: persistence flag: no database is a supported configuration, and the book falls back to
+    #: the in-process window rather than to a quiet promise of durability.
+    persist_benchmarks: bool = False
     #: Thursday is single-tenant. This is the owner row the seeds create.
     owner_id: UUID = UUID("00000000-0000-0000-0000-000000000001")
 
